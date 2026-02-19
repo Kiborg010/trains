@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { GRID_SIZE, getSegmentSlots, keyOf, snap } from "../../../shared/lib/geometry.js";
 
 const DEFAULT_VIEWPORT_WIDTH = 1200;
@@ -69,10 +69,26 @@ function findNearestFreeSlot(point, slots, blocked) {
   return best;
 }
 
+function findNearestSlot(point, slots) {
+  let best = null;
+  let bestDist = Number.POSITIVE_INFINITY;
+
+  for (const slot of slots) {
+    const d = distance2(point, slot);
+    if (d < bestDist) {
+      bestDist = d;
+      best = slot;
+    }
+  }
+
+  return best;
+}
+
 export default function EditorLayout() {
   const canvasRef = useRef(null);
   const canvasWrapRef = useRef(null);
   const panStateRef = useRef(null);
+  const movementTimerRef = useRef(null);
 
   const [mode, setMode] = useState("drawTrack");
   const [zoom, setZoom] = useState(1);
@@ -93,11 +109,16 @@ export default function EditorLayout() {
   const [vehicles, setVehicles] = useState([]);
   const [selectedVehicleIds, setSelectedVehicleIds] = useState([]);
   const [couplings, setCouplings] = useState([]);
+  const [selectedLocomotiveId, setSelectedLocomotiveId] = useState(null);
+  const [targetSlotId, setTargetSlotId] = useState(null);
+  const [isMoving, setIsMoving] = useState(false);
+  const [movementHint, setMovementHint] = useState("");
 
   const viewWidth = viewport.width / zoom;
   const viewHeight = viewport.height / zoom;
   const isEditMode = mode === "edit";
   const isPlaceMode = mode === "placeWagon" || mode === "placeLocomotive";
+  const isMoveMode = mode === "move";
 
   const selectedSegmentSet = useMemo(() => new Set(selectedSegmentIds), [selectedSegmentIds]);
   const selectedVehicleSet = useMemo(() => new Set(selectedVehicleIds), [selectedVehicleIds]);
@@ -121,6 +142,29 @@ export default function EditorLayout() {
       }
     }
     return [...map.values()];
+  }, [segments]);
+  const railSlotById = useMemo(
+    () => new Map(railSlots.map((slot) => [slot.id, slot])),
+    [railSlots]
+  );
+  const slotAdjacency = useMemo(() => {
+    const map = new Map();
+    for (const segment of segments) {
+      const slots = getSegmentSlots(segment, GRID_SIZE);
+      for (let i = 0; i < slots.length - 1; i += 1) {
+        const a = slotId(slots[i].x, slots[i].y);
+        const b = slotId(slots[i + 1].x, slots[i + 1].y);
+        if (!map.has(a)) {
+          map.set(a, new Set());
+        }
+        if (!map.has(b)) {
+          map.set(b, new Set());
+        }
+        map.get(a).add(b);
+        map.get(b).add(a);
+      }
+    }
+    return map;
   }, [segments]);
 
   const adjacentSlotPairs = useMemo(() => {
@@ -221,6 +265,14 @@ export default function EditorLayout() {
   }, [isPanning, zoom]);
 
   useEffect(() => {
+    return () => {
+      if (movementTimerRef.current) {
+        clearInterval(movementTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (railSlots.length === 0 || vehicles.length === 0) {
       return;
     }
@@ -264,6 +316,18 @@ export default function EditorLayout() {
     return { x, y };
   }
 
+  function stopMovement(clearSelection = false) {
+    if (movementTimerRef.current) {
+      clearInterval(movementTimerRef.current);
+      movementTimerRef.current = null;
+    }
+    setIsMoving(false);
+    if (clearSelection) {
+      setSelectedLocomotiveId(null);
+      setTargetSlotId(null);
+    }
+  }
+
   function updateSegment(segmentId, updater) {
     setSegments((prev) =>
       prev.map((segment) => (segment.id === segmentId ? updater(segment) : segment))
@@ -283,7 +347,7 @@ export default function EditorLayout() {
   }
 
   function handleCanvasMouseDown(event) {
-    if (event.button !== 0 || !isEditMode || isPanning) {
+    if (event.button !== 0 || !isEditMode || isPanning || isMoving) {
       return;
     }
     const point = getWorldPoint(event, false);
@@ -292,7 +356,7 @@ export default function EditorLayout() {
   }
 
   function handleCanvasClick(event) {
-    if (mode !== "drawTrack" || isPanning) {
+    if (mode !== "drawTrack" || isPanning || isMoving) {
       return;
     }
 
@@ -323,7 +387,7 @@ export default function EditorLayout() {
       return;
     }
 
-    if (!dragState || !isEditMode) {
+    if (!dragState || !isEditMode || isMoving) {
       return;
     }
 
@@ -490,7 +554,7 @@ export default function EditorLayout() {
   }
 
   function handleCanvasWrapMouseDown(event) {
-    if (event.button !== 1) {
+    if (event.button !== 1 || isMoving) {
       return;
     }
     event.preventDefault();
@@ -503,7 +567,7 @@ export default function EditorLayout() {
   }
 
   function startLineDrag(event, segment) {
-    if (event.button !== 0 || !isEditMode || isPanning) {
+    if (event.button !== 0 || !isEditMode || isPanning || isMoving) {
       return;
     }
     event.stopPropagation();
@@ -542,7 +606,7 @@ export default function EditorLayout() {
   }
 
   function startNodeDrag(event, node) {
-    if (event.button !== 0 || !isEditMode || isPanning) {
+    if (event.button !== 0 || !isEditMode || isPanning || isMoving) {
       return;
     }
     event.stopPropagation();
@@ -567,6 +631,17 @@ export default function EditorLayout() {
   }
 
   function handleSlotClick(event, slot) {
+    if (isMoving) {
+      return;
+    }
+
+    if (isMoveMode) {
+      event.stopPropagation();
+      setTargetSlotId(slot.id);
+      setMovementHint(`Цель: (${Math.round(slot.x)}, ${Math.round(slot.y)})`);
+      return;
+    }
+
     if (!isPlaceMode) {
       return;
     }
@@ -584,6 +659,17 @@ export default function EditorLayout() {
 
   function handleVehicleClick(event, vehicleId) {
     event.stopPropagation();
+
+    if (isMoveMode) {
+      const vehicle = vehicleById.get(vehicleId);
+      if (!vehicle || vehicle.type !== "locomotive") {
+        return;
+      }
+      setSelectedLocomotiveId(vehicleId);
+      setSelectedVehicleIds([vehicleId]);
+      setMovementHint("Локомотив выбран. Укажи целевую точку.");
+      return;
+    }
 
     if (event.shiftKey) {
       setSelectedVehicleIds((prev) => {
@@ -603,6 +689,315 @@ export default function EditorLayout() {
     });
   }
 
+  function buildTrainOrderFromLocomotive(locomotiveId) {
+    const graph = new Map();
+    for (const vehicle of vehicles) {
+      graph.set(vehicle.id, new Set());
+    }
+    for (const coupling of couplings) {
+      if (!graph.has(coupling.a) || !graph.has(coupling.b)) {
+        continue;
+      }
+      graph.get(coupling.a).add(coupling.b);
+      graph.get(coupling.b).add(coupling.a);
+    }
+
+    const connected = new Set([locomotiveId]);
+    const queue = [locomotiveId];
+    while (queue.length) {
+      const cur = queue.shift();
+      for (const next of graph.get(cur) || []) {
+        if (connected.has(next)) {
+          continue;
+        }
+        connected.add(next);
+        queue.push(next);
+      }
+    }
+
+    if (connected.size === 1) {
+      return [locomotiveId];
+    }
+
+    for (const id of connected) {
+      const degree = [...(graph.get(id) || [])].filter((n) => connected.has(n)).length;
+      if (degree > 2) {
+        return null;
+      }
+    }
+
+    const locoDegree = [...(graph.get(locomotiveId) || [])].filter((n) => connected.has(n)).length;
+    if (locoDegree > 1) {
+      return null;
+    }
+
+    const endpoints = [...connected].filter(
+      (id) => [...(graph.get(id) || [])].filter((n) => connected.has(n)).length <= 1
+    );
+    const tail = endpoints.find((id) => id !== locomotiveId);
+    if (!tail) {
+      return null;
+    }
+
+    const orderTailToLoco = [];
+    let prev = null;
+    let cur = tail;
+    while (cur) {
+      orderTailToLoco.push(cur);
+      if (cur === locomotiveId) {
+        break;
+      }
+      const next = [...(graph.get(cur) || [])].find((n) => n !== prev && connected.has(n));
+      prev = cur;
+      cur = next || null;
+    }
+
+    if (orderTailToLoco[orderTailToLoco.length - 1] !== locomotiveId) {
+      return null;
+    }
+
+    return [...orderTailToLoco].reverse();
+  }
+
+  function findSlotPathByDijkstra(startId, goalId) {
+    if (startId === goalId) {
+      return [startId];
+    }
+    if (!slotAdjacency.has(startId) || !slotAdjacency.has(goalId)) {
+      return null;
+    }
+
+    const dist = new Map();
+    const prev = new Map();
+    const visited = new Set();
+    const queue = [{ id: startId, d: 0 }];
+    dist.set(startId, 0);
+
+    while (queue.length) {
+      queue.sort((a, b) => a.d - b.d);
+      const cur = queue.shift();
+      if (visited.has(cur.id)) {
+        continue;
+      }
+      visited.add(cur.id);
+
+      if (cur.id === goalId) {
+        break;
+      }
+
+      for (const next of slotAdjacency.get(cur.id) || []) {
+        if (visited.has(next)) {
+          continue;
+        }
+        const nd = (dist.get(cur.id) ?? Number.POSITIVE_INFINITY) + 1;
+        if (nd < (dist.get(next) ?? Number.POSITIVE_INFINITY)) {
+          dist.set(next, nd);
+          prev.set(next, cur.id);
+          queue.push({ id: next, d: nd });
+        }
+      }
+    }
+
+    if (!prev.has(goalId)) {
+      return null;
+    }
+
+    const path = [goalId];
+    let node = goalId;
+    while (prev.has(node)) {
+      node = prev.get(node);
+      path.push(node);
+    }
+    path.reverse();
+    return path;
+  }
+
+    function startLocomotiveMovement() {
+    if (isMoving) {
+      return;
+    }
+    if (!selectedLocomotiveId) {
+      setMovementHint("Выбери локомотив.");
+      return;
+    }
+    if (!targetSlotId) {
+      setMovementHint("Выбери целевую точку.");
+      return;
+    }
+
+    const locomotive = vehicleById.get(selectedLocomotiveId);
+    if (!locomotive || locomotive.type !== "locomotive") {
+      setMovementHint("Выбранный объект не локомотив.");
+      return;
+    }
+
+    const trainOrderLocoToTail = buildTrainOrderFromLocomotive(selectedLocomotiveId);
+    if (!trainOrderLocoToTail) {
+      setMovementHint("Поддерживается только линейный состав с локомотивом в голове.");
+      return;
+    }
+
+    if (!railSlotById.get(targetSlotId)) {
+      setMovementHint("Целевая точка недоступна.");
+      return;
+    }
+
+    const currentSlotByVehicleId = new Map();
+    for (const vehicleId of trainOrderLocoToTail) {
+      const vehicle = vehicleById.get(vehicleId);
+      if (!vehicle) {
+        continue;
+      }
+      const nearest = findNearestSlot(vehicle, railSlots);
+      if (!nearest) {
+        setMovementHint("Нет доступных путей для движения.");
+        return;
+      }
+      currentSlotByVehicleId.set(vehicleId, nearest.id);
+    }
+
+    const trainOrderTailToLoco = [...trainOrderLocoToTail].reverse();
+    const initialTrail = trainOrderTailToLoco.map((id) => currentSlotByVehicleId.get(id));
+    for (let i = 0; i < initialTrail.length - 1; i += 1) {
+      const a = initialTrail[i];
+      const b = initialTrail[i + 1];
+      if (!slotAdjacency.get(a)?.has(b)) {
+        setMovementHint("Сцепленный состав должен стоять на соседних точках.");
+        return;
+      }
+    }
+
+    const locoStartId = currentSlotByVehicleId.get(selectedLocomotiveId);
+    const path = findSlotPathByDijkstra(locoStartId, targetSlotId);
+    if (!path || path.length < 2) {
+      setMovementHint("Маршрут не найден.");
+      return;
+    }
+
+    const currentLocoToTail = trainOrderLocoToTail.map((id) => currentSlotByVehicleId.get(id));
+    const isBackwardPush =
+      trainOrderLocoToTail.length > 1 && path[1] === currentLocoToTail[1];
+    let drivingPath = path;
+
+    if (isBackwardPush && trainOrderLocoToTail.length > 1) {
+      const neededTailSlots = trainOrderLocoToTail.length - 1;
+      const extended = [...path];
+      let prev = path[path.length - 2] ?? null;
+      let cur = path[path.length - 1];
+
+      for (let i = 0; i < neededTailSlots; i += 1) {
+        const candidates = [...(slotAdjacency.get(cur) || [])].filter((id) => id !== prev);
+        if (!candidates.length) {
+          setMovementHint("Недостаточно пути за целевой точкой для размещения хвоста состава.");
+          return;
+        }
+
+        let next = candidates[0];
+        if (candidates.length > 1 && prev) {
+          const pPrev = railSlotById.get(prev);
+          const pCur = railSlotById.get(cur);
+          if (pPrev && pCur) {
+            const inX = pCur.x - pPrev.x;
+            const inY = pCur.y - pPrev.y;
+            let bestScore = Number.NEGATIVE_INFINITY;
+            for (const candidateId of candidates) {
+              const pNext = railSlotById.get(candidateId);
+              if (!pNext) {
+                continue;
+              }
+              const outX = pNext.x - pCur.x;
+              const outY = pNext.y - pCur.y;
+              const score = inX * outX + inY * outY;
+              if (score > bestScore) {
+                bestScore = score;
+                next = candidateId;
+              }
+            }
+          }
+        }
+
+        extended.push(next);
+        prev = cur;
+        cur = next;
+      }
+
+      drivingPath = extended;
+    }
+
+    const staticOccupied = new Set(
+      vehicles
+        .filter((v) => !trainOrderLocoToTail.includes(v.id))
+        .map((v) => slotId(v.x, v.y))
+        .filter((v) => v !== undefined)
+    );
+
+    const timeline = [];
+    const maxSteps = path.length - 1;
+
+    if (maxSteps < 1) {
+      setMovementHint("Недостаточно пути для движения состава назад.");
+      return;
+    }
+
+    for (let step = 1; step <= maxSteps; step += 1) {
+      const stepPositions = new Map();
+      const usedSlots = new Set();
+      let validStep = true;
+
+      for (let i = 0; i < trainOrderLocoToTail.length; i += 1) {
+        let slotKey;
+        if (isBackwardPush) {
+          slotKey = drivingPath[step + i];
+        } else {
+          const historyIndex = step - i;
+          slotKey =
+            historyIndex > 0
+              ? path[historyIndex]
+              : currentLocoToTail[-historyIndex];
+        }
+        const slot = railSlotById.get(slotKey);
+        if (!slot) {
+          validStep = false;
+          break;
+        }
+        if (staticOccupied.has(slotKey) || usedSlots.has(slotKey)) {
+          validStep = false;
+          break;
+        }
+        usedSlots.add(slotKey);
+        stepPositions.set(trainOrderLocoToTail[i], { x: slot.x, y: slot.y });
+      }
+
+      if (!validStep) {
+        setMovementHint("Невозможно выполнить движение: не хватает места на пути.");
+        return;
+      }
+
+      timeline.push(stepPositions);
+    }
+
+    setMovementHint("Движение запущено.");
+    setIsMoving(true);
+    let stepIndex = 0;
+    movementTimerRef.current = setInterval(() => {
+      const step = timeline[stepIndex];
+      if (!step) {
+        stopMovement(false);
+        setMovementHint("Движение завершено.");
+        return;
+      }
+      setVehicles((prev) =>
+        prev.map((vehicle) => {
+          const next = step.get(vehicle.id);
+          if (!next) {
+            return vehicle;
+          }
+          return { ...vehicle, x: next.x, y: next.y };
+        })
+      );
+      stepIndex += 1;
+    }, 180);
+  }
   function startVehicleDrag(event, vehicleId) {
     if (event.button !== 0 || !isEditMode || isPanning) {
       return;
@@ -663,6 +1058,7 @@ export default function EditorLayout() {
   }
 
   function clearLayout() {
+    stopMovement(true);
     setSegments([]);
     setVehicles([]);
     setCouplings([]);
@@ -699,6 +1095,9 @@ export default function EditorLayout() {
   }
 
   function switchMode(nextMode) {
+    if (mode !== nextMode) {
+      stopMovement(false);
+    }
     setMode(nextMode);
     setStartPoint(null);
     setDragState(null);
@@ -730,7 +1129,9 @@ export default function EditorLayout() {
         ? "Добавление вагонов"
         : mode === "placeLocomotive"
           ? "Добавление локомотивов"
-          : "Редактирование";
+          : mode === "move"
+            ? "Движение"
+            : "Редактирование";
 
   return (
     <div className="layout">
@@ -767,6 +1168,13 @@ export default function EditorLayout() {
           >
             Редактирование
           </button>
+          <button
+            type="button"
+            className={`toolButton ${mode === "move" ? "active" : ""}`}
+            onClick={() => switchMode("move")}
+          >
+            Движение
+          </button>
         </div>
 
         <p className="counter">Сцепка/расцепка</p>
@@ -791,10 +1199,23 @@ export default function EditorLayout() {
           </button>
         </div>
 
+        <p className="counter">Движение локомотива</p>
+        <div className="tools">
+          <button type="button" className="toolButton" onClick={startLocomotiveMovement}>
+            Старт движения
+          </button>
+          <button type="button" className="toolButton" onClick={() => stopMovement(false)}>
+            Стоп
+          </button>
+        </div>
+
         <p className="counter">Путей: {segments.length}</p>
         <p className="counter">Составов: {vehicles.length}</p>
         <p className="counter">Сцепок: {couplings.length}</p>
         <p className="counter">Выбрано составов: {selectedVehicleIds.length}</p>
+        <p className="counter">Локомотив: {selectedLocomotiveId ? "выбран" : "не выбран"}</p>
+        <p className="counter">Цель: {targetSlotId ? "выбрана" : "не выбрана"}</p>
+        <p className="counter">{movementHint || "-"}</p>
       </aside>
 
       <main className="workspace">
@@ -916,7 +1337,13 @@ export default function EditorLayout() {
                 cx={slot.x}
                 cy={slot.y}
                 r="4.5"
-                fill={occupiedSlots.has(slot.id) ? "#94a3b8" : "#cbd5e1"}
+                fill={
+                  targetSlotId === slot.id
+                    ? "#22c55e"
+                    : occupiedSlots.has(slot.id)
+                      ? "#94a3b8"
+                      : "#cbd5e1"
+                }
                 className="slotPoint"
                 onClick={(event) => handleSlotClick(event, slot)}
               />
@@ -985,3 +1412,4 @@ export default function EditorLayout() {
     </div>
   );
 }
+
