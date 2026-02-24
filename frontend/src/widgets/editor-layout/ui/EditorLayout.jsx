@@ -1,5 +1,10 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { GRID_SIZE, getSegmentSlots, keyOf, snap } from "../../../shared/lib/geometry.js";
+import {
+  applyLayoutOperation,
+  planMovement,
+  resolveVehicles,
+} from "../../../shared/api/simulation.js";
 
 const DEFAULT_VIEWPORT_WIDTH = 1200;
 const DEFAULT_VIEWPORT_HEIGHT = 700;
@@ -34,54 +39,21 @@ function slotId(x, y) {
   return `${x.toFixed(2)}:${y.toFixed(2)}`;
 }
 
-function pairKey(a, b) {
-  return [a, b].sort().join("|");
-}
-
-function getLastPair(ids) {
-  if (ids.length < 2) {
-    return null;
+function hasVehiclePositionChanges(current, next) {
+  if (!Array.isArray(next) || current.length !== next.length) {
+    return true;
   }
-  return [ids[ids.length - 2], ids[ids.length - 1]];
-}
-
-function distance2(a, b) {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  return dx * dx + dy * dy;
-}
-
-function findNearestFreeSlot(point, slots, blocked) {
-  let best = null;
-  let bestDist = Number.POSITIVE_INFINITY;
-
-  for (const slot of slots) {
-    if (blocked.has(slot.id)) {
-      continue;
+  const nextMap = new Map(next.map((item) => [item.id, item]));
+  for (const vehicle of current) {
+    const match = nextMap.get(vehicle.id);
+    if (!match) {
+      return true;
     }
-    const d = distance2(point, slot);
-    if (d < bestDist) {
-      bestDist = d;
-      best = slot;
+    if (vehicle.x !== match.x || vehicle.y !== match.y || vehicle.type !== match.type) {
+      return true;
     }
   }
-
-  return best;
-}
-
-function findNearestSlot(point, slots) {
-  let best = null;
-  let bestDist = Number.POSITIVE_INFINITY;
-
-  for (const slot of slots) {
-    const d = distance2(point, slot);
-    if (d < bestDist) {
-      bestDist = d;
-      best = slot;
-    }
-  }
-
-  return best;
+  return false;
 }
 
 export default function EditorLayout() {
@@ -113,6 +85,7 @@ export default function EditorLayout() {
   const [targetSlotId, setTargetSlotId] = useState(null);
   const [isMoving, setIsMoving] = useState(false);
   const [movementHint, setMovementHint] = useState("");
+  const [movementCellsPassed, setMovementCellsPassed] = useState(0);
 
   const viewWidth = viewport.width / zoom;
   const viewHeight = viewport.height / zoom;
@@ -143,51 +116,10 @@ export default function EditorLayout() {
     }
     return [...map.values()];
   }, [segments]);
-  const railSlotById = useMemo(
-    () => new Map(railSlots.map((slot) => [slot.id, slot])),
-    [railSlots]
-  );
-  const slotAdjacency = useMemo(() => {
-    const map = new Map();
-    for (const segment of segments) {
-      const slots = getSegmentSlots(segment, GRID_SIZE);
-      for (let i = 0; i < slots.length - 1; i += 1) {
-        const a = slotId(slots[i].x, slots[i].y);
-        const b = slotId(slots[i + 1].x, slots[i + 1].y);
-        if (!map.has(a)) {
-          map.set(a, new Set());
-        }
-        if (!map.has(b)) {
-          map.set(b, new Set());
-        }
-        map.get(a).add(b);
-        map.get(b).add(a);
-      }
-    }
-    return map;
-  }, [segments]);
-
-  const adjacentSlotPairs = useMemo(() => {
-    const set = new Set();
-    for (const segment of segments) {
-      const slots = getSegmentSlots(segment, GRID_SIZE);
-      for (let i = 0; i < slots.length - 1; i += 1) {
-        const a = slotId(slots[i].x, slots[i].y);
-        const b = slotId(slots[i + 1].x, slots[i + 1].y);
-        set.add(pairKey(a, b));
-      }
-    }
-    return set;
-  }, [segments]);
 
   const occupiedSlots = useMemo(
     () => new Set(vehicles.map((vehicle) => slotId(vehicle.x, vehicle.y))),
     [vehicles]
-  );
-
-  const coupledPairSet = useMemo(
-    () => new Set(couplings.map((item) => pairKey(item.a, item.b))),
-    [couplings]
   );
 
   useEffect(() => {
@@ -214,25 +146,19 @@ export default function EditorLayout() {
 
       if (selectedVehicleIds.length > 0) {
         event.preventDefault();
-        const toDelete = new Set(selectedVehicleIds);
-        setVehicles((prev) => prev.filter((v) => !toDelete.has(v.id)));
-        setCouplings((prev) => prev.filter((c) => !toDelete.has(c.a) && !toDelete.has(c.b)));
-        setSelectedVehicleIds([]);
+        void deleteSelectedVehicles();
         return;
       }
 
       if (selectedSegmentIds.length > 0) {
         event.preventDefault();
-        setSegments((prev) => prev.filter((segment) => !selectedSegmentSet.has(segment.id)));
-        setSelectedSegmentIds([]);
-        setDragState(null);
-        setSelectionBox(null);
+        void deleteSelectedSegments();
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedSegmentIds, selectedSegmentSet, selectedVehicleIds]);
+  }, [selectedSegmentIds, selectedVehicleIds]);
 
   useEffect(() => {
     if (!isPanning) {
@@ -273,33 +199,39 @@ export default function EditorLayout() {
   }, []);
 
   useEffect(() => {
-    if (railSlots.length === 0 || vehicles.length === 0) {
+    if (!segments.length || !vehicles.length) {
       return;
     }
 
-    setVehicles((prev) => {
-      const blocked = new Set();
-      const next = [];
-      let changed = false;
+    let cancelled = false;
+    async function syncVehiclesToRails() {
+      try {
+        const response = await resolveVehicles({
+          gridSize: GRID_SIZE,
+          segments,
+          vehicles,
+          couplings,
+          movedVehicleIds: [],
+          strictCouplings: true,
+        });
 
-      for (const vehicle of prev) {
-        const nearest = findNearestFreeSlot(vehicle, railSlots, blocked);
-        if (!nearest) {
-          next.push(vehicle);
-          continue;
+        if (!response.ok || cancelled) {
+          return;
         }
-        blocked.add(nearest.id);
-        if (vehicle.x !== nearest.x || vehicle.y !== nearest.y) {
-          changed = true;
-          next.push({ ...vehicle, x: nearest.x, y: nearest.y });
-        } else {
-          next.push(vehicle);
-        }
+
+        setVehicles((prev) =>
+          hasVehiclePositionChanges(prev, response.vehicles) ? response.vehicles : prev
+        );
+      } catch (error) {
+        // Keep current state if backend is temporarily unavailable.
       }
+    }
 
-      return changed ? next : prev;
-    });
-  }, [railSlots, vehicles.length]);
+    syncVehiclesToRails();
+    return () => {
+      cancelled = true;
+    };
+  }, [segments, couplings]);
 
   function getWorldPoint(event, snapPoint = true) {
     if (!canvasRef.current) {
@@ -326,6 +258,32 @@ export default function EditorLayout() {
       setSelectedLocomotiveId(null);
       setTargetSlotId(null);
     }
+  }
+
+  async function applyLayoutAction(action, payload = {}) {
+    const response = await applyLayoutOperation({
+      gridSize: GRID_SIZE,
+      state: {
+        segments,
+        vehicles,
+        couplings,
+      },
+      action,
+      ...payload,
+    });
+
+    if (!response.ok) {
+      throw new Error(response.message || "Layout action failed.");
+    }
+
+    const nextState = response.state || {};
+    setSegments(nextState.segments || []);
+    setVehicles(nextState.vehicles || []);
+    setCouplings(nextState.couplings || []);
+    if (response.message) {
+      setMovementHint(response.message);
+    }
+    return response;
   }
 
   function updateSegment(segmentId, updater) {
@@ -355,7 +313,7 @@ export default function EditorLayout() {
     setDragState(null);
   }
 
-  function handleCanvasClick(event) {
+  async function handleCanvasClick(event) {
     if (mode !== "drawTrack" || isPanning || isMoving) {
       return;
     }
@@ -370,11 +328,15 @@ export default function EditorLayout() {
       return;
     }
 
-    setSegments((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), from: startPoint, to: point },
-    ]);
-    setStartPoint(null);
+    try {
+      await applyLayoutAction("add_segment", {
+        from: startPoint,
+        to: point,
+      });
+      setStartPoint(null);
+    } catch (error) {
+      setMovementHint(error.message);
+    }
   }
 
   function handleMouseMove(event) {
@@ -447,57 +409,16 @@ export default function EditorLayout() {
     }
   }
 
-  function handleMouseUp() {
+  async function handleMouseUp() {
     if (dragState?.type === "vehicle") {
-      const movedIds = new Set(dragState.origins.map((item) => item.id));
       const originMap = new Map(dragState.origins.map((item) => [item.id, item]));
-      const blocked = new Set(
-        vehicles
-          .filter((vehicle) => !movedIds.has(vehicle.id))
-          .map((vehicle) => slotId(vehicle.x, vehicle.y))
-      );
-      const snappedPositions = new Map();
-      let valid = true;
-
-      for (const vehicle of vehicles) {
-        if (!movedIds.has(vehicle.id)) {
-          continue;
-        }
-        const nearest = findNearestFreeSlot(vehicle, railSlots, blocked);
-        if (!nearest) {
-          valid = false;
-          break;
-        }
-        snappedPositions.set(vehicle.id, { x: nearest.x, y: nearest.y, slot: nearest.id });
-        blocked.add(nearest.id);
-      }
-
-      if (valid) {
-        const nextPositionByVehicleId = new Map();
-        for (const vehicle of vehicles) {
-          const snapped = snappedPositions.get(vehicle.id);
-          if (snapped) {
-            nextPositionByVehicleId.set(vehicle.id, { x: snapped.x, y: snapped.y });
-          } else {
-            nextPositionByVehicleId.set(vehicle.id, { x: vehicle.x, y: vehicle.y });
-          }
-        }
-
-        for (const coupling of couplings) {
-          const a = nextPositionByVehicleId.get(coupling.a);
-          const b = nextPositionByVehicleId.get(coupling.b);
-          if (!a || !b) {
-            continue;
-          }
-          const pair = pairKey(slotId(a.x, a.y), slotId(b.x, b.y));
-          if (!adjacentSlotPairs.has(pair)) {
-            valid = false;
-            break;
-          }
-        }
-      }
-
-      if (!valid) {
+      try {
+        await applyLayoutAction("resolve_vehicles", {
+          movedVehicleIds: dragState.origins.map((item) => item.id),
+          strictCouplings: true,
+        });
+      } catch (error) {
+        setMovementHint(error.message || "Backend connection error.");
         setVehicles((prev) =>
           prev.map((vehicle) => {
             const origin = originMap.get(vehicle.id);
@@ -505,16 +426,6 @@ export default function EditorLayout() {
               return vehicle;
             }
             return { ...vehicle, x: origin.x, y: origin.y };
-          })
-        );
-      } else {
-        setVehicles((prev) =>
-          prev.map((vehicle) => {
-            const target = snappedPositions.get(vehicle.id);
-            if (!target) {
-              return vehicle;
-            }
-            return { ...vehicle, x: target.x, y: target.y };
           })
         );
       }
@@ -630,7 +541,7 @@ export default function EditorLayout() {
     setSelectionBox(null);
   }
 
-  function handleSlotClick(event, slot) {
+  async function handleSlotClick(event, slot) {
     if (isMoving) {
       return;
     }
@@ -646,15 +557,16 @@ export default function EditorLayout() {
       return;
     }
     event.stopPropagation();
-    if (occupiedSlots.has(slot.id)) {
-      return;
-    }
-
     const type = mode === "placeLocomotive" ? "locomotive" : "wagon";
-    setVehicles((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), type, x: slot.x, y: slot.y },
-    ]);
+
+    try {
+      await applyLayoutAction("place_vehicle", {
+        vehicleType: type,
+        targetSlotId: slot.id,
+      });
+    } catch (error) {
+      setMovementHint(error.message || "Backend connection error.");
+    }
   }
 
   function handleVehicleClick(event, vehicleId) {
@@ -689,314 +601,62 @@ export default function EditorLayout() {
     });
   }
 
-  function buildTrainOrderFromLocomotive(locomotiveId) {
-    const graph = new Map();
-    for (const vehicle of vehicles) {
-      graph.set(vehicle.id, new Set());
-    }
-    for (const coupling of couplings) {
-      if (!graph.has(coupling.a) || !graph.has(coupling.b)) {
-        continue;
-      }
-      graph.get(coupling.a).add(coupling.b);
-      graph.get(coupling.b).add(coupling.a);
-    }
-
-    const connected = new Set([locomotiveId]);
-    const queue = [locomotiveId];
-    while (queue.length) {
-      const cur = queue.shift();
-      for (const next of graph.get(cur) || []) {
-        if (connected.has(next)) {
-          continue;
-        }
-        connected.add(next);
-        queue.push(next);
-      }
-    }
-
-    if (connected.size === 1) {
-      return [locomotiveId];
-    }
-
-    for (const id of connected) {
-      const degree = [...(graph.get(id) || [])].filter((n) => connected.has(n)).length;
-      if (degree > 2) {
-        return null;
-      }
-    }
-
-    const locoDegree = [...(graph.get(locomotiveId) || [])].filter((n) => connected.has(n)).length;
-    if (locoDegree > 1) {
-      return null;
-    }
-
-    const endpoints = [...connected].filter(
-      (id) => [...(graph.get(id) || [])].filter((n) => connected.has(n)).length <= 1
-    );
-    const tail = endpoints.find((id) => id !== locomotiveId);
-    if (!tail) {
-      return null;
-    }
-
-    const orderTailToLoco = [];
-    let prev = null;
-    let cur = tail;
-    while (cur) {
-      orderTailToLoco.push(cur);
-      if (cur === locomotiveId) {
-        break;
-      }
-      const next = [...(graph.get(cur) || [])].find((n) => n !== prev && connected.has(n));
-      prev = cur;
-      cur = next || null;
-    }
-
-    if (orderTailToLoco[orderTailToLoco.length - 1] !== locomotiveId) {
-      return null;
-    }
-
-    return [...orderTailToLoco].reverse();
-  }
-
-  function findSlotPathByDijkstra(startId, goalId) {
-    if (startId === goalId) {
-      return [startId];
-    }
-    if (!slotAdjacency.has(startId) || !slotAdjacency.has(goalId)) {
-      return null;
-    }
-
-    const dist = new Map();
-    const prev = new Map();
-    const visited = new Set();
-    const queue = [{ id: startId, d: 0 }];
-    dist.set(startId, 0);
-
-    while (queue.length) {
-      queue.sort((a, b) => a.d - b.d);
-      const cur = queue.shift();
-      if (visited.has(cur.id)) {
-        continue;
-      }
-      visited.add(cur.id);
-
-      if (cur.id === goalId) {
-        break;
-      }
-
-      for (const next of slotAdjacency.get(cur.id) || []) {
-        if (visited.has(next)) {
-          continue;
-        }
-        const nd = (dist.get(cur.id) ?? Number.POSITIVE_INFINITY) + 1;
-        if (nd < (dist.get(next) ?? Number.POSITIVE_INFINITY)) {
-          dist.set(next, nd);
-          prev.set(next, cur.id);
-          queue.push({ id: next, d: nd });
-        }
-      }
-    }
-
-    if (!prev.has(goalId)) {
-      return null;
-    }
-
-    const path = [goalId];
-    let node = goalId;
-    while (prev.has(node)) {
-      node = prev.get(node);
-      path.push(node);
-    }
-    path.reverse();
-    return path;
-  }
-
-    function startLocomotiveMovement() {
+  async function startLocomotiveMovement() {
     if (isMoving) {
       return;
     }
-    if (!selectedLocomotiveId) {
-      setMovementHint("Выбери локомотив.");
-      return;
-    }
-    if (!targetSlotId) {
-      setMovementHint("Выбери целевую точку.");
-      return;
-    }
 
-    const locomotive = vehicleById.get(selectedLocomotiveId);
-    if (!locomotive || locomotive.type !== "locomotive") {
-      setMovementHint("Выбранный объект не локомотив.");
-      return;
-    }
+    try {
+      const response = await planMovement({
+        gridSize: GRID_SIZE,
+        segments,
+        vehicles,
+        couplings,
+        selectedLocomotiveId,
+        targetSlotId,
+      });
 
-    const trainOrderLocoToTail = buildTrainOrderFromLocomotive(selectedLocomotiveId);
-    if (!trainOrderLocoToTail) {
-      setMovementHint("Поддерживается только линейный состав с локомотивом в голове.");
-      return;
-    }
-
-    if (!railSlotById.get(targetSlotId)) {
-      setMovementHint("Целевая точка недоступна.");
-      return;
-    }
-
-    const currentSlotByVehicleId = new Map();
-    for (const vehicleId of trainOrderLocoToTail) {
-      const vehicle = vehicleById.get(vehicleId);
-      if (!vehicle) {
-        continue;
-      }
-      const nearest = findNearestSlot(vehicle, railSlots);
-      if (!nearest) {
-        setMovementHint("Нет доступных путей для движения.");
+      if (!response.ok) {
+        setMovementHint(response.message || "Не удалось рассчитать движение.");
         return;
       }
-      currentSlotByVehicleId.set(vehicleId, nearest.id);
-    }
 
-    const trainOrderTailToLoco = [...trainOrderLocoToTail].reverse();
-    const initialTrail = trainOrderTailToLoco.map((id) => currentSlotByVehicleId.get(id));
-    for (let i = 0; i < initialTrail.length - 1; i += 1) {
-      const a = initialTrail[i];
-      const b = initialTrail[i + 1];
-      if (!slotAdjacency.get(a)?.has(b)) {
-        setMovementHint("Сцепленный состав должен стоять на соседних точках.");
+      const timeline = response.timeline || [];
+      if (!timeline.length) {
+        setMovementHint("Маршрут не найден.");
         return;
       }
-    }
 
-    const locoStartId = currentSlotByVehicleId.get(selectedLocomotiveId);
-    const path = findSlotPathByDijkstra(locoStartId, targetSlotId);
-    if (!path || path.length < 2) {
-      setMovementHint("Маршрут не найден.");
-      return;
-    }
+      setMovementHint(response.message || "Движение запущено.");
+      setMovementCellsPassed(0);
+      setIsMoving(true);
+      let stepIndex = 0;
 
-    const currentLocoToTail = trainOrderLocoToTail.map((id) => currentSlotByVehicleId.get(id));
-    const isBackwardPush =
-      trainOrderLocoToTail.length > 1 && path[1] === currentLocoToTail[1];
-    let drivingPath = path;
-
-    if (isBackwardPush && trainOrderLocoToTail.length > 1) {
-      const neededTailSlots = trainOrderLocoToTail.length - 1;
-      const extended = [...path];
-      let prev = path[path.length - 2] ?? null;
-      let cur = path[path.length - 1];
-
-      for (let i = 0; i < neededTailSlots; i += 1) {
-        const candidates = [...(slotAdjacency.get(cur) || [])].filter((id) => id !== prev);
-        if (!candidates.length) {
-          setMovementHint("Недостаточно пути за целевой точкой для размещения хвоста состава.");
+      movementTimerRef.current = setInterval(() => {
+        const step = timeline[stepIndex];
+        if (!step) {
+          stopMovement(false);
+          setMovementHint("Движение завершено.");
           return;
         }
 
-        let next = candidates[0];
-        if (candidates.length > 1 && prev) {
-          const pPrev = railSlotById.get(prev);
-          const pCur = railSlotById.get(cur);
-          if (pPrev && pCur) {
-            const inX = pCur.x - pPrev.x;
-            const inY = pCur.y - pPrev.y;
-            let bestScore = Number.NEGATIVE_INFINITY;
-            for (const candidateId of candidates) {
-              const pNext = railSlotById.get(candidateId);
-              if (!pNext) {
-                continue;
-              }
-              const outX = pNext.x - pCur.x;
-              const outY = pNext.y - pCur.y;
-              const score = inX * outX + inY * outY;
-              if (score > bestScore) {
-                bestScore = score;
-                next = candidateId;
-              }
+        const stepMap = new Map(step.map((item) => [item.id, item]));
+        setVehicles((prev) =>
+          prev.map((vehicle) => {
+            const next = stepMap.get(vehicle.id);
+            if (!next) {
+              return vehicle;
             }
-          }
-        }
+            return { ...vehicle, x: next.x, y: next.y };
+          })
+        );
 
-        extended.push(next);
-        prev = cur;
-        cur = next;
-      }
-
-      drivingPath = extended;
+        setMovementCellsPassed((prev) => prev + 1);
+        stepIndex += 1;
+      }, 180);
+    } catch (error) {
+      setMovementHint("Ошибка связи с backend.");
     }
-
-    const staticOccupied = new Set(
-      vehicles
-        .filter((v) => !trainOrderLocoToTail.includes(v.id))
-        .map((v) => slotId(v.x, v.y))
-        .filter((v) => v !== undefined)
-    );
-
-    const timeline = [];
-    const maxSteps = path.length - 1;
-
-    if (maxSteps < 1) {
-      setMovementHint("Недостаточно пути для движения состава назад.");
-      return;
-    }
-
-    for (let step = 1; step <= maxSteps; step += 1) {
-      const stepPositions = new Map();
-      const usedSlots = new Set();
-      let validStep = true;
-
-      for (let i = 0; i < trainOrderLocoToTail.length; i += 1) {
-        let slotKey;
-        if (isBackwardPush) {
-          slotKey = drivingPath[step + i];
-        } else {
-          const historyIndex = step - i;
-          slotKey =
-            historyIndex > 0
-              ? path[historyIndex]
-              : currentLocoToTail[-historyIndex];
-        }
-        const slot = railSlotById.get(slotKey);
-        if (!slot) {
-          validStep = false;
-          break;
-        }
-        if (staticOccupied.has(slotKey) || usedSlots.has(slotKey)) {
-          validStep = false;
-          break;
-        }
-        usedSlots.add(slotKey);
-        stepPositions.set(trainOrderLocoToTail[i], { x: slot.x, y: slot.y });
-      }
-
-      if (!validStep) {
-        setMovementHint("Невозможно выполнить движение: не хватает места на пути.");
-        return;
-      }
-
-      timeline.push(stepPositions);
-    }
-
-    setMovementHint("Движение запущено.");
-    setIsMoving(true);
-    let stepIndex = 0;
-    movementTimerRef.current = setInterval(() => {
-      const step = timeline[stepIndex];
-      if (!step) {
-        stopMovement(false);
-        setMovementHint("Движение завершено.");
-        return;
-      }
-      setVehicles((prev) =>
-        prev.map((vehicle) => {
-          const next = step.get(vehicle.id);
-          if (!next) {
-            return vehicle;
-          }
-          return { ...vehicle, x: next.x, y: next.y };
-        })
-      );
-      stepIndex += 1;
-    }, 180);
   }
   function startVehicleDrag(event, vehicleId) {
     if (event.button !== 0 || !isEditMode || isPanning) {
@@ -1023,75 +683,78 @@ export default function EditorLayout() {
     setSelectionBox(null);
   }
 
-  function coupleSelectedVehicles() {
-    const pair = getLastPair(selectedVehicleIds);
-    if (!pair) {
-      return;
-    }
-    const [a, b] = pair;
-    const va = vehicleById.get(a);
-    const vb = vehicleById.get(b);
-    if (!va || !vb) {
+  async function coupleSelectedVehicles() {
+    if (selectedVehicleIds.length < 2) {
+      setMovementHint("Выбери два состава для сцепки.");
       return;
     }
 
-    const slotsPair = pairKey(slotId(va.x, va.y), slotId(vb.x, vb.y));
-    if (!adjacentSlotPairs.has(slotsPair)) {
-      return;
+    try {
+      await applyLayoutAction("couple", {
+        selectedVehicleIds,
+      });
+      setMovementHint("Сцепка выполнена.");
+    } catch (error) {
+      setMovementHint(error.message || "Ошибка связи с backend.");
     }
-
-    const key = pairKey(a, b);
-    if (coupledPairSet.has(key)) {
-      return;
-    }
-    setCouplings((prev) => [...prev, { id: crypto.randomUUID(), a, b }]);
   }
 
-  function decoupleSelectedVehicles() {
-    const pair = getLastPair(selectedVehicleIds);
-    if (!pair) {
+  async function decoupleSelectedVehicles() {
+    if (selectedVehicleIds.length < 2) {
       return;
     }
-    const [a, b] = pair;
-    const key = pairKey(a, b);
-    setCouplings((prev) => prev.filter((item) => pairKey(item.a, item.b) !== key));
+    try {
+      await applyLayoutAction("decouple", { selectedVehicleIds });
+      setMovementHint("Расцепка выполнена.");
+    } catch (error) {
+      setMovementHint(error.message || "Ошибка связи с backend.");
+    }
   }
 
-  function clearLayout() {
+  async function clearLayout() {
     stopMovement(true);
-    setSegments([]);
-    setVehicles([]);
-    setCouplings([]);
+    try {
+      await applyLayoutAction("clear");
+    } catch (error) {
+      setMovementHint(error.message || "Ошибка связи с backend.");
+    }
     setStartPoint(null);
     setSelectedSegmentIds([]);
     setSelectedVehicleIds([]);
     setDragState(null);
     setSelectionBox(null);
+    setMovementCellsPassed(0);
   }
 
-  function deleteSelectedSegments() {
+  async function deleteSelectedSegments() {
     if (!selectedSegmentIds.length) {
       return;
     }
-    setSegments((prev) => prev.filter((segment) => !selectedSegmentSet.has(segment.id)));
-    setSelectedSegmentIds([]);
-    setDragState(null);
-    setSelectionBox(null);
+    try {
+      await applyLayoutAction("delete_segments", { ids: selectedSegmentIds });
+      setSelectedSegmentIds([]);
+      setDragState(null);
+      setSelectionBox(null);
+    } catch (error) {
+      setMovementHint(error.message || "Ошибка связи с backend.");
+    }
   }
 
-  function deleteSelectedVehicles() {
+  async function deleteSelectedVehicles() {
     if (!selectedVehicleIds.length) {
       return;
     }
-    const toDelete = new Set(selectedVehicleIds);
-    setVehicles((prev) => prev.filter((v) => !toDelete.has(v.id)));
-    setCouplings((prev) => prev.filter((c) => !toDelete.has(c.a) && !toDelete.has(c.b)));
-    setSelectedVehicleIds([]);
+    try {
+      await applyLayoutAction("delete_vehicles", { ids: selectedVehicleIds });
+      setSelectedVehicleIds([]);
+    } catch (error) {
+      setMovementHint(error.message || "Ошибка связи с backend.");
+    }
   }
 
-  function deleteSelectedAll() {
-    deleteSelectedVehicles();
-    deleteSelectedSegments();
+  async function deleteSelectedAll() {
+    await deleteSelectedVehicles();
+    await deleteSelectedSegments();
   }
 
   function switchMode(nextMode) {
@@ -1215,6 +878,7 @@ export default function EditorLayout() {
         <p className="counter">Выбрано составов: {selectedVehicleIds.length}</p>
         <p className="counter">Локомотив: {selectedLocomotiveId ? "выбран" : "не выбран"}</p>
         <p className="counter">Цель: {targetSlotId ? "выбрана" : "не выбрана"}</p>
+        <p className="counter">Пройдено ячеек: {movementCellsPassed}</p>
         <p className="counter">{movementHint || "-"}</p>
       </aside>
 
