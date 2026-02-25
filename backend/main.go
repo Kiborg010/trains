@@ -8,6 +8,8 @@ import (
 	"math"
 	"net/http"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -25,6 +27,7 @@ type Segment struct {
 type Vehicle struct {
 	ID   string  `json:"id"`
 	Type string  `json:"type"`
+	Code string  `json:"code,omitempty"`
 	X    float64 `json:"x"`
 	Y    float64 `json:"y"`
 }
@@ -132,6 +135,79 @@ type LayoutOperationResponse struct {
 	State   LayoutState `json:"state"`
 }
 
+type Scenario struct {
+	ID           string        `json:"id"`
+	Name         string        `json:"name"`
+	InitialState LayoutState   `json:"initialState"`
+	Commands     []CommandSpec `json:"commands"`
+}
+
+type CommandSpec struct {
+	ID      string         `json:"id"`
+	Order   int            `json:"order"`
+	Type    string         `json:"type"`
+	Payload CommandPayload `json:"payload"`
+}
+
+type CommandPayload struct {
+	LocoID       string `json:"locoId,omitempty"`
+	TargetSlotID string `json:"targetSlotId,omitempty"`
+	AID          string `json:"aId,omitempty"`
+	BID          string `json:"bId,omitempty"`
+}
+
+type Execution struct {
+	ID             string      `json:"id"`
+	ScenarioID     string      `json:"scenarioId"`
+	Status         string      `json:"status"`
+	CurrentCommand int         `json:"currentCommand"`
+	State          LayoutState `json:"state"`
+	Log            []string    `json:"log"`
+}
+
+type CreateScenarioRequest struct {
+	Name         string      `json:"name"`
+	InitialState LayoutState `json:"initialState"`
+}
+
+type CreateScenarioResponse struct {
+	OK       bool     `json:"ok"`
+	Message  string   `json:"message,omitempty"`
+	Scenario Scenario `json:"scenario"`
+}
+
+type AddCommandRequest struct {
+	Type    string         `json:"type"`
+	Payload CommandPayload `json:"payload"`
+}
+
+type AddCommandResponse struct {
+	OK      bool        `json:"ok"`
+	Message string      `json:"message,omitempty"`
+	Command CommandSpec `json:"command"`
+}
+
+type RunScenarioResponse struct {
+	OK        bool      `json:"ok"`
+	Message   string    `json:"message,omitempty"`
+	Execution Execution `json:"execution"`
+}
+
+type StepExecutionResponse struct {
+	OK        bool      `json:"ok"`
+	Message   string    `json:"message,omitempty"`
+	Execution Execution `json:"execution"`
+}
+
+var scenarioStore = struct {
+	mu         sync.Mutex
+	scenarios  map[string]Scenario
+	executions map[string]Execution
+}{
+	scenarios:  map[string]Scenario{},
+	executions: map[string]Execution{},
+}
+
 func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", healthHandler)
@@ -140,6 +216,9 @@ func main() {
 	mux.HandleFunc("/api/vehicles/place", placeVehicleHandler)
 	mux.HandleFunc("/api/vehicles/resolve", resolveVehiclesHandler)
 	mux.HandleFunc("/api/layout/apply", layoutApplyHandler)
+	mux.HandleFunc("/api/scenarios", scenariosHandler)
+	mux.HandleFunc("/api/scenarios/", scenarioByIDHandler)
+	mux.HandleFunc("/api/executions/", executionByIDHandler)
 
 	handler := withCORS(mux)
 	log.Println("backend started on :8080")
@@ -294,6 +373,7 @@ func placeVehicleInternal(req PlaceVehicleRequest) (PlaceVehicleResponse, error)
 	vehicle := Vehicle{
 		ID:   fmt.Sprintf("%d", time.Now().UnixNano()),
 		Type: req.VehicleType,
+		Code: nextVehicleCode(req.Vehicles, req.VehicleType),
 		X:    target.X,
 		Y:    target.Y,
 	}
@@ -377,6 +457,351 @@ func layoutApplyHandler(w http.ResponseWriter, r *http.Request) {
 		Message: message,
 		State:   nextState,
 	})
+}
+
+func scenariosHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req CreateScenarioRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, CreateScenarioResponse{
+			OK:      false,
+			Message: "invalid json",
+		})
+		return
+	}
+
+	if strings.TrimSpace(req.Name) == "" {
+		req.Name = "Scenario"
+	}
+
+	scenario := Scenario{
+		ID:           fmt.Sprintf("sc-%d", time.Now().UnixNano()),
+		Name:         req.Name,
+		InitialState: req.InitialState,
+		Commands:     []CommandSpec{},
+	}
+
+	scenarioStore.mu.Lock()
+	scenarioStore.scenarios[scenario.ID] = scenario
+	scenarioStore.mu.Unlock()
+
+	writeJSON(w, http.StatusOK, CreateScenarioResponse{
+		OK:       true,
+		Scenario: scenario,
+	})
+}
+
+func scenarioByIDHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/scenarios/")
+	path = strings.Trim(path, "/")
+	if path == "" {
+		http.Error(w, "scenario id required", http.StatusBadRequest)
+		return
+	}
+	parts := strings.Split(path, "/")
+	scenarioID := parts[0]
+
+	if len(parts) == 1 && r.Method == http.MethodGet {
+		scenarioStore.mu.Lock()
+		scenario, ok := scenarioStore.scenarios[scenarioID]
+		scenarioStore.mu.Unlock()
+		if !ok {
+			http.Error(w, "scenario not found", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, scenario)
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "commands" && r.Method == http.MethodPost {
+		addCommandHandler(w, r, scenarioID)
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "run" && r.Method == http.MethodPost {
+		runScenarioHandler(w, r, scenarioID)
+		return
+	}
+
+	http.Error(w, "not found", http.StatusNotFound)
+}
+
+func addCommandHandler(w http.ResponseWriter, r *http.Request, scenarioID string) {
+	var req AddCommandRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, AddCommandResponse{
+			OK:      false,
+			Message: "invalid json",
+		})
+		return
+	}
+
+	req.Type = strings.ToUpper(strings.TrimSpace(req.Type))
+	if req.Type == "" {
+		writeJSON(w, http.StatusOK, AddCommandResponse{
+			OK:      false,
+			Message: "command type is required",
+		})
+		return
+	}
+
+	scenarioStore.mu.Lock()
+	defer scenarioStore.mu.Unlock()
+
+	scenario, ok := scenarioStore.scenarios[scenarioID]
+	if !ok {
+		http.Error(w, "scenario not found", http.StatusNotFound)
+		return
+	}
+
+	command := CommandSpec{
+		ID:      fmt.Sprintf("cmd-%d", time.Now().UnixNano()),
+		Order:   len(scenario.Commands),
+		Type:    req.Type,
+		Payload: req.Payload,
+	}
+	scenario.Commands = append(scenario.Commands, command)
+	scenarioStore.scenarios[scenarioID] = scenario
+
+	writeJSON(w, http.StatusOK, AddCommandResponse{
+		OK:      true,
+		Command: command,
+	})
+}
+
+func runScenarioHandler(w http.ResponseWriter, r *http.Request, scenarioID string) {
+	scenarioStore.mu.Lock()
+	defer scenarioStore.mu.Unlock()
+
+	scenario, ok := scenarioStore.scenarios[scenarioID]
+	if !ok {
+		http.Error(w, "scenario not found", http.StatusNotFound)
+		return
+	}
+
+	execution := Execution{
+		ID:             fmt.Sprintf("ex-%d", time.Now().UnixNano()),
+		ScenarioID:     scenarioID,
+		Status:         "running",
+		CurrentCommand: 0,
+		State:          cloneLayoutState(scenario.InitialState),
+		Log:            []string{"execution created"},
+	}
+	scenarioStore.executions[execution.ID] = execution
+
+	writeJSON(w, http.StatusOK, RunScenarioResponse{
+		OK:        true,
+		Execution: execution,
+	})
+}
+
+func executionByIDHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/executions/")
+	path = strings.Trim(path, "/")
+	if path == "" {
+		http.Error(w, "execution id required", http.StatusBadRequest)
+		return
+	}
+	parts := strings.Split(path, "/")
+	executionID := parts[0]
+
+	if len(parts) == 1 && r.Method == http.MethodGet {
+		scenarioStore.mu.Lock()
+		execution, ok := scenarioStore.executions[executionID]
+		scenarioStore.mu.Unlock()
+		if !ok {
+			http.Error(w, "execution not found", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, execution)
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "step" && r.Method == http.MethodPost {
+		stepExecutionHandler(w, r, executionID)
+		return
+	}
+
+	http.Error(w, "not found", http.StatusNotFound)
+}
+
+func stepExecutionHandler(w http.ResponseWriter, r *http.Request, executionID string) {
+	scenarioStore.mu.Lock()
+	defer scenarioStore.mu.Unlock()
+
+	execution, ok := scenarioStore.executions[executionID]
+	if !ok {
+		http.Error(w, "execution not found", http.StatusNotFound)
+		return
+	}
+	if execution.Status != "running" {
+		writeJSON(w, http.StatusOK, StepExecutionResponse{
+			OK:        false,
+			Message:   "execution is not running",
+			Execution: execution,
+		})
+		return
+	}
+
+	scenario, ok := scenarioStore.scenarios[execution.ScenarioID]
+	if !ok {
+		http.Error(w, "scenario not found", http.StatusNotFound)
+		return
+	}
+	if execution.CurrentCommand >= len(scenario.Commands) {
+		execution.Status = "completed"
+		execution.Log = append(execution.Log, "completed")
+		scenarioStore.executions[executionID] = execution
+		writeJSON(w, http.StatusOK, StepExecutionResponse{
+			OK:        true,
+			Message:   "execution completed",
+			Execution: execution,
+		})
+		return
+	}
+
+	command := scenario.Commands[execution.CurrentCommand]
+	nextState, msg, err := applyCommand(execution.State, command)
+	if err != nil {
+		execution.Status = "failed"
+		execution.Log = append(execution.Log, fmt.Sprintf("command %s failed: %s", command.Type, err.Error()))
+		scenarioStore.executions[executionID] = execution
+		writeJSON(w, http.StatusOK, StepExecutionResponse{
+			OK:        false,
+			Message:   err.Error(),
+			Execution: execution,
+		})
+		return
+	}
+
+	execution.State = nextState
+	execution.CurrentCommand++
+	execution.Log = append(execution.Log, fmt.Sprintf("command %s ok %s", command.Type, msg))
+	if execution.CurrentCommand >= len(scenario.Commands) {
+		execution.Status = "completed"
+		execution.Log = append(execution.Log, "completed")
+	}
+
+	scenarioStore.executions[executionID] = execution
+	writeJSON(w, http.StatusOK, StepExecutionResponse{
+		OK:        true,
+		Message:   "step applied",
+		Execution: execution,
+	})
+}
+
+func applyCommand(state LayoutState, command CommandSpec) (LayoutState, string, error) {
+	switch command.Type {
+	case "MOVE_LOCO":
+		if command.Payload.LocoID == "" || command.Payload.TargetSlotID == "" {
+			return state, "", errors.New("MOVE_LOCO requires locoId and targetSlotId")
+		}
+		plan, err := buildMovementPlan(PlanMovementRequest{
+			GridSize:             32,
+			Segments:             state.Segments,
+			Vehicles:             state.Vehicles,
+			Couplings:            state.Couplings,
+			SelectedLocomotiveID: command.Payload.LocoID,
+			TargetSlotID:         command.Payload.TargetSlotID,
+		})
+		if err != nil {
+			return state, "", err
+		}
+		if len(plan.Timeline) == 0 {
+			return state, "", errors.New("movement timeline is empty")
+		}
+		lastStep := plan.Timeline[len(plan.Timeline)-1]
+		posByID := map[string]Position{}
+		for _, p := range lastStep {
+			posByID[p.ID] = p
+		}
+		nextVehicles := make([]Vehicle, 0, len(state.Vehicles))
+		for _, v := range state.Vehicles {
+			pos, ok := posByID[v.ID]
+			if !ok {
+				nextVehicles = append(nextVehicles, v)
+				continue
+			}
+			nextVehicles = append(nextVehicles, Vehicle{
+				ID:   v.ID,
+				Type: v.Type,
+				Code: v.Code,
+				X:    pos.X,
+				Y:    pos.Y,
+			})
+		}
+		state.Vehicles = nextVehicles
+		return state, "move applied", nil
+
+	case "COUPLE":
+		if command.Payload.AID == "" || command.Payload.BID == "" {
+			return state, "", errors.New("COUPLE requires aId and bId")
+		}
+		next, _, err := applyLayoutOperation(LayoutOperationRequest{
+			GridSize: 32,
+			State:    state,
+			Action:   "couple",
+			SelectedVehicleIDs: []string{
+				command.Payload.AID,
+				command.Payload.BID,
+			},
+		})
+		if err != nil {
+			return state, "", err
+		}
+		return next, "couple applied", nil
+
+	case "DECOUPLE":
+		if command.Payload.AID == "" || command.Payload.BID == "" {
+			return state, "", errors.New("DECOUPLE requires aId and bId")
+		}
+		next, _, err := applyLayoutOperation(LayoutOperationRequest{
+			GridSize: 32,
+			State:    state,
+			Action:   "decouple",
+			SelectedVehicleIDs: []string{
+				command.Payload.AID,
+				command.Payload.BID,
+			},
+		})
+		if err != nil {
+			return state, "", err
+		}
+		return next, "decouple applied", nil
+
+	default:
+		return state, "", errors.New("unsupported command type")
+	}
+}
+
+func cloneLayoutState(state LayoutState) LayoutState {
+	next := LayoutState{
+		Segments:  make([]Segment, len(state.Segments)),
+		Vehicles:  make([]Vehicle, len(state.Vehicles)),
+		Couplings: make([]Coupling, len(state.Couplings)),
+	}
+	copy(next.Segments, state.Segments)
+	copy(next.Vehicles, state.Vehicles)
+	copy(next.Couplings, state.Couplings)
+	return next
 }
 
 func applyLayoutOperation(req LayoutOperationRequest) (LayoutState, string, error) {
@@ -587,6 +1012,7 @@ func resolveVehicles(req ResolveVehiclesRequest) ([]Vehicle, error) {
 		resolved := Vehicle{
 			ID:   v.ID,
 			Type: v.Type,
+			Code: v.Code,
 			X:    nearest.X,
 			Y:    nearest.Y,
 		}
@@ -1156,6 +1582,29 @@ func reverseStrings(items []string) []string {
 		result[i], result[j] = result[j], result[i]
 	}
 	return result
+}
+
+func nextVehicleCode(vehicles []Vehicle, vehicleType string) string {
+	prefix := "в"
+	if vehicleType == "locomotive" {
+		prefix = "л"
+	}
+
+	maxNumber := 0
+	for _, vehicle := range vehicles {
+		if vehicle.Type != vehicleType {
+			continue
+		}
+		if !strings.HasPrefix(vehicle.Code, prefix) {
+			continue
+		}
+		var n int
+		if _, err := fmt.Sscanf(vehicle.Code, prefix+"%d", &n); err == nil && n > maxNumber {
+			maxNumber = n
+		}
+	}
+
+	return fmt.Sprintf("%s%d", prefix, maxNumber+1)
 }
 
 func slotID(x, y float64) string {

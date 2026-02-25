@@ -58,6 +58,15 @@ body,
   border-color: #2563eb;
 }
 
+.toolInput {
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0b1220;
+  color: #f8fafc;
+  padding: 10px 12px;
+  width: 100%;
+}
+
 .workspace {
   display: grid;
   grid-template-rows: 50px 1fr 40px;
