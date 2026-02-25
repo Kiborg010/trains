@@ -56,6 +56,37 @@ function hasVehiclePositionChanges(current, next) {
   return false;
 }
 
+function buildVehicleCodeMap(vehicles) {
+  let locoCounter = 0;
+  let wagonCounter = 0;
+  const map = new Map();
+  for (const vehicle of vehicles) {
+    if (vehicle.code) {
+      map.set(vehicle.id, vehicle.code);
+      continue;
+    }
+    if (vehicle.type === "locomotive") {
+      locoCounter += 1;
+      map.set(vehicle.id, `л${locoCounter}`);
+    } else {
+      wagonCounter += 1;
+      map.set(vehicle.id, `в${wagonCounter}`);
+    }
+  }
+  return map;
+}
+
+function applyTimelineStepToVehicles(vehicles, step) {
+  const stepMap = new Map(step.map((item) => [item.id, item]));
+  return vehicles.map((vehicle) => {
+    const next = stepMap.get(vehicle.id);
+    if (!next) {
+      return vehicle;
+    }
+    return { ...vehicle, x: next.x, y: next.y };
+  });
+}
+
 export default function EditorLayout() {
   const canvasRef = useRef(null);
   const canvasWrapRef = useRef(null);
@@ -90,6 +121,7 @@ export default function EditorLayout() {
   const [scenarioUnitCode, setScenarioUnitCode] = useState("");
   const [scenarioFromSlot, setScenarioFromSlot] = useState("");
   const [scenarioToSlot, setScenarioToSlot] = useState("");
+  const [scenarioSteps, setScenarioSteps] = useState([]);
 
   const viewWidth = viewport.width / zoom;
   const viewHeight = viewport.height / zoom;
@@ -104,25 +136,7 @@ export default function EditorLayout() {
   const selectedSegmentSet = useMemo(() => new Set(selectedSegmentIds), [selectedSegmentIds]);
   const selectedVehicleSet = useMemo(() => new Set(selectedVehicleIds), [selectedVehicleIds]);
   const vehicleById = useMemo(() => new Map(vehicles.map((v) => [v.id, v])), [vehicles]);
-  const vehicleCodeById = useMemo(() => {
-    let locoCounter = 0;
-    let wagonCounter = 0;
-    const map = new Map();
-    for (const vehicle of vehicles) {
-      if (vehicle.code) {
-        map.set(vehicle.id, vehicle.code);
-        continue;
-      }
-      if (vehicle.type === "locomotive") {
-        locoCounter += 1;
-        map.set(vehicle.id, `л${locoCounter}`);
-      } else {
-        wagonCounter += 1;
-        map.set(vehicle.id, `в${wagonCounter}`);
-      }
-    }
-    return map;
-  }, [vehicles]);
+  const vehicleCodeById = useMemo(() => buildVehicleCodeMap(vehicles), [vehicles]);
 
   const nodes = useMemo(() => {
     const map = new Map();
@@ -333,28 +347,33 @@ export default function EditorLayout() {
     }
   }, [targetSlotId]);
 
-  async function executeMovement(locoId, goalSlotId) {
+  async function buildMovementTimeline(locoId, goalSlotId, sourceVehicles) {
     const response = await planMovement({
       gridSize: GRID_SIZE,
       segments,
-      vehicles,
+      vehicles: sourceVehicles,
       couplings,
       selectedLocomotiveId: locoId,
       targetSlotId: goalSlotId,
     });
 
     if (!response.ok) {
-      setMovementHint(response.message || "Не удалось рассчитать движение.");
-      return false;
+      throw new Error(response.message || "Не удалось рассчитать движение.");
     }
 
     const timeline = response.timeline || [];
     if (!timeline.length) {
-      setMovementHint("Маршрут не найден.");
-      return false;
+      throw new Error("Маршрут не найден.");
     }
 
-    setMovementHint(response.message || "Движение запущено.");
+    return timeline;
+  }
+
+  function playTimeline(timeline, startMessage = "Движение запущено.") {
+    if (!timeline.length) {
+      return false;
+    }
+    setMovementHint(startMessage);
     setMovementCellsPassed(0);
     setIsMoving(true);
     let stepIndex = 0;
@@ -367,16 +386,7 @@ export default function EditorLayout() {
         return;
       }
 
-      const stepMap = new Map(step.map((item) => [item.id, item]));
-      setVehicles((prev) =>
-        prev.map((vehicle) => {
-          const next = stepMap.get(vehicle.id);
-          if (!next) {
-            return vehicle;
-          }
-          return { ...vehicle, x: next.x, y: next.y };
-        })
-      );
+      setVehicles((prev) => applyTimelineStepToVehicles(prev, step));
 
       setMovementCellsPassed((prev) => prev + 1);
       stepIndex += 1;
@@ -385,11 +395,12 @@ export default function EditorLayout() {
     return true;
   }
 
-  async function runSimpleScenario() {
-    if (isMoving) {
-      return;
-    }
+  async function executeMovement(locoId, goalSlotId) {
+    const timeline = await buildMovementTimeline(locoId, goalSlotId, vehicles);
+    return playTimeline(timeline, "Движение запущено.");
+  }
 
+  function addScenarioStep() {
     const unitCode = scenarioUnitCode.trim().toLowerCase();
     const fromSlot = scenarioFromSlot.trim();
     const toSlot = scenarioToSlot.trim();
@@ -399,32 +410,99 @@ export default function EditorLayout() {
       return;
     }
 
-    const target = vehicles.find(
-      (vehicle) => (vehicleCodeById.get(vehicle.id) || "").toLowerCase() === unitCode
-    );
-    if (!target) {
-      setMovementHint("Объект с таким номером не найден.");
-      return;
-    }
-    if (target.type !== "locomotive") {
-      setMovementHint("Пока сценарий движения доступен только для локомотива.");
+    setScenarioSteps((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        unitCode,
+        fromSlot,
+        toSlot,
+      },
+    ]);
+    setMovementHint("Шаг добавлен в сценарий.");
+  }
+
+  function removeScenarioStep(stepId) {
+    setScenarioSteps((prev) => prev.filter((step) => step.id !== stepId));
+  }
+
+  function clearScenarioSteps() {
+    setScenarioSteps([]);
+  }
+
+  async function runSimpleScenario() {
+    if (isMoving) {
       return;
     }
 
-    const currentSlot = slotId(target.x, target.y);
-    if (currentSlot !== fromSlot) {
-      setMovementHint(
-        `Локомотив ${vehicleCodeById.get(target.id) || target.id} сейчас в ${currentSlot}, а не в ${fromSlot}.`
-      );
-      return;
-    }
+    const steps = scenarioSteps.length
+      ? scenarioSteps
+      : [
+          {
+            id: "single",
+            unitCode: scenarioUnitCode.trim().toLowerCase(),
+            fromSlot: scenarioFromSlot.trim(),
+            toSlot: scenarioToSlot.trim(),
+          },
+        ];
 
-    setSelectedLocomotiveId(target.id);
-    setTargetSlotId(toSlot);
     try {
-      await executeMovement(target.id, toSlot);
+      if (!steps.length || !steps[0].unitCode || !steps[0].fromSlot || !steps[0].toSlot) {
+        setMovementHint("Добавь хотя бы один корректный шаг сценария.");
+        return;
+      }
+
+      let workingVehicles = vehicles.map((vehicle) => ({ ...vehicle }));
+      const combinedTimeline = [];
+      let lastLocomotiveId = null;
+      let lastTargetSlotId = null;
+
+      for (const step of steps) {
+        const codeMap = buildVehicleCodeMap(workingVehicles);
+        const target = workingVehicles.find(
+          (vehicle) => (codeMap.get(vehicle.id) || "").toLowerCase() === step.unitCode
+        );
+        if (!target) {
+          setMovementHint(`Объект с номером ${step.unitCode} не найден.`);
+          return;
+        }
+        if (target.type !== "locomotive") {
+          setMovementHint(`Объект ${step.unitCode} не локомотив.`);
+          return;
+        }
+
+        const currentSlot = slotId(target.x, target.y);
+        if (currentSlot !== step.fromSlot) {
+          setMovementHint(
+            `Локомотив ${codeMap.get(target.id) || target.id} сейчас в ${currentSlot}, а не в ${step.fromSlot}.`
+          );
+          return;
+        }
+
+        const timeline = await buildMovementTimeline(target.id, step.toSlot, workingVehicles);
+        for (const frame of timeline) {
+          combinedTimeline.push(frame);
+          workingVehicles = applyTimelineStepToVehicles(workingVehicles, frame);
+        }
+        lastLocomotiveId = target.id;
+        lastTargetSlotId = step.toSlot;
+      }
+
+      if (!combinedTimeline.length) {
+        setMovementHint("Сценарий не содержит шагов движения.");
+        return;
+      }
+
+      if (lastLocomotiveId) {
+        setSelectedLocomotiveId(lastLocomotiveId);
+      }
+      if (lastTargetSlotId) {
+        setTargetSlotId(lastTargetSlotId);
+      }
+
+      playTimeline(combinedTimeline, "Сценарий движения запущен.");
     } catch (error) {
-      setMovementHint("Ошибка связи с backend.");
+      setMovementHint(error.message || "Ошибка связи с backend.");
     }
   }
 
@@ -1062,8 +1140,32 @@ export default function EditorLayout() {
                 onChange={(event) => setScenarioToSlot(event.target.value)}
                 placeholder="Куда (x.xx:y.yy)"
               />
+              <button type="button" className="toolButton" onClick={addScenarioStep}>
+                Добавить шаг
+              </button>
+              <button type="button" className="toolButton" onClick={clearScenarioSteps}>
+                Очистить шаги
+              </button>
+              {scenarioSteps.length > 0 && (
+                <div className="scenarioSteps">
+                  {scenarioSteps.map((step, index) => (
+                    <div key={step.id} className="scenarioStepRow">
+                      <span className="scenarioStepText">
+                        {index + 1}. {step.unitCode}: {step.fromSlot} {"->"} {step.toSlot}
+                      </span>
+                      <button
+                        type="button"
+                        className="scenarioStepRemove"
+                        onClick={() => removeScenarioStep(step.id)}
+                      >
+                        x
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <button type="button" className="toolButton" onClick={runSimpleScenario}>
-                Выполнить сценарий
+                Выполнить шаги
               </button>
             </div>
           )}
