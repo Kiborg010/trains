@@ -24,6 +24,7 @@ body,
   background: #0f172a;
   color: #f8fafc;
   border-right: 1px solid #1e293b;
+  overflow-y: auto;
 }
 
 .title {
@@ -56,6 +57,36 @@ body,
 .toolButton.active {
   background: #2563eb;
   border-color: #2563eb;
+}
+
+.tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.panelContent {
+  border-top: 1px solid #334155;
+  padding-top: 12px;
+  margin-top: 4px;
+}
+
+.tabButton {
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0b1220;
+  color: #cbd5e1;
+  padding: 8px 10px;
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.tabButton.active {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #ffffff;
 }
 
 .toolInput {

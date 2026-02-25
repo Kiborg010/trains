@@ -77,6 +77,7 @@ export default function EditorLayout() {
   const [dragState, setDragState] = useState(null);
   const [selectionBox, setSelectionBox] = useState(null);
   const [isPanning, setIsPanning] = useState(false);
+  const [activePanel, setActivePanel] = useState("maneuvers");
 
   const [vehicles, setVehicles] = useState([]);
   const [selectedVehicleIds, setSelectedVehicleIds] = useState([]);
@@ -92,9 +93,13 @@ export default function EditorLayout() {
 
   const viewWidth = viewport.width / zoom;
   const viewHeight = viewport.height / zoom;
-  const isEditMode = mode === "edit";
-  const isPlaceMode = mode === "placeWagon" || mode === "placeLocomotive";
-  const isMoveMode = mode === "move";
+  const isManeuversPanel = activePanel === "maneuvers";
+  const isCouplingPanel = activePanel === "coupling";
+  const isMovementPanel = activePanel === "movement";
+  const isEditMode = isManeuversPanel && mode === "edit";
+  const isPlaceMode =
+    isManeuversPanel && (mode === "placeWagon" || mode === "placeLocomotive");
+  const isMoveMode = isMovementPanel && mode === "move";
 
   const selectedSegmentSet = useMemo(() => new Set(selectedSegmentIds), [selectedSegmentIds]);
   const selectedVehicleSet = useMemo(() => new Set(selectedVehicleIds), [selectedVehicleIds]);
@@ -165,6 +170,9 @@ export default function EditorLayout() {
       if (event.key !== "Delete") {
         return;
       }
+      if (!isManeuversPanel) {
+        return;
+      }
 
       if (selectedVehicleIds.length > 0) {
         event.preventDefault();
@@ -180,7 +188,7 @@ export default function EditorLayout() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedSegmentIds, selectedVehicleIds]);
+  }, [isManeuversPanel, selectedSegmentIds, selectedVehicleIds]);
 
   useEffect(() => {
     if (!isPanning) {
@@ -448,7 +456,7 @@ export default function EditorLayout() {
   }
 
   async function handleCanvasClick(event) {
-    if (mode !== "drawTrack" || isPanning || isMoving) {
+    if (!isManeuversPanel || mode !== "drawTrack" || isPanning || isMoving) {
       return;
     }
 
@@ -717,6 +725,10 @@ export default function EditorLayout() {
       return;
     }
 
+    if (!(isManeuversPanel || isCouplingPanel)) {
+      return;
+    }
+
     if (event.shiftKey) {
       setSelectedVehicleIds((prev) => {
         if (prev.includes(vehicleId)) {
@@ -858,6 +870,33 @@ export default function EditorLayout() {
     }
   }
 
+  function switchPanel(nextPanel) {
+    if (nextPanel === activePanel) {
+      return;
+    }
+    setActivePanel(nextPanel);
+
+    if (nextPanel === "maneuvers") {
+      if (!["drawTrack", "placeWagon", "placeLocomotive", "edit"].includes(mode)) {
+        switchMode("drawTrack");
+      }
+      return;
+    }
+
+    if (nextPanel === "movement") {
+      switchMode("move");
+      return;
+    }
+
+    stopMovement(false);
+    setMode("view");
+    setStartPoint(null);
+    setDragState(null);
+    setSelectionBox(null);
+    setSelectedSegmentIds([]);
+    setSelectedVehicleIds([]);
+  }
+
   function zoomIn() {
     setZoom((prev) => clamp(Number((prev + ZOOM_STEP).toFixed(2)), MIN_ZOOM, MAX_ZOOM));
   }
@@ -881,117 +920,167 @@ export default function EditorLayout() {
           ? "Добавление локомотивов"
           : mode === "move"
             ? "Движение"
-            : "Редактирование";
+            : mode === "edit"
+              ? "Редактирование"
+              : "Просмотр";
 
   return (
     <div className="layout">
       <aside className="sidebar">
         <h1 className="title">Trains Lab</h1>
         <p className="subtitle">Локомотивные маневры</p>
-
-        <div className="tools">
+        <div className="tabs">
           <button
             type="button"
-            className={`toolButton ${mode === "drawTrack" ? "active" : ""}`}
-            onClick={() => switchMode("drawTrack")}
+            className={`tabButton ${activePanel === "maneuvers" ? "active" : ""}`}
+            onClick={() => switchPanel("maneuvers")}
           >
-            Добавление пути
+            Расстановка путей и составов
           </button>
           <button
             type="button"
-            className={`toolButton ${mode === "placeWagon" ? "active" : ""}`}
-            onClick={() => switchMode("placeWagon")}
+            className={`tabButton ${activePanel === "coupling" ? "active" : ""}`}
+            onClick={() => switchPanel("coupling")}
           >
-            Добавление вагонов
+            Сцепка/расцепка
           </button>
           <button
             type="button"
-            className={`toolButton ${mode === "placeLocomotive" ? "active" : ""}`}
-            onClick={() => switchMode("placeLocomotive")}
+            className={`tabButton ${activePanel === "movement" ? "active" : ""}`}
+            onClick={() => switchPanel("movement")}
           >
-            Добавление локомотивов
+            Движение локомотива
           </button>
           <button
             type="button"
-            className={`toolButton ${mode === "edit" ? "active" : ""}`}
-            onClick={() => switchMode("edit")}
+            className={`tabButton ${activePanel === "scenario" ? "active" : ""}`}
+            onClick={() => switchPanel("scenario")}
           >
-            Редактирование
+            Сценарий
           </button>
           <button
             type="button"
-            className={`toolButton ${mode === "move" ? "active" : ""}`}
-            onClick={() => switchMode("move")}
+            className={`tabButton ${activePanel === "metrics" ? "active" : ""}`}
+            onClick={() => switchPanel("metrics")}
           >
-            Движение
+            Подсчет
           </button>
         </div>
 
-        <p className="counter">Сцепка/расцепка</p>
-        <div className="tools">
-          <button type="button" className="toolButton" onClick={coupleSelectedVehicles}>
-            Сцепить выбранные
-          </button>
-          <button type="button" className="toolButton" onClick={decoupleSelectedVehicles}>
-            Расцепить выбранные
-          </button>
-          <button type="button" className="toolButton" onClick={deleteSelectedSegments}>
-            Удалить выбранные пути
-          </button>
-          <button type="button" className="toolButton" onClick={deleteSelectedVehicles}>
-            Удалить выбранные составы
-          </button>
-          <button type="button" className="toolButton" onClick={deleteSelectedAll}>
-            Удалить всё выбранное
-          </button>
-          <button type="button" className="toolButton" onClick={clearLayout}>
-            Очистить все
-          </button>
+        <div className="panelContent">
+          {activePanel === "maneuvers" && (
+            <div className="tools">
+              <button
+                type="button"
+                className={`toolButton ${mode === "drawTrack" ? "active" : ""}`}
+                onClick={() => switchMode("drawTrack")}
+              >
+                Добавление пути
+              </button>
+              <button
+                type="button"
+                className={`toolButton ${mode === "placeWagon" ? "active" : ""}`}
+                onClick={() => switchMode("placeWagon")}
+              >
+                Добавление вагонов
+              </button>
+              <button
+                type="button"
+                className={`toolButton ${mode === "placeLocomotive" ? "active" : ""}`}
+                onClick={() => switchMode("placeLocomotive")}
+              >
+                Добавление локомотивов
+              </button>
+              <button
+                type="button"
+                className={`toolButton ${mode === "edit" ? "active" : ""}`}
+                onClick={() => switchMode("edit")}
+              >
+                Редактирование
+              </button>
+              <button type="button" className="toolButton" onClick={deleteSelectedSegments}>
+                Удалить выбранные пути
+              </button>
+              <button type="button" className="toolButton" onClick={deleteSelectedVehicles}>
+                Удалить выбранные составы
+              </button>
+              <button type="button" className="toolButton" onClick={deleteSelectedAll}>
+                Удалить всё выбранное
+              </button>
+              <button type="button" className="toolButton" onClick={clearLayout}>
+                Очистить все
+              </button>
+            </div>
+          )}
+
+          {activePanel === "coupling" && (
+            <div className="tools">
+              <button type="button" className="toolButton" onClick={coupleSelectedVehicles}>
+                Сцепить выбранные
+              </button>
+              <button type="button" className="toolButton" onClick={decoupleSelectedVehicles}>
+                Расцепить выбранные
+              </button>
+            </div>
+          )}
+
+          {activePanel === "movement" && (
+            <div className="tools">
+              <button
+                type="button"
+                className={`toolButton ${mode === "move" ? "active" : ""}`}
+                onClick={() => switchMode("move")}
+              >
+                Режим движения
+              </button>
+              <button type="button" className="toolButton" onClick={startLocomotiveMovement}>
+                Старт движения
+              </button>
+              <button type="button" className="toolButton" onClick={() => stopMovement(false)}>
+                Стоп
+              </button>
+            </div>
+          )}
+
+          {activePanel === "scenario" && (
+            <div className="tools">
+              <input
+                className="toolInput"
+                value={scenarioUnitCode}
+                onChange={(event) => setScenarioUnitCode(event.target.value)}
+                placeholder="Номер объекта (л1, в1)"
+              />
+              <input
+                className="toolInput"
+                value={scenarioFromSlot}
+                onChange={(event) => setScenarioFromSlot(event.target.value)}
+                placeholder="Откуда (x.xx:y.yy)"
+              />
+              <input
+                className="toolInput"
+                value={scenarioToSlot}
+                onChange={(event) => setScenarioToSlot(event.target.value)}
+                placeholder="Куда (x.xx:y.yy)"
+              />
+              <button type="button" className="toolButton" onClick={runSimpleScenario}>
+                Выполнить сценарий
+              </button>
+            </div>
+          )}
+
+          {activePanel === "metrics" && (
+            <div className="tools">
+              <p className="counter">Путей: {segments.length}</p>
+              <p className="counter">Составов: {vehicles.length}</p>
+              <p className="counter">Сцепок: {couplings.length}</p>
+              <p className="counter">Выбрано составов: {selectedVehicleIds.length}</p>
+              <p className="counter">Локомотив: {selectedLocomotiveId ? "выбран" : "не выбран"}</p>
+              <p className="counter">Цель: {targetSlotId ? "выбрана" : "не выбрана"}</p>
+              <p className="counter">Пройдено ячеек: {movementCellsPassed}</p>
+            </div>
+          )}
         </div>
 
-        <p className="counter">Движение локомотива</p>
-        <div className="tools">
-          <button type="button" className="toolButton" onClick={startLocomotiveMovement}>
-            Старт движения
-          </button>
-          <button type="button" className="toolButton" onClick={() => stopMovement(false)}>
-            Стоп
-          </button>
-        </div>
-
-        <p className="counter">Сценарий команд</p>
-        <div className="tools">
-          <input
-            className="toolInput"
-            value={scenarioUnitCode}
-            onChange={(event) => setScenarioUnitCode(event.target.value)}
-            placeholder="Номер объекта (л1, в1)"
-          />
-          <input
-            className="toolInput"
-            value={scenarioFromSlot}
-            onChange={(event) => setScenarioFromSlot(event.target.value)}
-            placeholder="Откуда (x.xx:y.yy)"
-          />
-          <input
-            className="toolInput"
-            value={scenarioToSlot}
-            onChange={(event) => setScenarioToSlot(event.target.value)}
-            placeholder="Куда (x.xx:y.yy)"
-          />
-
-          <button type="button" className="toolButton" onClick={runSimpleScenario}>
-            Выполнить сценарий
-          </button>
-        </div>
-
-        <p className="counter">Путей: {segments.length}</p>
-        <p className="counter">Составов: {vehicles.length}</p>
-        <p className="counter">Сцепок: {couplings.length}</p>
-        <p className="counter">Выбрано составов: {selectedVehicleIds.length}</p>
-        <p className="counter">Локомотив: {selectedLocomotiveId ? "выбран" : "не выбран"}</p>
-        <p className="counter">Цель: {targetSlotId ? "выбрана" : "не выбрана"}</p>
-        <p className="counter">Пройдено ячеек: {movementCellsPassed}</p>
         <p className="counter">{movementHint || "-"}</p>
       </aside>
 
