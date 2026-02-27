@@ -114,13 +114,16 @@ export default function EditorLayout() {
   const [selectedVehicleIds, setSelectedVehicleIds] = useState([]);
   const [couplings, setCouplings] = useState([]);
   const [selectedLocomotiveId, setSelectedLocomotiveId] = useState(null);
-  const [targetSlotId, setTargetSlotId] = useState(null);
+  const [targetPathId, setTargetPathId] = useState("");
+  const [targetPathIndex, setTargetPathIndex] = useState(null);
   const [isMoving, setIsMoving] = useState(false);
   const [movementHint, setMovementHint] = useState("");
   const [movementCellsPassed, setMovementCellsPassed] = useState(0);
   const [scenarioUnitCode, setScenarioUnitCode] = useState("");
-  const [scenarioFromSlot, setScenarioFromSlot] = useState("");
-  const [scenarioToSlot, setScenarioToSlot] = useState("");
+  const [scenarioFromPathId, setScenarioFromPathId] = useState("");
+  const [scenarioFromIndex, setScenarioFromIndex] = useState("");
+  const [scenarioToPathId, setScenarioToPathId] = useState("");
+  const [scenarioToIndex, setScenarioToIndex] = useState("");
   const [scenarioSteps, setScenarioSteps] = useState([]);
 
   const viewWidth = viewport.width / zoom;
@@ -150,16 +153,22 @@ export default function EditorLayout() {
   const railSlots = useMemo(() => {
     const map = new Map();
     for (const segment of segments) {
-      for (const point of getSegmentSlots(segment, GRID_SIZE)) {
-        const id = slotId(point.x, point.y);
-        map.set(id, { id, x: point.x, y: point.y });
-      }
+      const points = getSegmentSlots(segment, GRID_SIZE);
+      points.forEach((point, index) => {
+        const id = `${segment.id}:${index}`;
+        map.set(id, { id, pathId: segment.id, index, x: point.x, y: point.y });
+      });
     }
     return [...map.values()];
   }, [segments]);
 
   const occupiedSlots = useMemo(
-    () => new Set(vehicles.map((vehicle) => slotId(vehicle.x, vehicle.y))),
+    () =>
+      new Set(
+        vehicles
+          .filter((vehicle) => vehicle.pathId != null)
+          .map((vehicle) => `${vehicle.pathId}:${vehicle.pathIndex}`)
+      ),
     [vehicles]
   );
 
@@ -300,7 +309,8 @@ export default function EditorLayout() {
     setIsMoving(false);
     if (clearSelection) {
       setSelectedLocomotiveId(null);
-      setTargetSlotId(null);
+      setTargetPathId("");
+      setTargetPathIndex(null);
     }
   }
 
@@ -336,25 +346,33 @@ export default function EditorLayout() {
       const label = selected ? vehicleCodeById.get(selected.id) : "";
       if (label) {
         setScenarioUnitCode(label);
-        setScenarioFromSlot(slotId(selected.x, selected.y));
+        if (selected.pathId) {
+          setScenarioFromPathId(selected.pathId);
+          setScenarioFromIndex(String(selected.pathIndex ?? ""));
+        } else {
+          setScenarioFromPathId("");
+          setScenarioFromIndex("");
+        }
       }
     }
   }, [selectedLocomotiveId, vehicleById, vehicleCodeById]);
 
   useEffect(() => {
-    if (targetSlotId) {
-      setScenarioToSlot(targetSlotId);
+    if (targetPathId) {
+      setScenarioToPathId(targetPathId);
+      setScenarioToIndex(targetPathIndex == null ? "" : String(targetPathIndex));
     }
-  }, [targetSlotId]);
+  }, [targetPathId, targetPathIndex]);
 
-  async function buildMovementTimeline(locoId, goalSlotId, sourceVehicles) {
+  async function buildMovementTimeline(locoId, targetPathIdValue, targetIndexValue, sourceVehicles) {
     const response = await planMovement({
       gridSize: GRID_SIZE,
       segments,
       vehicles: sourceVehicles,
       couplings,
       selectedLocomotiveId: locoId,
-      targetSlotId: goalSlotId,
+      targetPathId: targetPathIdValue,
+      targetIndex: targetIndexValue,
     });
 
     if (!response.ok) {
@@ -395,18 +413,20 @@ export default function EditorLayout() {
     return true;
   }
 
-  async function executeMovement(locoId, goalSlotId) {
-    const timeline = await buildMovementTimeline(locoId, goalSlotId, vehicles);
+  async function executeMovement(locoId) {
+    const timeline = await buildMovementTimeline(locoId, targetPathId, targetPathIndex, vehicles);
     return playTimeline(timeline, "Движение запущено.");
   }
 
   function addScenarioStep() {
     const unitCode = scenarioUnitCode.trim().toLowerCase();
-    const fromSlot = scenarioFromSlot.trim();
-    const toSlot = scenarioToSlot.trim();
+    const fromPathId = scenarioFromPathId.trim();
+    const fromIndex = Number.parseInt(scenarioFromIndex, 10);
+    const toPathId = scenarioToPathId.trim();
+    const toIndex = Number.parseInt(scenarioToIndex, 10);
 
-    if (!unitCode || !fromSlot || !toSlot) {
-      setMovementHint("Заполни номер объекта, точку откуда и точку куда.");
+    if (!unitCode || !fromPathId || Number.isNaN(fromIndex) || !toPathId || Number.isNaN(toIndex)) {
+      setMovementHint("Заполни номер объекта, путь и индекс откуда/куда.");
       return;
     }
 
@@ -415,8 +435,10 @@ export default function EditorLayout() {
       {
         id: crypto.randomUUID(),
         unitCode,
-        fromSlot,
-        toSlot,
+        fromPathId,
+        fromIndex,
+        toPathId,
+        toIndex,
       },
     ]);
     setMovementHint("Шаг добавлен в сценарий.");
@@ -441,13 +463,22 @@ export default function EditorLayout() {
           {
             id: "single",
             unitCode: scenarioUnitCode.trim().toLowerCase(),
-            fromSlot: scenarioFromSlot.trim(),
-            toSlot: scenarioToSlot.trim(),
+            fromPathId: scenarioFromPathId.trim(),
+            fromIndex: Number.parseInt(scenarioFromIndex, 10),
+            toPathId: scenarioToPathId.trim(),
+            toIndex: Number.parseInt(scenarioToIndex, 10),
           },
         ];
 
     try {
-      if (!steps.length || !steps[0].unitCode || !steps[0].fromSlot || !steps[0].toSlot) {
+      if (
+        !steps.length ||
+        !steps[0].unitCode ||
+        !steps[0].fromPathId ||
+        Number.isNaN(steps[0].fromIndex) ||
+        !steps[0].toPathId ||
+        Number.isNaN(steps[0].toIndex)
+      ) {
         setMovementHint("Добавь хотя бы один корректный шаг сценария.");
         return;
       }
@@ -455,7 +486,8 @@ export default function EditorLayout() {
       let workingVehicles = vehicles.map((vehicle) => ({ ...vehicle }));
       const combinedTimeline = [];
       let lastLocomotiveId = null;
-      let lastTargetSlotId = null;
+      let lastTargetPathId = null;
+      let lastTargetIndex = null;
 
       for (const step of steps) {
         const codeMap = buildVehicleCodeMap(workingVehicles);
@@ -471,21 +503,42 @@ export default function EditorLayout() {
           return;
         }
 
-        const currentSlot = slotId(target.x, target.y);
-        if (currentSlot !== step.fromSlot) {
+        if (target.pathId !== step.fromPathId || Number(target.pathIndex) !== step.fromIndex) {
           setMovementHint(
-            `Локомотив ${codeMap.get(target.id) || target.id} сейчас в ${currentSlot}, а не в ${step.fromSlot}.`
+            `Локомотив ${codeMap.get(target.id) || target.id} сейчас в ${target.pathId}:${target.pathIndex}, а не в ${step.fromPathId}:${step.fromIndex}.`
           );
           return;
         }
 
-        const timeline = await buildMovementTimeline(target.id, step.toSlot, workingVehicles);
+        const timeline = await buildMovementTimeline(
+          target.id,
+          step.toPathId,
+          step.toIndex,
+          workingVehicles
+        );
         for (const frame of timeline) {
           combinedTimeline.push(frame);
           workingVehicles = applyTimelineStepToVehicles(workingVehicles, frame);
         }
+        try {
+          const resolved = await resolveVehicles({
+            gridSize: GRID_SIZE,
+            segments,
+            vehicles: workingVehicles,
+            couplings,
+            movedVehicleIds: workingVehicles.map((v) => v.id),
+            strictCouplings: true,
+          });
+          if (resolved.ok && Array.isArray(resolved.vehicles)) {
+            workingVehicles = resolved.vehicles;
+          }
+        } catch (error) {
+          setMovementHint("Не удалось обновить позиции после шага.");
+          return;
+        }
         lastLocomotiveId = target.id;
-        lastTargetSlotId = step.toSlot;
+        lastTargetPathId = step.toPathId;
+        lastTargetIndex = step.toIndex;
       }
 
       if (!combinedTimeline.length) {
@@ -496,8 +549,9 @@ export default function EditorLayout() {
       if (lastLocomotiveId) {
         setSelectedLocomotiveId(lastLocomotiveId);
       }
-      if (lastTargetSlotId) {
-        setTargetSlotId(lastTargetSlotId);
+      if (lastTargetPathId) {
+        setTargetPathId(lastTargetPathId);
+        setTargetPathIndex(lastTargetIndex);
       }
 
       playTimeline(combinedTimeline, "Сценарий движения запущен.");
@@ -768,8 +822,9 @@ export default function EditorLayout() {
 
     if (isMoveMode) {
       event.stopPropagation();
-      setTargetSlotId(slot.id);
-      setMovementHint(`Цель: (${Math.round(slot.x)}, ${Math.round(slot.y)})`);
+      setTargetPathId(slot.pathId);
+      setTargetPathIndex(slot.index);
+      setMovementHint(`Цель: ${slot.pathId}:${slot.index}`);
       return;
     }
 
@@ -782,7 +837,8 @@ export default function EditorLayout() {
     try {
       await applyLayoutAction("place_vehicle", {
         vehicleType: type,
-        targetSlotId: slot.id,
+        targetPathId: slot.pathId,
+        targetIndex: slot.index,
       });
     } catch (error) {
       setMovementHint(error.message || "Backend connection error.");
@@ -830,7 +886,7 @@ export default function EditorLayout() {
       return;
     }
     try {
-      await executeMovement(selectedLocomotiveId, targetSlotId);
+      await executeMovement(selectedLocomotiveId);
     } catch (error) {
       setMovementHint("Ошибка связи с backend.");
     }
@@ -1130,15 +1186,27 @@ export default function EditorLayout() {
               />
               <input
                 className="toolInput"
-                value={scenarioFromSlot}
-                onChange={(event) => setScenarioFromSlot(event.target.value)}
-                placeholder="Откуда (x.xx:y.yy)"
+                value={scenarioFromPathId}
+                onChange={(event) => setScenarioFromPathId(event.target.value)}
+                placeholder="Откуда путь (id)"
               />
               <input
                 className="toolInput"
-                value={scenarioToSlot}
-                onChange={(event) => setScenarioToSlot(event.target.value)}
-                placeholder="Куда (x.xx:y.yy)"
+                value={scenarioFromIndex}
+                onChange={(event) => setScenarioFromIndex(event.target.value)}
+                placeholder="Откуда индекс"
+              />
+              <input
+                className="toolInput"
+                value={scenarioToPathId}
+                onChange={(event) => setScenarioToPathId(event.target.value)}
+                placeholder="Куда путь (id)"
+              />
+              <input
+                className="toolInput"
+                value={scenarioToIndex}
+                onChange={(event) => setScenarioToIndex(event.target.value)}
+                placeholder="Куда индекс"
               />
               <button type="button" className="toolButton" onClick={addScenarioStep}>
                 Добавить шаг
@@ -1151,7 +1219,8 @@ export default function EditorLayout() {
                   {scenarioSteps.map((step, index) => (
                     <div key={step.id} className="scenarioStepRow">
                       <span className="scenarioStepText">
-                        {index + 1}. {step.unitCode}: {step.fromSlot} {"->"} {step.toSlot}
+                        {index + 1}. {step.unitCode}: {step.fromPathId}:{step.fromIndex} {"->"}{" "}
+                        {step.toPathId}:{step.toIndex}
                       </span>
                       <button
                         type="button"
@@ -1177,7 +1246,7 @@ export default function EditorLayout() {
               <p className="counter">Сцепок: {couplings.length}</p>
               <p className="counter">Выбрано составов: {selectedVehicleIds.length}</p>
               <p className="counter">Локомотив: {selectedLocomotiveId ? "выбран" : "не выбран"}</p>
-              <p className="counter">Цель: {targetSlotId ? "выбрана" : "не выбрана"}</p>
+              <p className="counter">Цель: {targetPathId ? "выбрана" : "не выбрана"}</p>
               <p className="counter">Пройдено ячеек: {movementCellsPassed}</p>
             </div>
           )}
@@ -1306,7 +1375,7 @@ export default function EditorLayout() {
                 cy={slot.y}
                 r="4.5"
                 fill={
-                  targetSlotId === slot.id
+                  targetPathId === slot.pathId && targetPathIndex === slot.index
                     ? "#22c55e"
                     : occupiedSlots.has(slot.id)
                       ? "#94a3b8"

@@ -25,11 +25,13 @@ type Segment struct {
 }
 
 type Vehicle struct {
-	ID   string  `json:"id"`
-	Type string  `json:"type"`
-	Code string  `json:"code,omitempty"`
-	X    float64 `json:"x"`
-	Y    float64 `json:"y"`
+	ID        string  `json:"id"`
+	Type      string  `json:"type"`
+	Code      string  `json:"code,omitempty"`
+	PathID    string  `json:"pathId,omitempty"`
+	PathIndex int     `json:"pathIndex,omitempty"`
+	X         float64 `json:"x"`
+	Y         float64 `json:"y"`
 }
 
 type Coupling struct {
@@ -63,13 +65,21 @@ type PlanMovementRequest struct {
 	Vehicles             []Vehicle  `json:"vehicles"`
 	Couplings            []Coupling `json:"couplings"`
 	SelectedLocomotiveID string     `json:"selectedLocomotiveId"`
-	TargetSlotID         string     `json:"targetSlotId"`
+	TargetPathID         string     `json:"targetPathId"`
+	TargetIndex          int        `json:"targetIndex"`
 }
 
 type Position struct {
 	ID string  `json:"id"`
 	X  float64 `json:"x"`
 	Y  float64 `json:"y"`
+}
+
+type PathSlot struct {
+	PathID string
+	Index  int
+	X      float64
+	Y      float64
 }
 
 type PlanMovementResponse struct {
@@ -84,7 +94,8 @@ type PlaceVehicleRequest struct {
 	Segments     []Segment `json:"segments"`
 	Vehicles     []Vehicle `json:"vehicles"`
 	VehicleType  string    `json:"vehicleType"`
-	TargetSlotID string    `json:"targetSlotId"`
+	TargetPathID string    `json:"targetPathId"`
+	TargetIndex  int       `json:"targetIndex"`
 }
 
 type PlaceVehicleResponse struct {
@@ -109,9 +120,17 @@ type ResolveVehiclesResponse struct {
 }
 
 type LayoutState struct {
-	Segments  []Segment  `json:"segments"`
-	Vehicles  []Vehicle  `json:"vehicles"`
-	Couplings []Coupling `json:"couplings"`
+	Segments  []Segment   `json:"segments"`
+	Vehicles  []Vehicle   `json:"vehicles"`
+	Couplings []Coupling  `json:"couplings"`
+	Paths     []PathState `json:"paths,omitempty"`
+}
+
+type PathState struct {
+	ID         string   `json:"id"`
+	Capacity   int      `json:"capacity"`
+	VehicleIDs []string `json:"vehicleIds,omitempty"`
+	Neighbors  []string `json:"neighbors,omitempty"`
 }
 
 type LayoutOperationRequest struct {
@@ -124,7 +143,8 @@ type LayoutOperationRequest struct {
 	IDs                []string `json:"ids,omitempty"`
 	SelectedVehicleIDs []string `json:"selectedVehicleIds,omitempty"`
 	VehicleType        string   `json:"vehicleType,omitempty"`
-	TargetSlotID       string   `json:"targetSlotId,omitempty"`
+	TargetPathID       string   `json:"targetPathId,omitempty"`
+	TargetIndex        int      `json:"targetIndex,omitempty"`
 	MovedVehicleIDs    []string `json:"movedVehicleIds,omitempty"`
 	StrictCouplings    bool     `json:"strictCouplings,omitempty"`
 }
@@ -151,7 +171,8 @@ type CommandSpec struct {
 
 type CommandPayload struct {
 	LocoID       string `json:"locoId,omitempty"`
-	TargetSlotID string `json:"targetSlotId,omitempty"`
+	TargetPathID string `json:"targetPathId,omitempty"`
+	TargetIndex  int    `json:"targetIndex,omitempty"`
 	AID          string `json:"aId,omitempty"`
 	BID          string `json:"bId,omitempty"`
 }
@@ -311,6 +332,12 @@ func validateCouplingInternal(req ValidateCouplingRequest) (ValidateCouplingResp
 		return ValidateCouplingResponse{OK: false, Message: "Select two vehicles."}, nil
 	}
 
+	pathSlots := collectPathSlots(req.Segments, req.GridSize)
+	vehicles := make([]Vehicle, 0, len(req.Vehicles))
+	for _, v := range req.Vehicles {
+		vehicles = append(vehicles, normalizeVehicleToPath(v, pathSlots))
+	}
+
 	a := req.SelectedVehicleIDs[len(req.SelectedVehicleIDs)-2]
 	b := req.SelectedVehicleIDs[len(req.SelectedVehicleIDs)-1]
 	if a == b {
@@ -318,7 +345,7 @@ func validateCouplingInternal(req ValidateCouplingRequest) (ValidateCouplingResp
 	}
 
 	vehicleByID := make(map[string]Vehicle, len(req.Vehicles))
-	for _, v := range req.Vehicles {
+	for _, v := range vehicles {
 		vehicleByID[v.ID] = v
 	}
 
@@ -351,31 +378,32 @@ func placeVehicleInternal(req PlaceVehicleRequest) (PlaceVehicleResponse, error)
 		return PlaceVehicleResponse{}, errors.New("Vehicle type must be wagon or locomotive.")
 	}
 
-	slots := collectRailSlots(req.Segments, req.GridSize)
-	slotByID := map[string]Slot{}
-	for _, slot := range slots {
-		slotByID[slot.ID] = slot
-	}
-
-	target, ok := slotByID[req.TargetSlotID]
+	pathSlots := collectPathSlots(req.Segments, req.GridSize)
+	target, ok := findPathSlot(pathSlots, req.TargetPathID, req.TargetIndex)
 	if !ok {
 		return PlaceVehicleResponse{}, errors.New("Target slot is not on rail.")
 	}
 
 	occupied := map[string]struct{}{}
 	for _, v := range req.Vehicles {
+		if v.PathID != "" {
+			occupied[pathSlotKey(v.PathID, v.PathIndex)] = struct{}{}
+			continue
+		}
 		occupied[slotID(v.X, v.Y)] = struct{}{}
 	}
-	if _, exists := occupied[target.ID]; exists {
+	if _, exists := occupied[pathSlotKey(target.PathID, target.Index)]; exists {
 		return PlaceVehicleResponse{}, errors.New("Target slot is occupied.")
 	}
 
 	vehicle := Vehicle{
-		ID:   fmt.Sprintf("%d", time.Now().UnixNano()),
-		Type: req.VehicleType,
-		Code: nextVehicleCode(req.Vehicles, req.VehicleType),
-		X:    target.X,
-		Y:    target.Y,
+		ID:        fmt.Sprintf("%d", time.Now().UnixNano()),
+		Type:      req.VehicleType,
+		Code:      nextVehicleCode(req.Vehicles, req.VehicleType),
+		PathID:    target.PathID,
+		PathIndex: target.Index,
+		X:         target.X,
+		Y:         target.Y,
 	}
 	return PlaceVehicleResponse{
 		OK:      true,
@@ -451,6 +479,7 @@ func layoutApplyHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	nextState = finalizeLayoutState(nextState, req.GridSize)
 
 	writeJSON(w, http.StatusOK, LayoutOperationResponse{
 		OK:      true,
@@ -711,8 +740,8 @@ func stepExecutionHandler(w http.ResponseWriter, r *http.Request, executionID st
 func applyCommand(state LayoutState, command CommandSpec) (LayoutState, string, error) {
 	switch command.Type {
 	case "MOVE_LOCO":
-		if command.Payload.LocoID == "" || command.Payload.TargetSlotID == "" {
-			return state, "", errors.New("MOVE_LOCO requires locoId and targetSlotId")
+		if command.Payload.LocoID == "" || command.Payload.TargetPathID == "" {
+			return state, "", errors.New("MOVE_LOCO requires locoId and targetPathId")
 		}
 		plan, err := buildMovementPlan(PlanMovementRequest{
 			GridSize:             32,
@@ -720,7 +749,8 @@ func applyCommand(state LayoutState, command CommandSpec) (LayoutState, string, 
 			Vehicles:             state.Vehicles,
 			Couplings:            state.Couplings,
 			SelectedLocomotiveID: command.Payload.LocoID,
-			TargetSlotID:         command.Payload.TargetSlotID,
+			TargetPathID:         command.Payload.TargetPathID,
+			TargetIndex:          command.Payload.TargetIndex,
 		})
 		if err != nil {
 			return state, "", err
@@ -748,7 +778,11 @@ func applyCommand(state LayoutState, command CommandSpec) (LayoutState, string, 
 				Y:    pos.Y,
 			})
 		}
-		state.Vehicles = nextVehicles
+		state.Vehicles = finalizeLayoutState(LayoutState{
+			Segments:  state.Segments,
+			Vehicles:  nextVehicles,
+			Couplings: state.Couplings,
+		}, 32).Vehicles
 		return state, "move applied", nil
 
 	case "COUPLE":
@@ -816,7 +850,7 @@ func applyLayoutOperation(req LayoutOperationRequest) (LayoutState, string, erro
 			return state, "", errors.New("segment length must be non-zero")
 		}
 		state.Segments = append(state.Segments, Segment{
-			ID:   fmt.Sprintf("%d", time.Now().UnixNano()),
+			ID:   nextPathID(state.Segments),
 			From: *req.From,
 			To:   *req.To,
 		})
@@ -896,7 +930,8 @@ func applyLayoutOperation(req LayoutOperationRequest) (LayoutState, string, erro
 			Segments:     state.Segments,
 			Vehicles:     state.Vehicles,
 			VehicleType:  req.VehicleType,
-			TargetSlotID: req.TargetSlotID,
+			TargetPathID: req.TargetPathID,
+			TargetIndex:  req.TargetIndex,
 		})
 		if err != nil {
 			return state, "", err
@@ -971,8 +1006,8 @@ func resolveVehicles(req ResolveVehiclesRequest) ([]Vehicle, error) {
 	if len(req.Vehicles) == 0 {
 		return req.Vehicles, nil
 	}
-	slots := collectRailSlots(req.Segments, req.GridSize)
-	if len(slots) == 0 {
+	pathSlots := collectPathSlots(req.Segments, req.GridSize)
+	if len(pathSlots) == 0 {
 		return nil, errors.New("No rail slots available.")
 	}
 
@@ -991,6 +1026,10 @@ func resolveVehicles(req ResolveVehiclesRequest) ([]Vehicle, error) {
 		if _, moved := movedSet[v.ID]; moved {
 			continue
 		}
+		if v.PathID != "" {
+			blocked[pathSlotKey(v.PathID, v.PathIndex)] = struct{}{}
+			continue
+		}
 		blocked[slotID(v.X, v.Y)] = struct{}{}
 	}
 
@@ -999,43 +1038,65 @@ func resolveVehicles(req ResolveVehiclesRequest) ([]Vehicle, error) {
 
 	for _, v := range req.Vehicles {
 		if _, moved := movedSet[v.ID]; !moved {
-			next = append(next, v)
-			nextByID[v.ID] = v
+			normalized := normalizeVehicleToPath(v, pathSlots)
+			next = append(next, normalized)
+			nextByID[v.ID] = normalized
 			continue
 		}
 
-		nearest := findNearestFreeSlot(Point{X: v.X, Y: v.Y}, slots, blocked)
+		nearest := findNearestPathSlot(Point{X: v.X, Y: v.Y}, pathSlots, blocked)
 		if nearest == nil {
 			return nil, errors.New("Cannot place moved vehicles on free rail slots.")
 		}
 
 		resolved := Vehicle{
-			ID:   v.ID,
-			Type: v.Type,
-			Code: v.Code,
-			X:    nearest.X,
-			Y:    nearest.Y,
+			ID:        v.ID,
+			Type:      v.Type,
+			Code:      v.Code,
+			PathID:    nearest.PathID,
+			PathIndex: nearest.Index,
+			X:         nearest.X,
+			Y:         nearest.Y,
 		}
 		next = append(next, resolved)
 		nextByID[v.ID] = resolved
-		blocked[nearest.ID] = struct{}{}
+		blocked[pathSlotKey(nearest.PathID, nearest.Index)] = struct{}{}
 	}
 
 	if req.StrictCouplings {
-		adjacentPairs := buildAdjacentSlotPairs(req.Segments, req.GridSize)
+		pathAdjPairs := buildAdjacentPathSlotPairs(req.Segments, req.GridSize)
 		for _, c := range req.Couplings {
 			va, okA := nextByID[c.A]
 			vb, okB := nextByID[c.B]
 			if !okA || !okB {
 				continue
 			}
-			if _, ok := adjacentPairs[pairKey(slotID(va.X, va.Y), slotID(vb.X, vb.Y))]; !ok {
+			if _, ok := pathAdjPairs[pathSlotPairKey(va.PathID, va.PathIndex, vb.PathID, vb.PathIndex)]; !ok {
 				return nil, errors.New("Coupled vehicles must stay on adjacent slots.")
 			}
 		}
 	}
 
 	return next, nil
+}
+
+func normalizeVehicleToPath(vehicle Vehicle, pathSlots []PathSlot) Vehicle {
+	if vehicle.PathID != "" && vehicle.PathIndex >= 0 {
+		if slot, ok := findPathSlot(pathSlots, vehicle.PathID, vehicle.PathIndex); ok {
+			vehicle.X = slot.X
+			vehicle.Y = slot.Y
+			return vehicle
+		}
+	}
+	nearest := findNearestPathSlot(Point{X: vehicle.X, Y: vehicle.Y}, pathSlots, nil)
+	if nearest == nil {
+		return vehicle
+	}
+	vehicle.PathID = nearest.PathID
+	vehicle.PathIndex = nearest.Index
+	vehicle.X = nearest.X
+	vehicle.Y = nearest.Y
+	return vehicle
 }
 
 func planMovementHandler(w http.ResponseWriter, r *http.Request) {
@@ -1077,13 +1138,26 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 	if req.SelectedLocomotiveID == "" {
 		return PlanMovementResponse{}, errors.New("Select locomotive.")
 	}
-	if req.TargetSlotID == "" {
-		return PlanMovementResponse{}, errors.New("Select target slot.")
+	if strings.TrimSpace(req.TargetPathID) == "" {
+		return PlanMovementResponse{}, errors.New("Select target path.")
 	}
 
+	pathSlots := collectPathSlots(req.Segments, req.GridSize)
+	if len(pathSlots) == 0 {
+		return PlanMovementResponse{}, errors.New("No rail slots available.")
+	}
+	targetSlot, ok := findPathSlot(pathSlots, req.TargetPathID, req.TargetIndex)
+	if !ok {
+		return PlanMovementResponse{}, errors.New("Target slot is unavailable.")
+	}
+	targetSlotID := slotID(targetSlot.X, targetSlot.Y)
+
+	normalizedVehicles := make([]Vehicle, 0, len(req.Vehicles))
 	vehicleByID := make(map[string]Vehicle, len(req.Vehicles))
 	for _, v := range req.Vehicles {
-		vehicleByID[v.ID] = v
+		nv := normalizeVehicleToPath(v, pathSlots)
+		normalizedVehicles = append(normalizedVehicles, nv)
+		vehicleByID[nv.ID] = nv
 	}
 
 	locomotive, exists := vehicleByID[req.SelectedLocomotiveID]
@@ -1092,19 +1166,13 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 	}
 
 	slots := collectRailSlots(req.Segments, req.GridSize)
-	if len(slots) == 0 {
-		return PlanMovementResponse{}, errors.New("No rail slots available.")
-	}
 	slotByID := make(map[string]Slot, len(slots))
 	for _, s := range slots {
 		slotByID[s.ID] = s
 	}
-	if _, ok := slotByID[req.TargetSlotID]; !ok {
-		return PlanMovementResponse{}, errors.New("Target slot is unavailable.")
-	}
 
 	slotAdj := buildSlotAdjacency(req.Segments, req.GridSize)
-	trainOrder, err := buildTrainOrder(req.SelectedLocomotiveID, req.Vehicles, req.Couplings)
+	trainOrder, err := buildTrainOrder(req.SelectedLocomotiveID, normalizedVehicles, req.Couplings)
 	if err != nil {
 		return PlanMovementResponse{}, err
 	}
@@ -1136,7 +1204,7 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 	}
 
 	locoStart := currentSlotByVehicleID[req.SelectedLocomotiveID]
-	path := dijkstraPath(slotAdj, locoStart, req.TargetSlotID)
+	path := dijkstraPath(slotAdj, locoStart, targetSlotID)
 	if len(path) < 2 {
 		return PlanMovementResponse{}, errors.New("Path was not found.")
 	}
@@ -1161,7 +1229,7 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 	for _, id := range trainOrder {
 		trainSet[id] = struct{}{}
 	}
-	for _, v := range req.Vehicles {
+	for _, v := range normalizedVehicles {
 		if _, ok := trainSet[v.ID]; ok {
 			continue
 		}
@@ -1482,6 +1550,51 @@ func collectRailSlots(segments []Segment, gridSize float64) []Slot {
 	return result
 }
 
+func collectPathSlots(segments []Segment, gridSize float64) []PathSlot {
+	slots := make([]PathSlot, 0)
+	for _, segment := range segments {
+		points := getSegmentSlots(segment, gridSize)
+		for i, p := range points {
+			slots = append(slots, PathSlot{
+				PathID: segment.ID,
+				Index:  i,
+				X:      p.X,
+				Y:      p.Y,
+			})
+		}
+	}
+	return slots
+}
+
+func findPathSlot(slots []PathSlot, pathID string, index int) (PathSlot, bool) {
+	for _, slot := range slots {
+		if slot.PathID == pathID && slot.Index == index {
+			return slot, true
+		}
+	}
+	return PathSlot{}, false
+}
+
+func findNearestPathSlot(point Point, slots []PathSlot, blocked map[string]struct{}) *PathSlot {
+	var best *PathSlot
+	bestDist := math.Inf(1)
+	for i := range slots {
+		if blocked != nil {
+			if _, used := blocked[pathSlotKey(slots[i].PathID, slots[i].Index)]; used {
+				continue
+			}
+		}
+		dx := point.X - slots[i].X
+		dy := point.Y - slots[i].Y
+		dist := dx*dx + dy*dy
+		if dist < bestDist {
+			bestDist = dist
+			best = &slots[i]
+		}
+	}
+	return best
+}
+
 func buildSlotAdjacency(segments []Segment, gridSize float64) map[string]map[string]struct{} {
 	adj := map[string]map[string]struct{}{}
 	for _, segment := range segments {
@@ -1513,6 +1626,149 @@ func buildAdjacentSlotPairs(segments []Segment, gridSize float64) map[string]str
 		}
 	}
 	return pairs
+}
+
+func buildAdjacentPathSlotPairs(segments []Segment, gridSize float64) map[string]struct{} {
+	pairs := map[string]struct{}{}
+	for _, segment := range segments {
+		points := getSegmentSlots(segment, gridSize)
+		for i := 0; i < len(points)-1; i++ {
+			pairs[pathSlotPairKey(segment.ID, i, segment.ID, i+1)] = struct{}{}
+		}
+	}
+	return pairs
+}
+
+func finalizeLayoutState(state LayoutState, gridSize float64) LayoutState {
+	state = normalizeSegmentIDs(state)
+	pathSlots := collectPathSlots(state.Segments, gridSize)
+	normalized := make([]Vehicle, 0, len(state.Vehicles))
+	for _, v := range state.Vehicles {
+		normalized = append(normalized, normalizeVehicleToPath(v, pathSlots))
+	}
+	state.Vehicles = normalized
+	state.Paths = buildPathStates(state.Segments, state.Vehicles, gridSize)
+	return state
+}
+
+func buildPathStates(segments []Segment, vehicles []Vehicle, gridSize float64) []PathState {
+	vehicleByPath := map[string][]string{}
+	for _, v := range vehicles {
+		if v.PathID == "" {
+			continue
+		}
+		vehicleByPath[v.PathID] = append(vehicleByPath[v.PathID], v.ID)
+	}
+
+	neighbors := buildPathAdjacency(segments)
+	states := make([]PathState, 0, len(segments))
+	for _, segment := range segments {
+		capacity := len(getSegmentSlots(segment, gridSize))
+		states = append(states, PathState{
+			ID:         segment.ID,
+			Capacity:   capacity,
+			VehicleIDs: vehicleByPath[segment.ID],
+			Neighbors:  neighbors[segment.ID],
+		})
+	}
+	return states
+}
+
+func buildPathAdjacency(segments []Segment) map[string][]string {
+	endpointMap := map[string][]string{}
+	for _, segment := range segments {
+		fromKey := slotID(segment.From.X, segment.From.Y)
+		toKey := slotID(segment.To.X, segment.To.Y)
+		endpointMap[fromKey] = append(endpointMap[fromKey], segment.ID)
+		endpointMap[toKey] = append(endpointMap[toKey], segment.ID)
+	}
+
+	adj := map[string]map[string]struct{}{}
+	for _, ids := range endpointMap {
+		for i := 0; i < len(ids); i++ {
+			for j := i + 1; j < len(ids); j++ {
+				a := ids[i]
+				b := ids[j]
+				if _, ok := adj[a]; !ok {
+					adj[a] = map[string]struct{}{}
+				}
+				if _, ok := adj[b]; !ok {
+					adj[b] = map[string]struct{}{}
+				}
+				adj[a][b] = struct{}{}
+				adj[b][a] = struct{}{}
+			}
+		}
+	}
+
+	result := map[string][]string{}
+	for id, neighbors := range adj {
+		for neighbor := range neighbors {
+			result[id] = append(result[id], neighbor)
+		}
+	}
+	return result
+}
+
+func normalizeSegmentIDs(state LayoutState) LayoutState {
+	if len(state.Segments) == 0 {
+		return state
+	}
+
+	needsNormalization := false
+	for _, segment := range state.Segments {
+		if !isSimpleNumericID(segment.ID) {
+			needsNormalization = true
+			break
+		}
+	}
+	if !needsNormalization {
+		return state
+	}
+
+	idMap := map[string]string{}
+	for i, segment := range state.Segments {
+		newID := fmt.Sprintf("%d", i+1)
+		idMap[segment.ID] = newID
+		state.Segments[i].ID = newID
+	}
+
+	for i, vehicle := range state.Vehicles {
+		if vehicle.PathID == "" {
+			continue
+		}
+		if newID, ok := idMap[vehicle.PathID]; ok {
+			state.Vehicles[i].PathID = newID
+		}
+	}
+
+	return state
+}
+
+func isSimpleNumericID(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, ch := range value {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func nextPathID(segments []Segment) string {
+	maxID := 0
+	for _, segment := range segments {
+		if !isSimpleNumericID(segment.ID) {
+			continue
+		}
+		var value int
+		if _, err := fmt.Sscanf(segment.ID, "%d", &value); err == nil && value > maxID {
+			maxID = value
+		}
+	}
+	return fmt.Sprintf("%d", maxID+1)
 }
 
 func getSegmentSlots(segment Segment, step float64) []Point {
@@ -1609,6 +1865,19 @@ func nextVehicleCode(vehicles []Vehicle, vehicleType string) string {
 
 func slotID(x, y float64) string {
 	return fmt.Sprintf("%.2f:%.2f", x, y)
+}
+
+func pathSlotKey(pathID string, index int) string {
+	return fmt.Sprintf("%s:%d", pathID, index)
+}
+
+func pathSlotPairKey(pathA string, indexA int, pathB string, indexB int) string {
+	keyA := pathSlotKey(pathA, indexA)
+	keyB := pathSlotKey(pathB, indexB)
+	if keyA < keyB {
+		return keyA + "|" + keyB
+	}
+	return keyB + "|" + keyA
 }
 
 func pairKey(a, b string) string {
