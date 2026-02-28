@@ -1,4 +1,4 @@
-package main
+﻿package main
 
 import (
 	"encoding/json"
@@ -28,9 +28,9 @@ func reverseStrings(items []string) []string {
 }
 
 func nextVehicleCode(vehicles []Vehicle, vehicleType string) string {
-	prefix := "РІ"
+	prefix := "\u0432"
 	if vehicleType == "locomotive" {
-		prefix = "Р»"
+		prefix = "\u043b"
 	}
 
 	maxNumber := 0
@@ -153,3 +153,4 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
 }
+

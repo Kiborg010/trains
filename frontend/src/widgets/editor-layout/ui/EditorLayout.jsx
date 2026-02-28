@@ -56,15 +56,62 @@ function hasVehiclePositionChanges(current, next) {
   return false;
 }
 
+function normalizeUnitCode(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) {
+    return "";
+  }
+
+  const first = raw[0];
+  const normalizedPrefix =
+    first === "l" ? "л" : first === "v" ? "в" : first;
+  if (normalizedPrefix !== "л" && normalizedPrefix !== "в") {
+    return "";
+  }
+
+  const digits = raw.slice(1).replace(/[^\d]/g, "");
+  if (!digits) {
+    return "";
+  }
+
+  return `${normalizedPrefix}${digits}`;
+}
+
 function buildVehicleCodeMap(vehicles) {
+  const map = new Map();
+
   let locoCounter = 0;
   let wagonCounter = 0;
-  const map = new Map();
+
   for (const vehicle of vehicles) {
-    if (vehicle.code) {
-      map.set(vehicle.id, vehicle.code);
+    const normalizedCode = normalizeUnitCode(vehicle.code);
+    if (!normalizedCode) {
       continue;
     }
+
+    if (vehicle.type === "locomotive" && normalizedCode.startsWith("л")) {
+      map.set(vehicle.id, normalizedCode);
+      const n = Number.parseInt(normalizedCode.slice(1), 10);
+      if (!Number.isNaN(n)) {
+        locoCounter = Math.max(locoCounter, n);
+      }
+      continue;
+    }
+
+    if (vehicle.type === "wagon" && normalizedCode.startsWith("в")) {
+      map.set(vehicle.id, normalizedCode);
+      const n = Number.parseInt(normalizedCode.slice(1), 10);
+      if (!Number.isNaN(n)) {
+        wagonCounter = Math.max(wagonCounter, n);
+      }
+    }
+  }
+
+  for (const vehicle of vehicles) {
+    if (map.has(vehicle.id)) {
+      continue;
+    }
+
     if (vehicle.type === "locomotive") {
       locoCounter += 1;
       map.set(vehicle.id, `л${locoCounter}`);
@@ -418,8 +465,8 @@ export default function EditorLayout() {
     return playTimeline(timeline, "Движение запущено.");
   }
 
-  function addScenarioStep() {
-    const unitCode = scenarioUnitCode.trim().toLowerCase();
+function addScenarioStep() {
+    const unitCode = normalizeUnitCode(scenarioUnitCode);
     const fromPathId = scenarioFromPathId.trim();
     const fromIndex = Number.parseInt(scenarioFromIndex, 10);
     const toPathId = scenarioToPathId.trim();
@@ -462,7 +509,7 @@ export default function EditorLayout() {
       : [
           {
             id: "single",
-            unitCode: scenarioUnitCode.trim().toLowerCase(),
+            unitCode: normalizeUnitCode(scenarioUnitCode),
             fromPathId: scenarioFromPathId.trim(),
             fromIndex: Number.parseInt(scenarioFromIndex, 10),
             toPathId: scenarioToPathId.trim(),
@@ -490,16 +537,21 @@ export default function EditorLayout() {
       let lastTargetIndex = null;
 
       for (const step of steps) {
+        const stepCode = normalizeUnitCode(step.unitCode);
+        if (!stepCode) {
+          setMovementHint(`Некорректный номер объекта в шаге: ${step.unitCode}.`);
+          return;
+        }
         const codeMap = buildVehicleCodeMap(workingVehicles);
         const target = workingVehicles.find(
-          (vehicle) => (codeMap.get(vehicle.id) || "").toLowerCase() === step.unitCode
+          (vehicle) => normalizeUnitCode(codeMap.get(vehicle.id)) === stepCode
         );
         if (!target) {
-          setMovementHint(`Объект с номером ${step.unitCode} не найден.`);
+          setMovementHint(`Объект с номером ${stepCode} не найден.`);
           return;
         }
         if (target.type !== "locomotive") {
-          setMovementHint(`Объект ${step.unitCode} не локомотив.`);
+          setMovementHint(`Объект ${stepCode} не локомотив.`);
           return;
         }
 
