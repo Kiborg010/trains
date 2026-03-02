@@ -1,7 +1,8 @@
-﻿package main
+package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -154,3 +155,10 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
+func userIDFromContext(r *http.Request) (int, error) {
+	userID, ok := r.Context().Value("userID").(int)
+	if !ok || userID <= 0 {
+		return 0, errors.New("unauthorized")
+	}
+	return userID, nil
+}

@@ -1,12 +1,61 @@
 const API_BASE_URL = "http://localhost:8080/api";
 
+function getAuthHeaders() {
+  const token = localStorage.getItem("authToken");
+  const headers = {
+    "Content-Type": "application/json",
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 async function postJSON(path, body) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: getAuthHeaders(),
     body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function putJSON(path, body) {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "PUT",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function deleteJSON(path) {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function getJSON(path) {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "GET",
+    headers: getAuthHeaders(),
   });
 
   if (!response.ok) {
@@ -35,3 +84,56 @@ export async function resolveVehicles(payload) {
 export async function applyLayoutOperation(payload) {
   return postJSON("/layout/apply", payload);
 }
+
+export async function getCurrentUser() {
+  return getJSON("/auth/me");
+}
+
+export async function saveLayout(payload) {
+  return postJSON("/layouts", payload);
+}
+
+export async function listLayouts() {
+  return getJSON("/layouts");
+}
+
+export async function getLayout(layoutId) {
+  return getJSON(`/layouts/${layoutId}`);
+}
+
+export async function updateLayout(layoutId, payload) {
+  return putJSON(`/layouts/${layoutId}`, payload);
+}
+
+export async function deleteLayout(layoutId) {
+  return deleteJSON(`/layouts/${layoutId}`);
+}
+
+export async function createScenario(payload) {
+  return postJSON("/scenarios", payload);
+}
+
+export async function listScenarios() {
+  return getJSON("/scenarios");
+}
+
+export async function getScenario(scenarioId) {
+  return getJSON(`/scenarios/${scenarioId}`);
+}
+
+export async function addScenarioCommand(scenarioId, payload) {
+  return postJSON(`/scenarios/${scenarioId}/commands`, payload);
+}
+
+export async function runScenario(scenarioId) {
+  return postJSON(`/scenarios/${scenarioId}/run`, {});
+}
+
+export async function getExecution(executionId) {
+  return getJSON(`/executions/${executionId}`);
+}
+
+export async function stepExecution(executionId) {
+  return postJSON(`/executions/${executionId}/step`, {});
+}
+

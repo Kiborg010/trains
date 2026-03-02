@@ -143,10 +143,13 @@ type LayoutOperationResponse struct {
 }
 
 type Scenario struct {
-	ID           string        `json:"id"`
-	Name         string        `json:"name"`
-	InitialState LayoutState   `json:"initialState"`
-	Commands     []CommandSpec `json:"commands"`
+	ID           string                 `json:"id"`
+	Name         string                 `json:"name"`
+	UserID       int                    `json:"userId,omitempty"`
+	LayoutID     int                    `json:"layoutId,omitempty"`
+	InitialState LayoutState            `json:"initialState"`
+	Commands     []CommandSpec          `json:"commands"`
+	CommandsMap  map[string]CommandSpec `json:"-"`
 }
 
 type CommandSpec struct {
@@ -167,6 +170,7 @@ type CommandPayload struct {
 type Execution struct {
 	ID             string      `json:"id"`
 	ScenarioID     string      `json:"scenarioId"`
+	UserID         int         `json:"userId,omitempty"`
 	Status         string      `json:"status"`
 	CurrentCommand int         `json:"currentCommand"`
 	State          LayoutState `json:"state"`
@@ -205,4 +209,27 @@ type StepExecutionResponse struct {
 	OK        bool      `json:"ok"`
 	Message   string    `json:"message,omitempty"`
 	Execution Execution `json:"execution"`
+}
+
+type SaveLayoutRequest struct {
+	Name  string      `json:"name"`
+	State LayoutState `json:"state"`
+}
+
+type SaveLayoutResponse struct {
+	OK      bool    `json:"ok"`
+	Message string  `json:"message,omitempty"`
+	Layout  *Layout `json:"layout,omitempty"`
+}
+
+type ListLayoutsResponse struct {
+	OK      bool     `json:"ok"`
+	Message string   `json:"message,omitempty"`
+	Layouts []Layout `json:"layouts,omitempty"`
+}
+
+type ListScenariosResponse struct {
+	OK        bool       `json:"ok"`
+	Message   string     `json:"message,omitempty"`
+	Scenarios []Scenario `json:"scenarios,omitempty"`
 }

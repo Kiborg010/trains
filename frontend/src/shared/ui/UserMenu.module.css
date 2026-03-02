@@ -1,0 +1,41 @@
+.menu {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 10px 20px;
+  background: #f5f5f5;
+  border-bottom: 1px solid #ddd;
+  justify-content: flex-end;
+}
+
+.userInfo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.email {
+  color: #555;
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.logoutBtn {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: transform 0.2s;
+}
+
+.logoutBtn:hover {
+  transform: translateY(-2px);
+}
+
+.logoutBtn:active {
+  transform: translateY(0);
+}

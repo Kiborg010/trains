@@ -13,6 +13,29 @@ func scenariosHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+
+	userID, err := userIDFromContext(r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if r.Method == http.MethodGet {
+		scenarios, err := appStore.ListScenarios(userID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, ListScenariosResponse{
+				OK:      false,
+				Message: "failed to list scenarios",
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, ListScenariosResponse{
+			OK:        true,
+			Scenarios: scenarios,
+		})
+		return
+	}
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -31,26 +54,39 @@ func scenariosHandler(w http.ResponseWriter, r *http.Request) {
 		req.Name = "Scenario"
 	}
 
-	scenario := Scenario{
-		ID:           fmt.Sprintf("sc-%d", time.Now().UnixNano()),
-		Name:         req.Name,
-		InitialState: req.InitialState,
-		Commands:     []CommandSpec{},
+	id, err := appStore.SaveScenario(userID, nil, req.Name, req.InitialState, []CommandSpec{})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, CreateScenarioResponse{
+			OK:      false,
+			Message: "failed to create scenario",
+		})
+		return
 	}
 
-	scenarioStore.mu.Lock()
-	scenarioStore.scenarios[scenario.ID] = scenario
-	scenarioStore.mu.Unlock()
+	scenario, err := appStore.GetScenario(id)
+	if err != nil || scenario.UserID != userID {
+		writeJSON(w, http.StatusInternalServerError, CreateScenarioResponse{
+			OK:      false,
+			Message: "failed to load scenario",
+		})
+		return
+	}
 
 	writeJSON(w, http.StatusOK, CreateScenarioResponse{
 		OK:       true,
-		Scenario: scenario,
+		Scenario: *scenario,
 	})
 }
 
 func scenarioByIDHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	userID, err := userIDFromContext(r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -64,10 +100,8 @@ func scenarioByIDHandler(w http.ResponseWriter, r *http.Request) {
 	scenarioID := parts[0]
 
 	if len(parts) == 1 && r.Method == http.MethodGet {
-		scenarioStore.mu.Lock()
-		scenario, ok := scenarioStore.scenarios[scenarioID]
-		scenarioStore.mu.Unlock()
-		if !ok {
+		scenario, err := appStore.GetScenario(scenarioID)
+		if err != nil || scenario.UserID != userID {
 			http.Error(w, "scenario not found", http.StatusNotFound)
 			return
 		}
@@ -76,19 +110,19 @@ func scenarioByIDHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(parts) == 2 && parts[1] == "commands" && r.Method == http.MethodPost {
-		addCommandHandler(w, r, scenarioID)
+		addCommandHandler(w, r, userID, scenarioID)
 		return
 	}
 
 	if len(parts) == 2 && parts[1] == "run" && r.Method == http.MethodPost {
-		runScenarioHandler(w, r, scenarioID)
+		runScenarioHandler(w, r, userID, scenarioID)
 		return
 	}
 
 	http.Error(w, "not found", http.StatusNotFound)
 }
 
-func addCommandHandler(w http.ResponseWriter, r *http.Request, scenarioID string) {
+func addCommandHandler(w http.ResponseWriter, r *http.Request, userID int, scenarioID string) {
 	var req AddCommandRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, AddCommandResponse{
@@ -107,11 +141,8 @@ func addCommandHandler(w http.ResponseWriter, r *http.Request, scenarioID string
 		return
 	}
 
-	scenarioStore.mu.Lock()
-	defer scenarioStore.mu.Unlock()
-
-	scenario, ok := scenarioStore.scenarios[scenarioID]
-	if !ok {
+	scenario, err := appStore.GetScenario(scenarioID)
+	if err != nil || scenario.UserID != userID {
 		http.Error(w, "scenario not found", http.StatusNotFound)
 		return
 	}
@@ -122,8 +153,16 @@ func addCommandHandler(w http.ResponseWriter, r *http.Request, scenarioID string
 		Type:    req.Type,
 		Payload: req.Payload,
 	}
-	scenario.Commands = append(scenario.Commands, command)
-	scenarioStore.scenarios[scenarioID] = scenario
+
+	nextCommands := append([]CommandSpec{}, scenario.Commands...)
+	nextCommands = append(nextCommands, command)
+	if err := appStore.UpdateScenarioCommands(scenarioID, userID, nextCommands); err != nil {
+		writeJSON(w, http.StatusInternalServerError, AddCommandResponse{
+			OK:      false,
+			Message: "failed to add command",
+		})
+		return
+	}
 
 	writeJSON(w, http.StatusOK, AddCommandResponse{
 		OK:      true,
@@ -131,35 +170,46 @@ func addCommandHandler(w http.ResponseWriter, r *http.Request, scenarioID string
 	})
 }
 
-func runScenarioHandler(w http.ResponseWriter, r *http.Request, scenarioID string) {
-	scenarioStore.mu.Lock()
-	defer scenarioStore.mu.Unlock()
-
-	scenario, ok := scenarioStore.scenarios[scenarioID]
-	if !ok {
+func runScenarioHandler(w http.ResponseWriter, r *http.Request, userID int, scenarioID string) {
+	scenario, err := appStore.GetScenario(scenarioID)
+	if err != nil || scenario.UserID != userID {
 		http.Error(w, "scenario not found", http.StatusNotFound)
 		return
 	}
 
-	execution := Execution{
-		ID:             fmt.Sprintf("ex-%d", time.Now().UnixNano()),
-		ScenarioID:     scenarioID,
-		Status:         "running",
-		CurrentCommand: 0,
-		State:          cloneLayoutState(scenario.InitialState),
-		Log:            []string{"execution created"},
+	executionID, err := appStore.SaveExecution(userID, scenarioID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, RunScenarioResponse{
+			OK:      false,
+			Message: "failed to start execution",
+		})
+		return
 	}
-	scenarioStore.executions[execution.ID] = execution
+
+	execution, err := appStore.GetExecution(executionID, userID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, RunScenarioResponse{
+			OK:      false,
+			Message: "failed to load execution",
+		})
+		return
+	}
 
 	writeJSON(w, http.StatusOK, RunScenarioResponse{
 		OK:        true,
-		Execution: execution,
+		Execution: *execution,
 	})
 }
 
 func executionByIDHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	userID, err := userIDFromContext(r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -173,10 +223,8 @@ func executionByIDHandler(w http.ResponseWriter, r *http.Request) {
 	executionID := parts[0]
 
 	if len(parts) == 1 && r.Method == http.MethodGet {
-		scenarioStore.mu.Lock()
-		execution, ok := scenarioStore.executions[executionID]
-		scenarioStore.mu.Unlock()
-		if !ok {
+		execution, err := appStore.GetExecution(executionID, userID)
+		if err != nil {
 			http.Error(w, "execution not found", http.StatusNotFound)
 			return
 		}
@@ -185,19 +233,16 @@ func executionByIDHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(parts) == 2 && parts[1] == "step" && r.Method == http.MethodPost {
-		stepExecutionHandler(w, r, executionID)
+		stepExecutionHandler(w, r, userID, executionID)
 		return
 	}
 
 	http.Error(w, "not found", http.StatusNotFound)
 }
 
-func stepExecutionHandler(w http.ResponseWriter, r *http.Request, executionID string) {
-	scenarioStore.mu.Lock()
-	defer scenarioStore.mu.Unlock()
-
-	execution, ok := scenarioStore.executions[executionID]
-	if !ok {
+func stepExecutionHandler(w http.ResponseWriter, r *http.Request, userID int, executionID string) {
+	execution, err := appStore.GetExecution(executionID, userID)
+	if err != nil {
 		http.Error(w, "execution not found", http.StatusNotFound)
 		return
 	}
@@ -205,24 +250,24 @@ func stepExecutionHandler(w http.ResponseWriter, r *http.Request, executionID st
 		writeJSON(w, http.StatusOK, StepExecutionResponse{
 			OK:        false,
 			Message:   "execution is not running",
-			Execution: execution,
+			Execution: *execution,
 		})
 		return
 	}
 
-	scenario, ok := scenarioStore.scenarios[execution.ScenarioID]
-	if !ok {
+	scenario, err := appStore.GetScenario(execution.ScenarioID)
+	if err != nil || scenario.UserID != userID {
 		http.Error(w, "scenario not found", http.StatusNotFound)
 		return
 	}
 	if execution.CurrentCommand >= len(scenario.Commands) {
 		execution.Status = "completed"
 		execution.Log = append(execution.Log, "completed")
-		scenarioStore.executions[executionID] = execution
+		_ = appStore.UpdateExecution(executionID, userID, *execution)
 		writeJSON(w, http.StatusOK, StepExecutionResponse{
 			OK:        true,
 			Message:   "execution completed",
-			Execution: execution,
+			Execution: *execution,
 		})
 		return
 	}
@@ -232,11 +277,11 @@ func stepExecutionHandler(w http.ResponseWriter, r *http.Request, executionID st
 	if err != nil {
 		execution.Status = "failed"
 		execution.Log = append(execution.Log, fmt.Sprintf("command %s failed: %s", command.Type, err.Error()))
-		scenarioStore.executions[executionID] = execution
+		_ = appStore.UpdateExecution(executionID, userID, *execution)
 		writeJSON(w, http.StatusOK, StepExecutionResponse{
 			OK:        false,
 			Message:   err.Error(),
-			Execution: execution,
+			Execution: *execution,
 		})
 		return
 	}
@@ -249,10 +294,18 @@ func stepExecutionHandler(w http.ResponseWriter, r *http.Request, executionID st
 		execution.Log = append(execution.Log, "completed")
 	}
 
-	scenarioStore.executions[executionID] = execution
+	if err := appStore.UpdateExecution(executionID, userID, *execution); err != nil {
+		writeJSON(w, http.StatusInternalServerError, StepExecutionResponse{
+			OK:        false,
+			Message:   "failed to persist execution state",
+			Execution: *execution,
+		})
+		return
+	}
+
 	writeJSON(w, http.StatusOK, StepExecutionResponse{
 		OK:        true,
 		Message:   "step applied",
-		Execution: execution,
+		Execution: *execution,
 	})
 }
