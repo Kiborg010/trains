@@ -1,39 +1,47 @@
 .menu {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  padding: 10px 20px;
-  background: #f5f5f5;
-  border-bottom: 1px solid #ddd;
-  justify-content: flex-end;
-}
+  position: absolute;
+  top: 12px;
+  right: 16px;
 
-.userInfo {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.email {
-  color: #555;
-  font-weight: 500;
+.avatar {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+
+  border-radius: 50%;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: #2563eb;
+  color: white;
+
+  font-weight: 700;
   font-size: 14px;
+
+  flex-shrink: 0;
 }
 
 .logoutBtn {
-  padding: 8px 16px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
+  padding: 4px 10px;
   font-size: 14px;
-  font-weight: 600;
-  transition: transform 0.2s;
+
+  border: none;
+  border-radius: 6px;
+  background: #ef4444;
+  color: white;
+
+  cursor: pointer;
 }
 
 .logoutBtn:hover {
-  transform: translateY(-2px);
+  background: #dc2626;
 }
 
 .logoutBtn:active {

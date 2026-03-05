@@ -1,0 +1,95 @@
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+}
+
+/* Верхняя панель */
+.topbar {
+  height: 56px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  background: #0b1220;            /* можешь менять */
+  color: #fff;
+}
+
+/* Блок с названием */
+.brand {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.title {
+  font-weight: 800;
+  font-size: 18px;
+}
+
+.subtitle {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+/* Вторая панель (ниже) */
+.subbar {
+  height: 44px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+
+  background: #111827;            /* чуть светлее/темнее topbar */
+  color: #fff;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+.subbarLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hint {
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+/* Контент */
+.content {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tab {
+  height: 30px;
+  padding: 0 12px;
+
+  border: 1px solid rgba(255,255,255,0.18);
+  background: transparent;
+  color: rgba(255,255,255,0.9);
+
+  border-radius: 999px;
+  cursor: pointer;
+
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tab:hover {
+  background: rgba(255,255,255,0.08);
+}
+
+.tabActive {
+  background: rgba(255,255,255,0.18);
+  border-color: rgba(255,255,255,0.28);
+  color: #fff;
+}

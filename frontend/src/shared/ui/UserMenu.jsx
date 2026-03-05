@@ -6,22 +6,22 @@ export default function UserMenu() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
+  if (!user) return null;
+
+  const letter = (user.email?.trim()?.[0] ?? "?").toUpperCase();
+
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
 
-  if (!user) {
-    return null;
-  }
-
   return (
     <div className={styles.menu}>
-      <div className={styles.userInfo}>
-        <span className={styles.email}>{user.email}</span>
+      <div className={styles.avatar} title={user.email}>
+        {letter}
       </div>
       <button onClick={handleLogout} className={styles.logoutBtn}>
-        Logout
+        Выйти
       </button>
     </div>
   );

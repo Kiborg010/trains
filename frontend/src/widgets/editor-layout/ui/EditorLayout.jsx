@@ -187,7 +187,7 @@ function buildScenarioStepsFromBackendScenario(scenario) {
   return steps;
 }
 
-export default function EditorLayout() {
+export default function EditorLayout({ activePanel, setActivePanel }) {
   const canvasRef = useRef(null);
   const canvasWrapRef = useRef(null);
   const panStateRef = useRef(null);
@@ -208,7 +208,6 @@ export default function EditorLayout() {
   const [dragState, setDragState] = useState(null);
   const [selectionBox, setSelectionBox] = useState(null);
   const [isPanning, setIsPanning] = useState(false);
-  const [activePanel, setActivePanel] = useState("maneuvers");
 
   const [vehicles, setVehicles] = useState([]);
   const [selectedVehicleIds, setSelectedVehicleIds] = useState([]);
@@ -1344,46 +1343,6 @@ function addScenarioStep() {
   return (
     <div className="layout">
       <aside className="sidebar">
-        <h1 className="title">Trains Lab</h1>
-        <p className="subtitle">Локомотивные маневры</p>
-        <div className="tabs">
-          <button
-            type="button"
-            className={`tabButton ${activePanel === "maneuvers" ? "active" : ""}`}
-            onClick={() => switchPanel("maneuvers")}
-          >
-            Расстановка путей и составов
-          </button>
-          <button
-            type="button"
-            className={`tabButton ${activePanel === "coupling" ? "active" : ""}`}
-            onClick={() => switchPanel("coupling")}
-          >
-            Сцепка/расцепка
-          </button>
-          <button
-            type="button"
-            className={`tabButton ${activePanel === "movement" ? "active" : ""}`}
-            onClick={() => switchPanel("movement")}
-          >
-            Движение локомотива
-          </button>
-          <button
-            type="button"
-            className={`tabButton ${activePanel === "scenario" ? "active" : ""}`}
-            onClick={() => switchPanel("scenario")}
-          >
-            Сценарий
-          </button>
-          <button
-            type="button"
-            className={`tabButton ${activePanel === "metrics" ? "active" : ""}`}
-            onClick={() => switchPanel("metrics")}
-          >
-            Подсчет
-          </button>
-        </div>
-
         <div className="panelContent">
           {activePanel === "maneuvers" && (
             <div className="tools">
