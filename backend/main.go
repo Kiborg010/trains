@@ -4,6 +4,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+
+	"github.com/joho/godotenv"
 )
 
 var (
@@ -12,6 +14,7 @@ var (
 )
 
 func main() {
+	_ = godotenv.Load()
 	// Get JWT secret from environment or use default (NOT SAFE FOR PRODUCTION)
 	jwtSecret = os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {

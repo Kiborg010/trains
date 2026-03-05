@@ -1,9 +1,18 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { GRID_SIZE, getSegmentSlots, keyOf, snap } from "../../../shared/lib/geometry.js";
 import {
+  addScenarioCommand,
   applyLayoutOperation,
+  createScenario,
+  deleteLayout,
+  getLayout,
+  getScenario,
+  listLayouts,
+  listScenarios,
   planMovement,
   resolveVehicles,
+  saveLayout,
+  updateLayout,
 } from "../../../shared/api/simulation.js";
 
 const DEFAULT_VIEWPORT_WIDTH = 1200;
@@ -134,6 +143,50 @@ function applyTimelineStepToVehicles(vehicles, step) {
   });
 }
 
+function buildScenarioStepsFromBackendScenario(scenario) {
+  if (!scenario || !Array.isArray(scenario.commands)) {
+    return [];
+  }
+
+  const steps = [];
+  const positionsByVehicleId = new Map();
+  const codeByVehicleId = buildVehicleCodeMap(scenario.initialState?.vehicles || []);
+
+  for (const vehicle of scenario.initialState?.vehicles || []) {
+    positionsByVehicleId.set(vehicle.id, {
+      pathId: vehicle.pathId || "",
+      pathIndex: Number(vehicle.pathIndex ?? 0),
+    });
+  }
+
+  for (const command of scenario.commands) {
+    if (command.type !== "MOVE_LOCO") {
+      continue;
+    }
+    const payload = command.payload || {};
+    const locoId = payload.locoId;
+    const fromPos = positionsByVehicleId.get(locoId) || { pathId: "", pathIndex: 0 };
+    const toPathId = String(payload.targetPathId || "").trim();
+    const toIndex = Number(payload.targetIndex ?? 0);
+
+    steps.push({
+      id: command.id || crypto.randomUUID(),
+      unitCode: normalizeUnitCode(codeByVehicleId.get(locoId)) || "",
+      fromPathId: fromPos.pathId,
+      fromIndex: Number(fromPos.pathIndex ?? 0),
+      toPathId,
+      toIndex,
+    });
+
+    positionsByVehicleId.set(locoId, {
+      pathId: toPathId,
+      pathIndex: toIndex,
+    });
+  }
+
+  return steps;
+}
+
 export default function EditorLayout() {
   const canvasRef = useRef(null);
   const canvasWrapRef = useRef(null);
@@ -172,6 +225,12 @@ export default function EditorLayout() {
   const [scenarioToPathId, setScenarioToPathId] = useState("");
   const [scenarioToIndex, setScenarioToIndex] = useState("");
   const [scenarioSteps, setScenarioSteps] = useState([]);
+  const [layoutName, setLayoutName] = useState("Схема 1");
+  const [savedLayouts, setSavedLayouts] = useState([]);
+  const [selectedLayoutId, setSelectedLayoutId] = useState("");
+  const [scenarioName, setScenarioName] = useState("Сценарий 1");
+  const [savedScenarios, setSavedScenarios] = useState([]);
+  const [selectedScenarioId, setSelectedScenarioId] = useState("");
 
   const viewWidth = viewport.width / zoom;
   const viewHeight = viewport.height / zoom;
@@ -333,6 +392,32 @@ export default function EditorLayout() {
     };
   }, [segments, couplings]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSavedData() {
+      try {
+        const [layoutsResp, scenariosResp] = await Promise.all([
+          listLayouts(),
+          listScenarios(),
+        ]);
+        if (!cancelled) {
+          setSavedLayouts(layoutsResp.layouts || []);
+          setSavedScenarios(scenariosResp.scenarios || []);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setMovementHint("Не удалось загрузить сохраненные схемы/сценарии.");
+        }
+      }
+    }
+
+    loadSavedData();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   function getWorldPoint(event, snapPoint = true) {
     if (!canvasRef.current) {
       return { x: 0, y: 0 };
@@ -385,6 +470,152 @@ export default function EditorLayout() {
       setMovementHint(response.message);
     }
     return response;
+  }
+
+  async function refreshSavedLayouts() {
+    const response = await listLayouts();
+    setSavedLayouts(response.layouts || []);
+  }
+
+  async function refreshSavedScenarios() {
+    const response = await listScenarios();
+    setSavedScenarios(response.scenarios || []);
+  }
+
+  async function handleSaveLayout() {
+    try {
+      const payload = {
+        name: layoutName.trim() || "Схема",
+        state: { segments, vehicles, couplings },
+      };
+
+      let response;
+      if (selectedLayoutId) {
+        response = await updateLayout(selectedLayoutId, payload);
+      } else {
+        response = await saveLayout(payload);
+      }
+
+      const saved = response.layout;
+      if (saved?.id != null) {
+        setSelectedLayoutId(String(saved.id));
+      }
+      await refreshSavedLayouts();
+      setMovementHint("Схема сохранена.");
+    } catch (error) {
+      setMovementHint(error.message || "Не удалось сохранить схему.");
+    }
+  }
+
+  async function handleLoadLayout() {
+    if (!selectedLayoutId) {
+      setMovementHint("Выбери схему для загрузки.");
+      return;
+    }
+    try {
+      const response = await getLayout(selectedLayoutId);
+      const state = response.layout?.state || {};
+      stopMovement(true);
+      setSegments(state.segments || []);
+      setVehicles(state.vehicles || []);
+      setCouplings(state.couplings || []);
+      setSelectedSegmentIds([]);
+      setSelectedVehicleIds([]);
+      setDragState(null);
+      setSelectionBox(null);
+      setMovementHint("Схема загружена.");
+    } catch (error) {
+      setMovementHint(error.message || "Не удалось загрузить схему.");
+    }
+  }
+
+  async function handleDeleteLayout() {
+    if (!selectedLayoutId) {
+      setMovementHint("Выбери схему для удаления.");
+      return;
+    }
+    try {
+      await deleteLayout(selectedLayoutId);
+      setSelectedLayoutId("");
+      await refreshSavedLayouts();
+      setMovementHint("Схема удалена.");
+    } catch (error) {
+      setMovementHint(error.message || "Не удалось удалить схему.");
+    }
+  }
+
+  async function handleSaveScenario() {
+    try {
+      if (!scenarioSteps.length) {
+        setMovementHint("Добавь шаги сценария перед сохранением.");
+        return;
+      }
+
+      const initialState = { segments, vehicles, couplings };
+      const createResp = await createScenario({
+        name: scenarioName.trim() || "Сценарий",
+        initialState,
+      });
+      if (!createResp.ok || !createResp.scenario?.id) {
+        throw new Error(createResp.message || "Не удалось создать сценарий.");
+      }
+
+      const codeMap = buildVehicleCodeMap(vehicles);
+      const idByCode = new Map();
+      for (const vehicle of vehicles) {
+        const code = normalizeUnitCode(codeMap.get(vehicle.id));
+        if (code) {
+          idByCode.set(code, vehicle.id);
+        }
+      }
+
+      for (const step of scenarioSteps) {
+        const code = normalizeUnitCode(step.unitCode);
+        const locoId = idByCode.get(code);
+        if (!locoId) {
+          throw new Error(`Локомотив ${code || step.unitCode} не найден для сохранения.`);
+        }
+
+        const commandPayload = {
+          type: "MOVE_LOCO",
+          payload: {
+            locoId,
+            targetPathId: step.toPathId,
+            targetIndex: step.toIndex,
+          },
+        };
+        await addScenarioCommand(createResp.scenario.id, commandPayload);
+      }
+
+      setSelectedScenarioId(String(createResp.scenario.id));
+      await refreshSavedScenarios();
+      setMovementHint("Сценарий сохранен.");
+    } catch (error) {
+      setMovementHint(error.message || "Не удалось сохранить сценарий.");
+    }
+  }
+
+  async function handleLoadScenario() {
+    if (!selectedScenarioId) {
+      setMovementHint("Выбери сценарий для загрузки.");
+      return;
+    }
+    try {
+      const scenario = await getScenario(selectedScenarioId);
+      setScenarioName(scenario.name || "Сценарий");
+      const loadedSteps = buildScenarioStepsFromBackendScenario(scenario);
+      setScenarioSteps(loadedSteps);
+
+      if (scenario.initialState) {
+        setSegments(scenario.initialState.segments || []);
+        setVehicles(scenario.initialState.vehicles || []);
+        setCouplings(scenario.initialState.couplings || []);
+      }
+
+      setMovementHint("Сценарий загружен.");
+    } catch (error) {
+      setMovementHint(error.message || "Не удалось загрузить сценарий.");
+    }
   }
 
   useEffect(() => {
@@ -1196,6 +1427,33 @@ function addScenarioStep() {
               <button type="button" className="toolButton" onClick={clearLayout}>
                 Очистить все
               </button>
+              <input
+                className="toolInput"
+                value={layoutName}
+                onChange={(event) => setLayoutName(event.target.value)}
+                placeholder="Название схемы"
+              />
+              <select
+                className="toolInput"
+                value={selectedLayoutId}
+                onChange={(event) => setSelectedLayoutId(event.target.value)}
+              >
+                <option value="">Выбери схему</option>
+                {savedLayouts.map((layout) => (
+                  <option key={layout.id} value={String(layout.id)}>
+                    {layout.name || `Схема ${layout.id}`}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="toolButton" onClick={handleSaveLayout}>
+                Сохранить схему
+              </button>
+              <button type="button" className="toolButton" onClick={handleLoadLayout}>
+                Загрузить схему
+              </button>
+              <button type="button" className="toolButton" onClick={handleDeleteLayout}>
+                Удалить схему
+              </button>
             </div>
           )}
 
@@ -1230,6 +1488,30 @@ function addScenarioStep() {
 
           {activePanel === "scenario" && (
             <div className="tools">
+              <input
+                className="toolInput"
+                value={scenarioName}
+                onChange={(event) => setScenarioName(event.target.value)}
+                placeholder="Название сценария"
+              />
+              <select
+                className="toolInput"
+                value={selectedScenarioId}
+                onChange={(event) => setSelectedScenarioId(event.target.value)}
+              >
+                <option value="">Выбери сценарий</option>
+                {savedScenarios.map((scenario) => (
+                  <option key={scenario.id} value={String(scenario.id)}>
+                    {scenario.name || `Сценарий ${scenario.id}`}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="toolButton" onClick={handleSaveScenario}>
+                Сохранить сценарий
+              </button>
+              <button type="button" className="toolButton" onClick={handleLoadScenario}>
+                Загрузить сценарий
+              </button>
               <input
                 className="toolInput"
                 value={scenarioUnitCode}
