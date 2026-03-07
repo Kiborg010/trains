@@ -20,6 +20,9 @@ const DEFAULT_VIEWPORT_HEIGHT = 700;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2.5;
 const ZOOM_STEP = 0.1;
+const SCENARIO_STEP_MOVE = "MOVE_LOCO";
+const SCENARIO_STEP_COUPLE = "COUPLE";
+const SCENARIO_STEP_DECOUPLE = "DECOUPLE";
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -132,6 +135,54 @@ function buildVehicleCodeMap(vehicles) {
   return map;
 }
 
+function normalizeScenarioStepType(type) {
+  const normalized = String(type || "").trim().toUpperCase();
+  if (normalized === SCENARIO_STEP_COUPLE || normalized === SCENARIO_STEP_DECOUPLE) {
+    return normalized;
+  }
+  return SCENARIO_STEP_MOVE;
+}
+
+function normalizeScenarioStep(step) {
+  const type = normalizeScenarioStepType(step?.type);
+  const payload = step?.payload && typeof step.payload === "object" ? step.payload : {};
+  const id = step?.id || crypto.randomUUID();
+
+  if (type === SCENARIO_STEP_MOVE) {
+    return {
+      id,
+      type,
+      payload: {
+        unitCode: normalizeUnitCode(payload.unitCode ?? step?.unitCode ?? ""),
+        fromPathId: String(payload.fromPathId ?? step?.fromPathId ?? "").trim(),
+        fromIndex: Number(payload.fromIndex ?? step?.fromIndex ?? Number.NaN),
+        toPathId: String(payload.toPathId ?? step?.toPathId ?? "").trim(),
+        toIndex: Number(payload.toIndex ?? step?.toIndex ?? Number.NaN),
+      },
+    };
+  }
+
+  const rawCodes = Array.isArray(payload.unitCodes) ? payload.unitCodes : [];
+  const unitCodes = rawCodes.map((value) => normalizeUnitCode(value)).filter(Boolean).slice(0, 2);
+  return {
+    id,
+    type,
+    payload: {
+      unitCodes,
+    },
+  };
+}
+
+function formatScenarioStepText(step, index) {
+  if (step.type === SCENARIO_STEP_MOVE) {
+    return `${index + 1}. ${step.payload.unitCode}: ${step.payload.fromPathId}:${step.payload.fromIndex} -> ${step.payload.toPathId}:${step.payload.toIndex}`;
+  }
+  if (step.type === SCENARIO_STEP_COUPLE) {
+    return `${index + 1}. СЦЕПКА: ${(step.payload.unitCodes || []).join(" + ")}`;
+  }
+  return `${index + 1}. РАСЦЕПКА: ${(step.payload.unitCodes || []).join(" + ")}`;
+}
+
 function applyTimelineStepToVehicles(vehicles, step) {
   const stepMap = new Map(step.map((item) => [item.id, item]));
   return vehicles.map((vehicle) => {
@@ -160,27 +211,43 @@ function buildScenarioStepsFromBackendScenario(scenario) {
   }
 
   for (const command of scenario.commands) {
-    if (command.type !== "MOVE_LOCO") {
+    const type = normalizeScenarioStepType(command.type);
+    const payload = command.payload || {};
+
+    if (type === SCENARIO_STEP_MOVE) {
+      const locoId = payload.locoId;
+      const fromPos = positionsByVehicleId.get(locoId) || { pathId: "", pathIndex: 0 };
+      const toPathId = String(payload.targetPathId || "").trim();
+      const toIndex = Number(payload.targetIndex ?? 0);
+
+      steps.push({
+        id: command.id || crypto.randomUUID(),
+        type,
+        payload: {
+          unitCode: normalizeUnitCode(codeByVehicleId.get(locoId)) || "",
+          fromPathId: fromPos.pathId,
+          fromIndex: Number(fromPos.pathIndex ?? 0),
+          toPathId,
+          toIndex,
+        },
+      });
+
+      positionsByVehicleId.set(locoId, {
+        pathId: toPathId,
+        pathIndex: toIndex,
+      });
       continue;
     }
-    const payload = command.payload || {};
-    const locoId = payload.locoId;
-    const fromPos = positionsByVehicleId.get(locoId) || { pathId: "", pathIndex: 0 };
-    const toPathId = String(payload.targetPathId || "").trim();
-    const toIndex = Number(payload.targetIndex ?? 0);
 
     steps.push({
       id: command.id || crypto.randomUUID(),
-      unitCode: normalizeUnitCode(codeByVehicleId.get(locoId)) || "",
-      fromPathId: fromPos.pathId,
-      fromIndex: Number(fromPos.pathIndex ?? 0),
-      toPathId,
-      toIndex,
-    });
-
-    positionsByVehicleId.set(locoId, {
-      pathId: toPathId,
-      pathIndex: toIndex,
+      type,
+      payload: {
+        unitCodes: [
+          normalizeUnitCode(codeByVehicleId.get(payload.aId)) || "",
+          normalizeUnitCode(codeByVehicleId.get(payload.bId)) || "",
+        ].filter(Boolean),
+      },
     });
   }
 
@@ -223,6 +290,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [scenarioFromIndex, setScenarioFromIndex] = useState("");
   const [scenarioToPathId, setScenarioToPathId] = useState("");
   const [scenarioToIndex, setScenarioToIndex] = useState("");
+  const [scenarioStepType, setScenarioStepType] = useState(SCENARIO_STEP_MOVE);
   const [scenarioSteps, setScenarioSteps] = useState([]);
   const [layoutName, setLayoutName] = useState("Схема 1");
   const [savedLayouts, setSavedLayouts] = useState([]);
@@ -568,22 +636,41 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         }
       }
 
-      for (const step of scenarioSteps) {
-        const code = normalizeUnitCode(step.unitCode);
-        const locoId = idByCode.get(code);
-        if (!locoId) {
-          throw new Error(`Локомотив ${code || step.unitCode} не найден для сохранения.`);
+      for (const rawStep of scenarioSteps) {
+        const step = normalizeScenarioStep(rawStep);
+
+        if (step.type === SCENARIO_STEP_MOVE) {
+          const code = normalizeUnitCode(step.payload.unitCode);
+          const locoId = idByCode.get(code);
+          if (!locoId) {
+            throw new Error(`Локомотив ${code || step.payload.unitCode} не найден для сохранения.`);
+          }
+
+          await addScenarioCommand(createResp.scenario.id, {
+            type: SCENARIO_STEP_MOVE,
+            payload: {
+              locoId,
+              targetPathId: step.payload.toPathId,
+              targetIndex: step.payload.toIndex,
+            },
+          });
+          continue;
         }
 
-        const commandPayload = {
-          type: "MOVE_LOCO",
+        const [aCode, bCode] = step.payload.unitCodes || [];
+        const aId = idByCode.get(aCode);
+        const bId = idByCode.get(bCode);
+        if (!aId || !bId) {
+          throw new Error(`Объекты ${aCode || "?"} и ${bCode || "?"} не найдены для сохранения.`);
+        }
+
+        await addScenarioCommand(createResp.scenario.id, {
+          type: step.type,
           payload: {
-            locoId,
-            targetPathId: step.toPathId,
-            targetIndex: step.toIndex,
+            aId,
+            bId,
           },
-        };
-        await addScenarioCommand(createResp.scenario.id, commandPayload);
+        });
       }
 
       setSelectedScenarioId(String(createResp.scenario.id));
@@ -641,12 +728,18 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     }
   }, [targetPathId, targetPathIndex]);
 
-  async function buildMovementTimeline(locoId, targetPathIdValue, targetIndexValue, sourceVehicles) {
+  async function buildMovementTimeline(
+    locoId,
+    targetPathIdValue,
+    targetIndexValue,
+    sourceVehicles,
+    sourceCouplings = couplings
+  ) {
     const response = await planMovement({
       gridSize: GRID_SIZE,
       segments,
       vehicles: sourceVehicles,
-      couplings,
+      couplings: sourceCouplings,
       selectedLocomotiveId: locoId,
       targetPathId: targetPathIdValue,
       targetIndex: targetIndexValue,
@@ -664,62 +757,61 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     return timeline;
   }
 
-  async function playTimeline(timeline, startMessage = "Движение запущено.") {
+  async function playTimeline(
+    timeline,
+    startMessage = "Движение запущено.",
+    sourceVehicles = vehicles,
+    sourceCouplings = couplings
+  ) {
     if (!timeline.length) {
-      return false;
+      return { ok: false, vehicles: sourceVehicles };
     }
 
     setMovementHint(startMessage);
     setMovementCellsPassed(0);
     setIsMoving(true);
 
-    let stepIndex = 0;
+    return new Promise((resolve) => {
+      let stepIndex = 0;
+      let currentVehicles = sourceVehicles.map((vehicle) => ({ ...vehicle }));
 
-    // будем хранить актуальное состояние
-    let currentVehicles = vehicles.map(v => ({ ...v }));
+      movementTimerRef.current = setInterval(async () => {
+        const step = timeline[stepIndex];
 
-    movementTimerRef.current = setInterval(async () => {
-      const step = timeline[stepIndex];
+        if (!step) {
+          clearInterval(movementTimerRef.current);
+          movementTimerRef.current = null;
+          setIsMoving(false);
 
-      if (!step) {
-        clearInterval(movementTimerRef.current);
-        movementTimerRef.current = null;
-        setIsMoving(false);
+          try {
+            const resolved = await resolveVehicles({
+              gridSize: GRID_SIZE,
+              segments,
+              vehicles: currentVehicles,
+              couplings: sourceCouplings,
+              movedVehicleIds: currentVehicles.map((v) => v.id),
+              strictCouplings: true,
+            });
 
-        try {
-          const resolved = await resolveVehicles({
-            gridSize: GRID_SIZE,
-            segments,
-            vehicles: currentVehicles,
-            couplings,
-            movedVehicleIds: currentVehicles.map(v => v.id),
-            strictCouplings: true,
-          });
-
-          if (resolved.ok && Array.isArray(resolved.vehicles)) {
-            setVehicles(resolved.vehicles);
+            if (resolved.ok && Array.isArray(resolved.vehicles)) {
+              currentVehicles = resolved.vehicles;
+              setVehicles(resolved.vehicles);
+            }
+          } catch (error) {
+            console.error("resolveVehicles failed", error);
           }
 
-        } catch (error) {
-          console.error("resolveVehicles failed", error);
+          setMovementHint("Движение завершено.");
+          resolve({ ok: true, vehicles: currentVehicles });
+          return;
         }
 
-        setMovementHint("Движение завершено.");
-        return;
-      }
-
-      // обновляем локальное состояние
-      currentVehicles = applyTimelineStepToVehicles(currentVehicles, step);
-
-      // обновляем React state
-      setVehicles(currentVehicles);
-
-      setMovementCellsPassed(prev => prev + 1);
-      stepIndex += 1;
-
-    }, 180);
-
-    return true;
+        currentVehicles = applyTimelineStepToVehicles(currentVehicles, step);
+        setVehicles(currentVehicles);
+        setMovementCellsPassed((prev) => prev + 1);
+        stepIndex += 1;
+      }, 180);
+    });
   }
 
   async function executeMovement(locoId) {
@@ -727,29 +819,56 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     return playTimeline(timeline, "Движение запущено.");
   }
 
-function addScenarioStep() {
-    const unitCode = normalizeUnitCode(scenarioUnitCode);
-    const fromPathId = scenarioFromPathId.trim();
-    const fromIndex = Number.parseInt(scenarioFromIndex, 10);
-    const toPathId = scenarioToPathId.trim();
-    const toIndex = Number.parseInt(scenarioToIndex, 10);
+  function buildDraftScenarioStep() {
+    const type = normalizeScenarioStepType(scenarioStepType);
+    if (type === SCENARIO_STEP_MOVE) {
+      const unitCode = normalizeUnitCode(scenarioUnitCode);
+      const fromPathId = scenarioFromPathId.trim();
+      const fromIndex = Number.parseInt(scenarioFromIndex, 10);
+      const toPathId = scenarioToPathId.trim();
+      const toIndex = Number.parseInt(scenarioToIndex, 10);
 
-    if (!unitCode || !fromPathId || Number.isNaN(fromIndex) || !toPathId || Number.isNaN(toIndex)) {
-      setMovementHint("Заполни номер объекта, путь и индекс откуда/куда.");
-      return;
+      if (!unitCode || !fromPathId || Number.isNaN(fromIndex) || !toPathId || Number.isNaN(toIndex)) {
+        setMovementHint("Заполни номер объекта, путь и индекс откуда/куда.");
+        return null;
+      }
+
+      return normalizeScenarioStep({
+        id: crypto.randomUUID(),
+        type: SCENARIO_STEP_MOVE,
+        payload: {
+          unitCode,
+          fromPathId,
+          fromIndex,
+          toPathId,
+          toIndex,
+        },
+      });
     }
 
-    setScenarioSteps((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        unitCode,
-        fromPathId,
-        fromIndex,
-        toPathId,
-        toIndex,
+    const selectedCodes = selectedVehicleIds
+      .map((id) => normalizeUnitCode(vehicleCodeById.get(id)))
+      .filter(Boolean)
+      .slice(0, 2);
+    if (selectedCodes.length < 2) {
+      setMovementHint("Для сцепки/расцепки выбери два объекта на схеме.");
+      return null;
+    }
+    return normalizeScenarioStep({
+      id: crypto.randomUUID(),
+      type,
+      payload: {
+        unitCodes: selectedCodes,
       },
-    ]);
+    });
+  }
+
+  function addScenarioStep() {
+    const step = buildDraftScenarioStep();
+    if (!step) {
+      return;
+    }
+    setScenarioSteps((prev) => [...prev, step]);
     setMovementHint("Шаг добавлен в сценарий.");
   }
 
@@ -766,98 +885,119 @@ function addScenarioStep() {
       return;
     }
 
-    const steps = scenarioSteps.length
-      ? scenarioSteps
-      : [
-          {
-            id: "single",
-            unitCode: normalizeUnitCode(scenarioUnitCode),
-            fromPathId: scenarioFromPathId.trim(),
-            fromIndex: Number.parseInt(scenarioFromIndex, 10),
-            toPathId: scenarioToPathId.trim(),
-            toIndex: Number.parseInt(scenarioToIndex, 10),
-          },
-        ];
+    const fallbackStep = scenarioSteps.length ? null : buildDraftScenarioStep();
+    const steps = (scenarioSteps.length ? scenarioSteps : fallbackStep ? [fallbackStep] : [])
+      .map((step) => normalizeScenarioStep(step))
+      .filter(Boolean);
 
     try {
-      if (
-        !steps.length ||
-        !steps[0].unitCode ||
-        !steps[0].fromPathId ||
-        Number.isNaN(steps[0].fromIndex) ||
-        !steps[0].toPathId ||
-        Number.isNaN(steps[0].toIndex)
-      ) {
+      if (!steps.length) {
         setMovementHint("Добавь хотя бы один корректный шаг сценария.");
         return;
       }
 
       let workingVehicles = vehicles.map((vehicle) => ({ ...vehicle }));
-      const combinedTimeline = [];
+      let workingCouplings = couplings.map((coupling) => ({ ...coupling }));
       let lastLocomotiveId = null;
       let lastTargetPathId = null;
       let lastTargetIndex = null;
 
-      for (const step of steps) {
-        const stepCode = normalizeUnitCode(step.unitCode);
-        if (!stepCode) {
-          setMovementHint(`Некорректный номер объекта в шаге: ${step.unitCode}.`);
-          return;
-        }
+      for (let index = 0; index < steps.length; index += 1) {
+        const step = steps[index];
         const codeMap = buildVehicleCodeMap(workingVehicles);
-        const target = workingVehicles.find(
-          (vehicle) => normalizeUnitCode(codeMap.get(vehicle.id)) === stepCode
-        );
-        if (!target) {
-          setMovementHint(`Объект с номером ${stepCode} не найден.`);
-          return;
-        }
-        if (target.type !== "locomotive") {
-          setMovementHint(`Объект ${stepCode} не локомотив.`);
-          return;
-        }
-
-        if (target.pathId !== step.fromPathId || Number(target.pathIndex) !== step.fromIndex) {
-          setMovementHint(
-            `Локомотив ${codeMap.get(target.id) || target.id} сейчас в ${target.pathId}:${target.pathIndex}, а не в ${step.fromPathId}:${step.fromIndex}.`
+        if (step.type === SCENARIO_STEP_MOVE) {
+          const stepCode = normalizeUnitCode(step.payload.unitCode);
+          if (!stepCode) {
+            setMovementHint(`Некорректный номер объекта в шаге: ${step.payload.unitCode}.`);
+            return;
+          }
+          const target = workingVehicles.find(
+            (vehicle) => normalizeUnitCode(codeMap.get(vehicle.id)) === stepCode
           );
+          if (!target) {
+            setMovementHint(`Объект с номером ${stepCode} не найден.`);
+            return;
+          }
+          if (target.type !== "locomotive") {
+            setMovementHint(`Объект ${stepCode} не локомотив.`);
+            return;
+          }
+
+          if (
+            target.pathId !== step.payload.fromPathId ||
+            Number(target.pathIndex) !== step.payload.fromIndex
+          ) {
+            setMovementHint(
+              `Локомотив ${codeMap.get(target.id) || target.id} сейчас в ${target.pathId}:${target.pathIndex}, а не в ${step.payload.fromPathId}:${step.payload.fromIndex}.`
+            );
+            return;
+          }
+
+          const timeline = await buildMovementTimeline(
+            target.id,
+            step.payload.toPathId,
+            step.payload.toIndex,
+            workingVehicles,
+            workingCouplings
+          );
+
+          const animationResult = await playTimeline(
+            timeline,
+            `Шаг ${index + 1}/${steps.length}: движение`,
+            workingVehicles,
+            workingCouplings
+          );
+          if (!animationResult.ok) {
+            setMovementHint("Не удалось выполнить шаг движения.");
+            return;
+          }
+          workingVehicles = animationResult.vehicles;
+
+          lastLocomotiveId = target.id;
+          lastTargetPathId = step.payload.toPathId;
+          lastTargetIndex = step.payload.toIndex;
+          continue;
+        }
+
+        const unitCodes = (step.payload.unitCodes || [])
+          .map((value) => normalizeUnitCode(value))
+          .filter(Boolean);
+        if (unitCodes.length < 2) {
+          setMovementHint("Шаг сцепки/расцепки должен содержать два объекта.");
+          return;
+        }
+        const a = workingVehicles.find(
+          (vehicle) => normalizeUnitCode(codeMap.get(vehicle.id)) === unitCodes[0]
+        );
+        const b = workingVehicles.find(
+          (vehicle) => normalizeUnitCode(codeMap.get(vehicle.id)) === unitCodes[1]
+        );
+        if (!a || !b) {
+          setMovementHint(`Не найдены объекты ${unitCodes[0]} и ${unitCodes[1]}.`);
           return;
         }
 
-        const timeline = await buildMovementTimeline(
-          target.id,
-          step.toPathId,
-          step.toIndex,
-          workingVehicles
-        );
-        for (const frame of timeline) {
-          combinedTimeline.push(frame);
-          workingVehicles = applyTimelineStepToVehicles(workingVehicles, frame);
-        }
-        try {
-          const resolved = await resolveVehicles({
-            gridSize: GRID_SIZE,
+        const response = await applyLayoutOperation({
+          gridSize: GRID_SIZE,
+          state: {
             segments,
             vehicles: workingVehicles,
-            couplings,
-            movedVehicleIds: workingVehicles.map((v) => v.id),
-            strictCouplings: true,
-          });
-          if (resolved.ok && Array.isArray(resolved.vehicles)) {
-            workingVehicles = resolved.vehicles;
-          }
-        } catch (error) {
-          setMovementHint("Не удалось обновить позиции после шага.");
-          return;
+            couplings: workingCouplings,
+          },
+          action: step.type === SCENARIO_STEP_COUPLE ? "couple" : "decouple",
+          selectedVehicleIds: [a.id, b.id],
+        });
+        if (!response.ok) {
+          throw new Error(response.message || "Не удалось выполнить шаг сцепки/расцепки.");
         }
-        lastLocomotiveId = target.id;
-        lastTargetPathId = step.toPathId;
-        lastTargetIndex = step.toIndex;
-      }
-
-      if (!combinedTimeline.length) {
-        setMovementHint("Сценарий не содержит шагов движения.");
-        return;
+        const nextState = response.state || {};
+        workingVehicles = nextState.vehicles || [];
+        workingCouplings = nextState.couplings || [];
+        setVehicles(workingVehicles);
+        setCouplings(workingCouplings);
+        setMovementHint(
+          `Шаг ${index + 1}/${steps.length}: ${step.type === SCENARIO_STEP_COUPLE ? "сцепка" : "расцепка"} выполнен.`
+        );
       }
 
       if (lastLocomotiveId) {
@@ -867,8 +1007,9 @@ function addScenarioStep() {
         setTargetPathId(lastTargetPathId);
         setTargetPathIndex(lastTargetIndex);
       }
-
-      playTimeline(combinedTimeline, "Сценарий движения запущен.");
+      setVehicles(workingVehicles);
+      setCouplings(workingCouplings);
+      setMovementHint("Сценарий выполнен.");
     } catch (error) {
       setMovementHint(error.message || "Ошибка связи с backend.");
     }
@@ -1503,36 +1644,51 @@ function addScenarioStep() {
               <button type="button" className="toolButton" onClick={handleLoadScenario}>
                 Загрузить сценарий
               </button>
-              <input
+              <select
                 className="toolInput"
-                value={scenarioUnitCode}
-                onChange={(event) => setScenarioUnitCode(event.target.value)}
-                placeholder="Номер объекта (л1, в1)"
-              />
-              <input
-                className="toolInput"
-                value={scenarioFromPathId}
-                onChange={(event) => setScenarioFromPathId(event.target.value)}
-                placeholder="Откуда путь (id)"
-              />
-              <input
-                className="toolInput"
-                value={scenarioFromIndex}
-                onChange={(event) => setScenarioFromIndex(event.target.value)}
-                placeholder="Откуда индекс"
-              />
-              <input
-                className="toolInput"
-                value={scenarioToPathId}
-                onChange={(event) => setScenarioToPathId(event.target.value)}
-                placeholder="Куда путь (id)"
-              />
-              <input
-                className="toolInput"
-                value={scenarioToIndex}
-                onChange={(event) => setScenarioToIndex(event.target.value)}
-                placeholder="Куда индекс"
-              />
+                value={scenarioStepType}
+                onChange={(event) => setScenarioStepType(normalizeScenarioStepType(event.target.value))}
+              >
+                <option value={SCENARIO_STEP_MOVE}>движение</option>
+                <option value={SCENARIO_STEP_COUPLE}>сцепка</option>
+                <option value={SCENARIO_STEP_DECOUPLE}>расцепка</option>
+              </select>
+              {scenarioStepType === SCENARIO_STEP_MOVE ? (
+                <>
+                  <input
+                    className="toolInput"
+                    value={scenarioUnitCode}
+                    onChange={(event) => setScenarioUnitCode(event.target.value)}
+                    placeholder="Номер объекта (л1, в1)"
+                  />
+                  <input
+                    className="toolInput"
+                    value={scenarioFromPathId}
+                    onChange={(event) => setScenarioFromPathId(event.target.value)}
+                    placeholder="Откуда путь (id)"
+                  />
+                  <input
+                    className="toolInput"
+                    value={scenarioFromIndex}
+                    onChange={(event) => setScenarioFromIndex(event.target.value)}
+                    placeholder="Откуда индекс"
+                  />
+                  <input
+                    className="toolInput"
+                    value={scenarioToPathId}
+                    onChange={(event) => setScenarioToPathId(event.target.value)}
+                    placeholder="Куда путь (id)"
+                  />
+                  <input
+                    className="toolInput"
+                    value={scenarioToIndex}
+                    onChange={(event) => setScenarioToIndex(event.target.value)}
+                    placeholder="Куда индекс"
+                  />
+                </>
+              ) : (
+                <p className="counter">Выбери на схеме 2 объекта и добавь шаг.</p>
+              )}
               <button type="button" className="toolButton" onClick={addScenarioStep}>
                 Добавить шаг
               </button>
@@ -1544,8 +1700,7 @@ function addScenarioStep() {
                   {scenarioSteps.map((step, index) => (
                     <div key={step.id} className="scenarioStepRow">
                       <span className="scenarioStepText">
-                        {index + 1}. {step.unitCode}: {step.fromPathId}:{step.fromIndex} {"->"}{" "}
-                        {step.toPathId}:{step.toIndex}
+                        {formatScenarioStepText(normalizeScenarioStep(step), index)}
                       </span>
                       <button
                         type="button"
