@@ -664,27 +664,59 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     return timeline;
   }
 
-  function playTimeline(timeline, startMessage = "Движение запущено.") {
+  async function playTimeline(timeline, startMessage = "Движение запущено.") {
     if (!timeline.length) {
       return false;
     }
+
     setMovementHint(startMessage);
     setMovementCellsPassed(0);
     setIsMoving(true);
+
     let stepIndex = 0;
 
-    movementTimerRef.current = setInterval(() => {
+    // будем хранить актуальное состояние
+    let currentVehicles = vehicles.map(v => ({ ...v }));
+
+    movementTimerRef.current = setInterval(async () => {
       const step = timeline[stepIndex];
+
       if (!step) {
-        stopMovement(false);
+        clearInterval(movementTimerRef.current);
+        movementTimerRef.current = null;
+        setIsMoving(false);
+
+        try {
+          const resolved = await resolveVehicles({
+            gridSize: GRID_SIZE,
+            segments,
+            vehicles: currentVehicles,
+            couplings,
+            movedVehicleIds: currentVehicles.map(v => v.id),
+            strictCouplings: true,
+          });
+
+          if (resolved.ok && Array.isArray(resolved.vehicles)) {
+            setVehicles(resolved.vehicles);
+          }
+
+        } catch (error) {
+          console.error("resolveVehicles failed", error);
+        }
+
         setMovementHint("Движение завершено.");
         return;
       }
 
-      setVehicles((prev) => applyTimelineStepToVehicles(prev, step));
+      // обновляем локальное состояние
+      currentVehicles = applyTimelineStepToVehicles(currentVehicles, step);
 
-      setMovementCellsPassed((prev) => prev + 1);
+      // обновляем React state
+      setVehicles(currentVehicles);
+
+      setMovementCellsPassed(prev => prev + 1);
       stepIndex += 1;
+
     }, 180);
 
     return true;
@@ -1638,7 +1670,9 @@ function addScenarioStep() {
                   }
                   setSelectedSegmentIds([segment.id]);
                 }}
-              />
+              >
+                <title>Путь: {segment.id}</title>
+              </line>
             ))}
 
             {couplings.map((coupling) => {
@@ -1676,7 +1710,11 @@ function addScenarioStep() {
                 }
                 className="slotPoint"
                 onClick={(event) => handleSlotClick(event, slot)}
-              />
+              >
+                <title>
+                  Путь: {slot.pathId}, звено: {slot.index}
+                </title>
+             </circle>
             ))}
 
             {vehicles.map((vehicle) => (
