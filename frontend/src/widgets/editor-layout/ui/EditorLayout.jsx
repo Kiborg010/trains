@@ -259,6 +259,8 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const canvasWrapRef = useRef(null);
   const panStateRef = useRef(null);
   const movementTimerRef = useRef(null);
+  const movementRunIdRef = useRef(0);
+  const skipNextAutoResolveRef = useRef(false);
 
   const [mode, setMode] = useState("drawTrack");
   const [zoom, setZoom] = useState(1);
@@ -292,6 +294,8 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [scenarioToIndex, setScenarioToIndex] = useState("");
   const [scenarioStepType, setScenarioStepType] = useState(SCENARIO_STEP_MOVE);
   const [scenarioSteps, setScenarioSteps] = useState([]);
+  const [currentScenarioStep, setCurrentScenarioStep] = useState(0);
+  const [scenarioStateHistory, setScenarioStateHistory] = useState([]);
   const [layoutName, setLayoutName] = useState("Схема 1");
   const [savedLayouts, setSavedLayouts] = useState([]);
   const [selectedLayoutId, setSelectedLayoutId] = useState("");
@@ -425,6 +429,11 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   }, []);
 
   useEffect(() => {
+    if (skipNextAutoResolveRef.current) {
+      skipNextAutoResolveRef.current = false;
+      return;
+    }
+
     if (!segments.length || !vehicles.length) {
       return;
     }
@@ -501,6 +510,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   }
 
   function stopMovement(clearSelection = false) {
+    movementRunIdRef.current += 1;
     if (movementTimerRef.current) {
       clearInterval(movementTimerRef.current);
       movementTimerRef.current = null;
@@ -688,15 +698,24 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     }
     try {
       const scenario = await getScenario(selectedScenarioId);
+      stopMovement(true);
       setScenarioName(scenario.name || "Сценарий");
       const loadedSteps = buildScenarioStepsFromBackendScenario(scenario);
       setScenarioSteps(loadedSteps);
+      setCurrentScenarioStep(0);
+      setScenarioStateHistory([]);
 
       if (scenario.initialState) {
+        skipNextAutoResolveRef.current = true;
         setSegments(scenario.initialState.segments || []);
         setVehicles(scenario.initialState.vehicles || []);
         setCouplings(scenario.initialState.couplings || []);
       }
+      setSelectedSegmentIds([]);
+      setSelectedVehicleIds([]);
+      setDragState(null);
+      setSelectionBox(null);
+      setMovementCellsPassed(0);
 
       setMovementHint("Сценарий загружен.");
     } catch (error) {
@@ -766,6 +785,8 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     if (!timeline.length) {
       return { ok: false, vehicles: sourceVehicles };
     }
+    const runId = movementRunIdRef.current + 1;
+    movementRunIdRef.current = runId;
 
     setMovementHint(startMessage);
     setMovementCellsPassed(0);
@@ -776,6 +797,14 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       let currentVehicles = sourceVehicles.map((vehicle) => ({ ...vehicle }));
 
       movementTimerRef.current = setInterval(async () => {
+        if (runId !== movementRunIdRef.current) {
+          clearInterval(movementTimerRef.current);
+          movementTimerRef.current = null;
+          setIsMoving(false);
+          resolve({ ok: false, vehicles: sourceVehicles });
+          return;
+        }
+
         const step = timeline[stepIndex];
 
         if (!step) {
@@ -794,6 +823,10 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
             });
 
             if (resolved.ok && Array.isArray(resolved.vehicles)) {
+              if (runId !== movementRunIdRef.current) {
+                resolve({ ok: false, vehicles: sourceVehicles });
+                return;
+              }
               currentVehicles = resolved.vehicles;
               setVehicles(resolved.vehicles);
             }
@@ -806,6 +839,10 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
           return;
         }
 
+        if (runId !== movementRunIdRef.current) {
+          resolve({ ok: false, vehicles: sourceVehicles });
+          return;
+        }
         currentVehicles = applyTimelineStepToVehicles(currentVehicles, step);
         setVehicles(currentVehicles);
         setMovementCellsPassed((prev) => prev + 1);
@@ -869,15 +906,229 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       return;
     }
     setScenarioSteps((prev) => [...prev, step]);
+    setCurrentScenarioStep(0);
+    setScenarioStateHistory([]);
     setMovementHint("Шаг добавлен в сценарий.");
   }
 
   function removeScenarioStep(stepId) {
     setScenarioSteps((prev) => prev.filter((step) => step.id !== stepId));
+    setCurrentScenarioStep(0);
+    setScenarioStateHistory([]);
   }
 
   function clearScenarioSteps() {
     setScenarioSteps([]);
+    setCurrentScenarioStep(0);
+    setScenarioStateHistory([]);
+  }
+
+  function cloneLayoutState(state) {
+    return JSON.parse(JSON.stringify(state));
+  }
+
+  function cloneTimeline(timeline) {
+    if (!Array.isArray(timeline)) {
+      return [];
+    }
+    return timeline.map((frame) =>
+      Array.isArray(frame) ? frame.map((item) => ({ ...item })) : []
+    );
+  }
+
+  async function executeSingleScenarioStep(
+    step,
+    stepIndex,
+    totalSteps,
+    sourceVehicles,
+    sourceCouplings
+  ) {
+    const codeMap = buildVehicleCodeMap(sourceVehicles);
+
+    if (step.type === SCENARIO_STEP_MOVE) {
+      const stepCode = normalizeUnitCode(step.payload.unitCode);
+      if (!stepCode) {
+        throw new Error(`Некорректный номер объекта в шаге: ${step.payload.unitCode}.`);
+      }
+      const target = sourceVehicles.find(
+        (vehicle) => normalizeUnitCode(codeMap.get(vehicle.id)) === stepCode
+      );
+      if (!target) {
+        throw new Error(`Объект с номером ${stepCode} не найден.`);
+      }
+      if (target.type !== "locomotive") {
+        throw new Error(`Объект ${stepCode} не локомотив.`);
+      }
+      if (
+        target.pathId !== step.payload.fromPathId ||
+        Number(target.pathIndex) !== step.payload.fromIndex
+      ) {
+        throw new Error(
+          `Локомотив ${codeMap.get(target.id) || target.id} сейчас в ${target.pathId}:${target.pathIndex}, а не в ${step.payload.fromPathId}:${step.payload.fromIndex}.`
+        );
+      }
+
+      const timeline = await buildMovementTimeline(
+        target.id,
+        step.payload.toPathId,
+        step.payload.toIndex,
+        sourceVehicles,
+        sourceCouplings
+      );
+
+      const animationResult = await playTimeline(
+        timeline,
+        `Шаг ${stepIndex + 1}/${totalSteps}: движение`,
+        sourceVehicles,
+        sourceCouplings
+      );
+      if (!animationResult.ok) {
+        throw new Error("Не удалось выполнить шаг движения.");
+      }
+
+      return {
+        vehicles: animationResult.vehicles,
+        couplings: sourceCouplings,
+        timeline: cloneTimeline(timeline),
+        lastLocomotiveId: target.id,
+        lastTargetPathId: step.payload.toPathId,
+        lastTargetIndex: step.payload.toIndex,
+      };
+    }
+
+    const unitCodes = (step.payload.unitCodes || [])
+      .map((value) => normalizeUnitCode(value))
+      .filter(Boolean);
+    if (unitCodes.length < 2) {
+      throw new Error("Шаг сцепки/расцепки должен содержать два объекта.");
+    }
+
+    const a = sourceVehicles.find(
+      (vehicle) => normalizeUnitCode(codeMap.get(vehicle.id)) === unitCodes[0]
+    );
+    const b = sourceVehicles.find(
+      (vehicle) => normalizeUnitCode(codeMap.get(vehicle.id)) === unitCodes[1]
+    );
+    if (!a || !b) {
+      throw new Error(`Не найдены объекты ${unitCodes[0]} и ${unitCodes[1]}.`);
+    }
+
+    const response = await applyLayoutOperation({
+      gridSize: GRID_SIZE,
+      state: {
+        segments,
+        vehicles: sourceVehicles,
+        couplings: sourceCouplings,
+      },
+      action: step.type === SCENARIO_STEP_COUPLE ? "couple" : "decouple",
+      selectedVehicleIds: [a.id, b.id],
+    });
+    if (!response.ok) {
+      throw new Error(response.message || "Не удалось выполнить шаг сцепки/расцепки.");
+    }
+
+    const nextState = response.state || {};
+    return {
+      vehicles: nextState.vehicles || [],
+      couplings: nextState.couplings || [],
+      timeline: [],
+      lastLocomotiveId: null,
+      lastTargetPathId: null,
+      lastTargetIndex: null,
+    };
+  }
+
+  async function handleNextScenarioStep() {
+    if (isMoving) {
+      return;
+    }
+
+    const steps = scenarioSteps.map((step) => normalizeScenarioStep(step)).filter(Boolean);
+    if (!steps.length) {
+      setMovementHint("Сценарий не содержит шагов.");
+      return;
+    }
+    if (currentScenarioStep >= steps.length) {
+      setMovementHint("Все шаги сценария уже выполнены.");
+      return;
+    }
+
+    const step = steps[currentScenarioStep];
+    const snapshot = cloneLayoutState({ segments, vehicles, couplings });
+
+    try {
+      const result = await executeSingleScenarioStep(
+        step,
+        currentScenarioStep,
+        steps.length,
+        vehicles.map((vehicle) => ({ ...vehicle })),
+        couplings.map((coupling) => ({ ...coupling }))
+      );
+
+      setScenarioStateHistory((prev) => [
+        ...prev,
+        {
+          state: snapshot,
+          stepType: step.type,
+          timeline: result.timeline || [],
+        },
+      ]);
+      setCurrentScenarioStep((prev) => prev + 1);
+      setVehicles(result.vehicles);
+      setCouplings(result.couplings);
+      if (result.lastLocomotiveId) {
+        setSelectedLocomotiveId(result.lastLocomotiveId);
+      }
+      if (result.lastTargetPathId) {
+        setTargetPathId(result.lastTargetPathId);
+        setTargetPathIndex(result.lastTargetIndex);
+      }
+      setMovementHint(`Выполнен шаг ${currentScenarioStep + 1}/${steps.length}.`);
+    } catch (error) {
+      setMovementHint(error.message || "Не удалось выполнить шаг сценария.");
+    }
+  }
+
+  async function handlePrevScenarioStep() {
+    if (isMoving) {
+      return;
+    }
+    if (currentScenarioStep <= 0 || !scenarioStateHistory.length) {
+      setMovementHint("Нет предыдущего шага для отката.");
+      return;
+    }
+
+    const historyEntry = scenarioStateHistory[scenarioStateHistory.length - 1];
+    const previousSnapshot = historyEntry?.state || {};
+    const shouldAnimateReverseMove =
+      historyEntry?.stepType === SCENARIO_STEP_MOVE &&
+      Array.isArray(historyEntry?.timeline) &&
+      historyEntry.timeline.length > 0;
+
+    if (shouldAnimateReverseMove) {
+      const reverseTimeline = cloneTimeline(historyEntry.timeline).reverse();
+      const reverseResult = await playTimeline(
+        reverseTimeline,
+        `Откат шага ${currentScenarioStep}/${scenarioSteps.length}: движение`,
+        vehicles.map((vehicle) => ({ ...vehicle })),
+        couplings.map((coupling) => ({ ...coupling }))
+      );
+      if (!reverseResult.ok) {
+        setMovementHint("Не удалось выполнить обратную анимацию шага.");
+        return;
+      }
+    }
+
+    setSegments(previousSnapshot.segments || []);
+    setVehicles(previousSnapshot.vehicles || []);
+    setCouplings(previousSnapshot.couplings || []);
+    setScenarioStateHistory((prev) => prev.slice(0, -1));
+    setCurrentScenarioStep((prev) => Math.max(0, prev - 1));
+    setMovementHint(
+      shouldAnimateReverseMove
+        ? "Шаг откачен с обратной анимацией."
+        : "Выполнен откат на предыдущий шаг."
+    );
   }
 
   async function runSimpleScenario() {
@@ -903,6 +1154,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       let lastTargetIndex = null;
 
       for (let index = 0; index < steps.length; index += 1) {
+        setCurrentScenarioStep(index);
         const step = steps[index];
         const codeMap = buildVehicleCodeMap(workingVehicles);
         if (step.type === SCENARIO_STEP_MOVE) {
@@ -1009,6 +1261,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       }
       setVehicles(workingVehicles);
       setCouplings(workingCouplings);
+      setCurrentScenarioStep(steps.length);
       setMovementHint("Сценарий выполнен.");
     } catch (error) {
       setMovementHint(error.message || "Ошибка связи с backend.");
@@ -1512,6 +1765,9 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
             : mode === "edit"
               ? "Редактирование"
               : "Просмотр";
+  const scenarioStepDisplay = scenarioSteps.length
+    ? Math.min(currentScenarioStep + 1, scenarioSteps.length)
+    : 0;
 
   return (
     <div className="layout">
@@ -1695,10 +1951,25 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
               <button type="button" className="toolButton" onClick={clearScenarioSteps}>
                 Очистить шаги
               </button>
+              <button type="button" className="toolButton" onClick={handlePrevScenarioStep}>
+                Предыдущий шаг
+              </button>
+              <button type="button" className="toolButton" onClick={handleNextScenarioStep}>
+                Следующий шаг
+              </button>
+              <button type="button" className="toolButton" onClick={runSimpleScenario}>
+                Выполнить шаги
+              </button>
+              <p className="counter">
+                Текущий шаг: {scenarioStepDisplay}/{scenarioSteps.length}
+              </p>
               {scenarioSteps.length > 0 && (
                 <div className="scenarioSteps">
                   {scenarioSteps.map((step, index) => (
-                    <div key={step.id} className="scenarioStepRow">
+                    <div
+                      key={step.id}
+                      className={`scenarioStepRow ${index === currentScenarioStep ? "current" : ""}`}
+                    >
                       <span className="scenarioStepText">
                         {formatScenarioStepText(normalizeScenarioStep(step), index)}
                       </span>
@@ -1713,9 +1984,6 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                   ))}
                 </div>
               )}
-              <button type="button" className="toolButton" onClick={runSimpleScenario}>
-                Выполнить шаги
-              </button>
             </div>
           )}
 
