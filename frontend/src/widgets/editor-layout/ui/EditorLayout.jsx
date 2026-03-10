@@ -195,21 +195,13 @@ function applyTimelineStepToVehicles(vehicles, step) {
   });
 }
 
-function buildScenarioStepsFromBackendScenario(scenario) {
+function buildScenarioStepsFromBackendScenario(scenario, sourceVehicles = []) {
   if (!scenario || !Array.isArray(scenario.commands)) {
     return [];
   }
 
   const steps = [];
-  const positionsByVehicleId = new Map();
-  const codeByVehicleId = buildVehicleCodeMap(scenario.initialState?.vehicles || []);
-
-  for (const vehicle of scenario.initialState?.vehicles || []) {
-    positionsByVehicleId.set(vehicle.id, {
-      pathId: vehicle.pathId || "",
-      pathIndex: Number(vehicle.pathIndex ?? 0),
-    });
-  }
+  const codeByVehicleId = buildVehicleCodeMap(sourceVehicles);
 
   for (const command of scenario.commands) {
     const type = normalizeScenarioStepType(command.type);
@@ -217,25 +209,24 @@ function buildScenarioStepsFromBackendScenario(scenario) {
 
     if (type === SCENARIO_STEP_MOVE) {
       const locoId = payload.locoId;
-      const fromPos = positionsByVehicleId.get(locoId) || { pathId: "", pathIndex: 0 };
-      const toPathId = String(payload.targetPathId || "").trim();
-      const toIndex = Number(payload.targetIndex ?? 0);
+      const fromPathId = String(payload.fromPathId || "").trim();
+      const fromIndex =
+        payload.fromIndex == null || payload.fromIndex === ""
+          ? Number.NaN
+          : Number(payload.fromIndex);
+      const toPathId = String(payload.toPathId || payload.targetPathId || "").trim();
+      const toIndex = Number(payload.toIndex ?? payload.targetIndex ?? 0);
 
       steps.push({
         id: command.id || crypto.randomUUID(),
         type,
         payload: {
           unitCode: normalizeUnitCode(codeByVehicleId.get(locoId)) || "",
-          fromPathId: fromPos.pathId,
-          fromIndex: Number(fromPos.pathIndex ?? 0),
+          fromPathId,
+          fromIndex,
           toPathId,
           toIndex,
         },
-      });
-
-      positionsByVehicleId.set(locoId, {
-        pathId: toPathId,
-        pathIndex: toIndex,
       });
       continue;
     }
@@ -630,20 +621,19 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         setMovementHint("Добавь шаги сценария перед сохранением.");
         return;
       }
-
-      const initialState =
-        scenarioInitialState ||
-        cloneLayoutState({
-          segments,
-          vehicles,
-          couplings,
-        });
-      if (!scenarioInitialState) {
-        setScenarioInitialState(initialState);
+      if (!selectedLayoutId) {
+        setMovementHint("Перед сохранением сценария выбери сохраненную схему.");
+        return;
       }
+      const layoutID = Number.parseInt(selectedLayoutId, 10);
+      if (Number.isNaN(layoutID) || layoutID <= 0) {
+        setMovementHint("Некорректный layout_id для сценария.");
+        return;
+      }
+
       const createResp = await createScenario({
         name: scenarioName.trim() || "Сценарий",
-        initialState,
+        layoutId: layoutID,
       });
       if (!createResp.ok || !createResp.scenario?.id) {
         throw new Error(createResp.message || "Не удалось создать сценарий.");
@@ -672,6 +662,10 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
             type: SCENARIO_STEP_MOVE,
             payload: {
               locoId,
+              fromPathId: step.payload.fromPathId,
+              fromIndex: step.payload.fromIndex,
+              toPathId: step.payload.toPathId,
+              toIndex: step.payload.toIndex,
               targetPathId: step.payload.toPathId,
               targetIndex: step.payload.toIndex,
             },
@@ -710,29 +704,25 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     }
     try {
       const scenario = await getScenario(selectedScenarioId);
+      console.log("SCENARIO INITIAL STATE", scenario.initialState);
+      console.log(
+        "INITIAL VEHICLE POSITIONS",
+        scenario.initialState?.vehicles?.map((v) => ({
+          id: v.id,
+          code: v.code,
+          pathId: v.pathId,
+          pathIndex: v.pathIndex,
+          x: v.x,
+          y: v.y,
+        }))
+      );
       stopMovement(true);
       setScenarioName(scenario.name || "Сценарий");
-      const loadedSteps = buildScenarioStepsFromBackendScenario(scenario);
+      const loadedSteps = buildScenarioStepsFromBackendScenario(scenario, vehicles);
       setScenarioSteps(loadedSteps);
       setCurrentScenarioStep(0);
       setScenarioStateHistory([]);
-
-      const initialState = cloneLayoutState({
-        segments: scenario.initialState?.segments || [],
-        vehicles: scenario.initialState?.vehicles || [],
-        couplings: scenario.initialState?.couplings || [],
-      });
-      setScenarioInitialState(initialState);
-      // Skip auto-resolve for a couple of effect passes to keep exact initial state on canvas.
-      skipAutoResolvePassesRef.current = 2;
-      setSegments(initialState.segments || []);
-      setVehicles(initialState.vehicles || []);
-      setCouplings(initialState.couplings || []);
-      setSelectedSegmentIds([]);
-      setSelectedVehicleIds([]);
-      setDragState(null);
-      setSelectionBox(null);
-      setMovementCellsPassed(0);
+      setScenarioInitialState(null);
 
       setMovementHint("Сценарий загружен.");
     } catch (error) {

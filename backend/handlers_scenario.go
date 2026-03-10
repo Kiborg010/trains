@@ -53,8 +53,22 @@ func scenariosHandler(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(req.Name) == "" {
 		req.Name = "Scenario"
 	}
+	if req.LayoutID <= 0 {
+		writeJSON(w, http.StatusBadRequest, CreateScenarioResponse{
+			OK:      false,
+			Message: "layoutId is required",
+		})
+		return
+	}
+	if _, err := appStore.GetLayout(req.LayoutID, userID); err != nil {
+		writeJSON(w, http.StatusBadRequest, CreateScenarioResponse{
+			OK:      false,
+			Message: "layout not found",
+		})
+		return
+	}
 
-	id, err := appStore.SaveScenario(userID, nil, req.Name, req.InitialState, []CommandSpec{})
+	id, err := appStore.SaveScenario(userID, req.LayoutID, req.Name, []CommandSpec{})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, CreateScenarioResponse{
 			OK:      false,

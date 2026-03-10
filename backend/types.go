@@ -146,8 +146,8 @@ type Scenario struct {
 	ID           string                 `json:"id"`
 	Name         string                 `json:"name"`
 	UserID       int                    `json:"userId,omitempty"`
-	LayoutID     int                    `json:"layoutId,omitempty"`
-	InitialState LayoutState            `json:"initialState"`
+	LayoutID     int                    `json:"layoutId"`
+	InitialState LayoutState            `json:"initialState,omitempty"` // legacy compatibility only
 	Commands     []CommandSpec          `json:"commands"`
 	CommandsMap  map[string]CommandSpec `json:"-"`
 }
@@ -161,6 +161,10 @@ type CommandSpec struct {
 
 type CommandPayload struct {
 	LocoID       string `json:"locoId,omitempty"`
+	FromPathID   string `json:"fromPathId,omitempty"`
+	FromIndex    int    `json:"fromIndex,omitempty"`
+	ToPathID     string `json:"toPathId,omitempty"`
+	ToIndex      int    `json:"toIndex,omitempty"`
 	TargetPathID string `json:"targetPathId,omitempty"`
 	TargetIndex  int    `json:"targetIndex,omitempty"`
 	AID          string `json:"aId,omitempty"`
@@ -178,8 +182,8 @@ type Execution struct {
 }
 
 type CreateScenarioRequest struct {
-	Name         string      `json:"name"`
-	InitialState LayoutState `json:"initialState"`
+	Name     string `json:"name"`
+	LayoutID int    `json:"layoutId"`
 }
 
 type CreateScenarioResponse struct {

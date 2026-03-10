@@ -26,7 +26,7 @@ type Store interface {
 	DeleteLayout(id int, userID int) error
 
 	// Scenario operations
-	SaveScenario(userID int, layoutID *int, name string, initialState LayoutState, commands []CommandSpec) (string, error)
+	SaveScenario(userID int, layoutID int, name string, commands []CommandSpec) (string, error)
 	GetScenario(id string) (*Scenario, error)
 	ListScenarios(userID int) ([]Scenario, error)
 	UpdateScenarioCommands(id string, userID int, commands []CommandSpec) error
@@ -176,7 +176,7 @@ func (s *InMemoryStore) DeleteLayout(id int, userID int) error {
 	return nil
 }
 
-func (s *InMemoryStore) SaveScenario(userID int, layoutID *int, name string, initialState LayoutState, commands []CommandSpec) (string, error) {
+func (s *InMemoryStore) SaveScenario(userID int, layoutID int, name string, commands []CommandSpec) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -184,12 +184,9 @@ func (s *InMemoryStore) SaveScenario(userID int, layoutID *int, name string, ini
 	scenario := Scenario{
 		ID:           id,
 		UserID:       userID,
+		LayoutID:     layoutID,
 		Name:         name,
-		InitialState: initialState,
 		Commands:     append([]CommandSpec{}, commands...),
-	}
-	if layoutID != nil {
-		scenario.LayoutID = *layoutID
 	}
 	s.scenariosByID[id] = scenario
 	return id, nil
@@ -252,6 +249,10 @@ func (s *InMemoryStore) SaveExecution(userID int, scenarioID string) (string, er
 	if !ok || scenario.UserID != userID {
 		return "", fmt.Errorf("scenario not found")
 	}
+	layout, ok := s.layoutsByID[scenario.LayoutID]
+	if !ok || layout.UserID != userID {
+		return "", fmt.Errorf("layout not found")
+	}
 
 	id := fmt.Sprintf("ex-%d", time.Now().UnixNano())
 	execution := Execution{
@@ -260,7 +261,7 @@ func (s *InMemoryStore) SaveExecution(userID int, scenarioID string) (string, er
 		ScenarioID:     scenarioID,
 		Status:         "running",
 		CurrentCommand: 0,
-		State:          scenario.InitialState,
+		State:          layout.State,
 		Log:            []string{"execution created"},
 	}
 	s.executionsByID[id] = execution
@@ -514,12 +515,7 @@ func (s *PostgresStore) DeleteLayout(id int, userID int) error {
 }
 
 // SaveScenario saves a scenario
-func (s *PostgresStore) SaveScenario(userID int, layoutID *int, name string, initialState LayoutState, commands []CommandSpec) (string, error) {
-	initialStateJSON, err := json.Marshal(initialState)
-	if err != nil {
-		return "", err
-	}
-
+func (s *PostgresStore) SaveScenario(userID int, layoutID int, name string, commands []CommandSpec) (string, error) {
 	commandsJSON, err := json.Marshal(commands)
 	if err != nil {
 		return "", err
@@ -527,12 +523,19 @@ func (s *PostgresStore) SaveScenario(userID int, layoutID *int, name string, ini
 
 	var scenarioID int
 	err = s.db.QueryRow(
-		"INSERT INTO scenarios (user_id, layout_id, name, initial_state, commands, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $6) RETURNING id",
-		userID, layoutID, name, initialStateJSON, commandsJSON, time.Now(),
+		"INSERT INTO scenarios (user_id, layout_id, name, commands, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $5) RETURNING id",
+		userID, layoutID, name, commandsJSON, time.Now(),
 	).Scan(&scenarioID)
 
 	if err != nil {
-		return "", err
+		// Compatibility with older schema where initial_state is NOT NULL.
+		err = s.db.QueryRow(
+			"INSERT INTO scenarios (user_id, layout_id, name, initial_state, commands, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $6) RETURNING id",
+			userID, layoutID, name, []byte(`{}`), commandsJSON, time.Now(),
+		).Scan(&scenarioID)
+		if err != nil {
+			return "", err
+		}
 	}
 	return strconv.Itoa(scenarioID), nil
 }
@@ -547,12 +550,12 @@ func (s *PostgresStore) GetScenario(id string) (*Scenario, error) {
 	var scenario Scenario
 	var scenarioIDValue int
 	var layoutID sql.NullInt64
-	var initialStateJSON, commandsJSON []byte
+	var commandsJSON []byte
 
 	err = s.db.QueryRow(
-		"SELECT id, user_id, layout_id, name, initial_state, commands FROM scenarios WHERE id = $1",
+		"SELECT id, user_id, layout_id, name, commands FROM scenarios WHERE id = $1",
 		scenarioID,
-	).Scan(&scenarioIDValue, &scenario.UserID, &layoutID, &scenario.Name, &initialStateJSON, &commandsJSON)
+	).Scan(&scenarioIDValue, &scenario.UserID, &layoutID, &scenario.Name, &commandsJSON)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("scenario not found")
@@ -564,11 +567,6 @@ func (s *PostgresStore) GetScenario(id string) (*Scenario, error) {
 
 	if layoutID.Valid {
 		scenario.LayoutID = int(layoutID.Int64)
-	}
-
-	err = json.Unmarshal(initialStateJSON, &scenario.InitialState)
-	if err != nil {
-		return nil, err
 	}
 
 	err = json.Unmarshal(commandsJSON, &scenario.Commands)
@@ -588,7 +586,7 @@ func (s *PostgresStore) GetScenario(id string) (*Scenario, error) {
 // ListScenarios lists scenarios for a user
 func (s *PostgresStore) ListScenarios(userID int) ([]Scenario, error) {
 	rows, err := s.db.Query(
-		"SELECT id, user_id, layout_id, name, initial_state, commands FROM scenarios WHERE user_id = $1 ORDER BY updated_at DESC",
+		"SELECT id, user_id, layout_id, name, commands FROM scenarios WHERE user_id = $1 ORDER BY updated_at DESC",
 		userID,
 	)
 	if err != nil {
@@ -601,9 +599,9 @@ func (s *PostgresStore) ListScenarios(userID int) ([]Scenario, error) {
 		var scenario Scenario
 		var scenarioIDValue int
 		var layoutID sql.NullInt64
-		var initialStateJSON, commandsJSON []byte
+		var commandsJSON []byte
 
-		err := rows.Scan(&scenarioIDValue, &scenario.UserID, &layoutID, &scenario.Name, &initialStateJSON, &commandsJSON)
+		err := rows.Scan(&scenarioIDValue, &scenario.UserID, &layoutID, &scenario.Name, &commandsJSON)
 		if err != nil {
 			return nil, err
 		}
@@ -611,11 +609,6 @@ func (s *PostgresStore) ListScenarios(userID int) ([]Scenario, error) {
 
 		if layoutID.Valid {
 			scenario.LayoutID = int(layoutID.Int64)
-		}
-
-		err = json.Unmarshal(initialStateJSON, &scenario.InitialState)
-		if err != nil {
-			return nil, err
 		}
 
 		err = json.Unmarshal(commandsJSON, &scenario.Commands)
@@ -697,8 +690,12 @@ func (s *PostgresStore) SaveExecution(userID int, scenarioID string) (string, er
 	if scenario.UserID != userID {
 		return "", fmt.Errorf("scenario not found")
 	}
+	layout, err := s.GetLayout(scenario.LayoutID, userID)
+	if err != nil {
+		return "", fmt.Errorf("layout not found")
+	}
 
-	stateJSON, err := json.Marshal(scenario.InitialState)
+	stateJSON, err := json.Marshal(layout.State)
 	if err != nil {
 		return "", err
 	}

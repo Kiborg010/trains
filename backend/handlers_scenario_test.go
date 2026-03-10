@@ -55,10 +55,14 @@ func TestScenarioEndpointsStepExecution(t *testing.T) {
 			{ID: "l1", Type: "locomotive", PathID: "1", PathIndex: 0, X: 0, Y: 0},
 		},
 	}
+	layoutID, err := appStore.SaveLayout(1, "layout", initial)
+	if err != nil {
+		t.Fatalf("failed to save layout: %v", err)
+	}
 
 	createRR := doJSONRequest(t, mux, http.MethodPost, "/api/scenarios", CreateScenarioRequest{
-		Name:         "test",
-		InitialState: initial,
+		Name:     "test",
+		LayoutID: layoutID,
 	}, token)
 	if createRR.Code != http.StatusOK {
 		t.Fatalf("create scenario status: %d", createRR.Code)
