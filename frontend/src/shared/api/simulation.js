@@ -125,6 +125,10 @@ export async function addScenarioCommand(scenarioId, payload) {
   return postJSON(`/scenarios/${scenarioId}/commands`, payload);
 }
 
+export async function deleteScenario(scenarioId) {
+  return deleteJSON(`/scenarios/${scenarioId}`);
+}
+
 export async function runScenario(scenarioId) {
   return postJSON(`/scenarios/${scenarioId}/run`, {});
 }

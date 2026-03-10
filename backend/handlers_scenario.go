@@ -109,6 +109,18 @@ func scenarioByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(parts) == 1 && r.Method == http.MethodDelete {
+		if err := appStore.DeleteScenario(scenarioID, userID); err != nil {
+			http.Error(w, "scenario not found", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok":      true,
+			"message": "scenario deleted",
+		})
+		return
+	}
+
 	if len(parts) == 2 && parts[1] == "commands" && r.Method == http.MethodPost {
 		addCommandHandler(w, r, userID, scenarioID)
 		return
