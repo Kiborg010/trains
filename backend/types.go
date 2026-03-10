@@ -15,6 +15,7 @@ type Vehicle struct {
 	ID        string  `json:"id"`
 	Type      string  `json:"type"`
 	Code      string  `json:"code,omitempty"`
+	Color     string  `json:"color"`
 	PathID    string  `json:"pathId,omitempty"`
 	PathIndex int     `json:"pathIndex,omitempty"`
 	X         float64 `json:"x"`

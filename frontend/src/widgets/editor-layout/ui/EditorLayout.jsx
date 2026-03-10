@@ -24,6 +24,17 @@ const ZOOM_STEP = 0.1;
 const SCENARIO_STEP_MOVE = "MOVE_LOCO";
 const SCENARIO_STEP_COUPLE = "COUPLE";
 const SCENARIO_STEP_DECOUPLE = "DECOUPLE";
+const DEFAULT_WAGON_COLOR = "#0ea5e9";
+const WAGON_COLOR_PALETTE = [
+  DEFAULT_WAGON_COLOR,
+  "#22c55e",
+  "#f59e0b",
+  "#f97316",
+  "#ef4444",
+  "#a855f7",
+  "#14b8a6",
+  "#64748b",
+];
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -195,6 +206,28 @@ function applyTimelineStepToVehicles(vehicles, step) {
   });
 }
 
+function mergeVehicleColors(previousVehicles, nextVehicles, rememberedColors) {
+  const nextList = Array.isArray(nextVehicles) ? nextVehicles : [];
+  const prevById = new Map((Array.isArray(previousVehicles) ? previousVehicles : []).map((v) => [v.id, v]));
+  return nextList.map((vehicle) => {
+    if (!vehicle || typeof vehicle !== "object") {
+      return vehicle;
+    }
+    if (vehicle.color) {
+      return vehicle;
+    }
+    const prev = prevById.get(vehicle.id);
+    const rememberedColor =
+      rememberedColors && typeof rememberedColors.get === "function"
+        ? rememberedColors.get(vehicle.id)
+        : "";
+    if (!prev?.color && !rememberedColor) {
+      return vehicle;
+    }
+    return { ...vehicle, color: prev?.color || rememberedColor };
+  });
+}
+
 function buildScenarioStepsFromBackendScenario(scenario, sourceVehicles = []) {
   if (!scenario || !Array.isArray(scenario.commands)) {
     return [];
@@ -254,6 +287,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const movementRunIdRef = useRef(0);
   const skipAutoResolvePassesRef = useRef(0);
   const scenarioStopRequestedRef = useRef(false);
+  const vehicleColorMemoryRef = useRef(new Map());
 
   const [mode, setMode] = useState("drawTrack");
   const [zoom, setZoom] = useState(1);
@@ -275,6 +309,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [selectedVehicleIds, setSelectedVehicleIds] = useState([]);
   const [couplings, setCouplings] = useState([]);
   const [selectedLocomotiveId, setSelectedLocomotiveId] = useState(null);
+  const [wagonPaintColor, setWagonPaintColor] = useState(DEFAULT_WAGON_COLOR);
   const [targetPathId, setTargetPathId] = useState("");
   const [targetPathIndex, setTargetPathIndex] = useState(null);
   const [isMoving, setIsMoving] = useState(false);
@@ -309,6 +344,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const isPlaceMode =
     isManeuversPanel && (mode === "placeWagon" || mode === "placeLocomotive");
   const isMoveMode = isMovementPanel && mode === "move";
+  const isPaintMode = isManeuversPanel && mode === "paintWagon";
 
   const selectedSegmentSet = useMemo(() => new Set(selectedSegmentIds), [selectedSegmentIds]);
   const selectedVehicleSet = useMemo(() => new Set(selectedVehicleIds), [selectedVehicleIds]);
@@ -345,6 +381,22 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       ),
     [vehicles]
   );
+
+  useEffect(() => {
+    const memory = vehicleColorMemoryRef.current;
+    const liveIds = new Set();
+    for (const vehicle of vehicles) {
+      liveIds.add(vehicle.id);
+      if (vehicle?.color) {
+        memory.set(vehicle.id, vehicle.color);
+      }
+    }
+    for (const id of [...memory.keys()]) {
+      if (!liveIds.has(id)) {
+        memory.delete(id);
+      }
+    }
+  }, [vehicles]);
 
   useEffect(() => {
     function updateViewport() {
@@ -452,7 +504,9 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         }
 
         setVehicles((prev) =>
-          hasVehiclePositionChanges(prev, response.vehicles) ? response.vehicles : prev
+          hasVehiclePositionChanges(prev, response.vehicles)
+            ? mergeVehicleColors(prev, response.vehicles, vehicleColorMemoryRef.current)
+            : prev
         );
       } catch (error) {
         // Keep current state if backend is temporarily unavailable.
@@ -538,7 +592,9 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
     const nextState = response.state || {};
     setSegments(nextState.segments || []);
-    setVehicles(nextState.vehicles || []);
+    setVehicles((prev) =>
+      mergeVehicleColors(prev, nextState.vehicles || [], vehicleColorMemoryRef.current)
+    );
     setCouplings(nextState.couplings || []);
     if (response.message) {
       setMovementHint(response.message);
@@ -558,9 +614,19 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
   async function handleSaveLayout() {
     try {
+      const vehiclesForSave = vehicles.map((vehicle) => {
+        if (vehicle.type !== "wagon") {
+          return { ...vehicle };
+        }
+        return {
+          ...vehicle,
+          color: vehicle.color || DEFAULT_WAGON_COLOR,
+        };
+      });
+
       const payload = {
         name: layoutName.trim() || "Схема",
-        state: { segments, vehicles, couplings },
+        state: { segments, vehicles: vehiclesForSave, couplings },
       };
 
       let response;
@@ -591,7 +657,9 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       const state = response.layout?.state || {};
       stopMovement(true);
       setSegments(state.segments || []);
-      setVehicles(state.vehicles || []);
+      setVehicles((prev) =>
+        mergeVehicleColors(prev, state.vehicles || [], vehicleColorMemoryRef.current)
+      );
       setCouplings(state.couplings || []);
       setScenarioInitialState(null);
       setScenarioViewMode("start");
@@ -849,8 +917,14 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                 resolve({ ok: false, vehicles: sourceVehicles });
                 return;
               }
-              currentVehicles = resolved.vehicles;
-              setVehicles(resolved.vehicles);
+              currentVehicles = mergeVehicleColors(
+                currentVehicles,
+                resolved.vehicles,
+                vehicleColorMemoryRef.current
+              );
+              setVehicles((prev) =>
+                mergeVehicleColors(prev, currentVehicles, vehicleColorMemoryRef.current)
+              );
             }
           } catch (error) {
             console.error("resolveVehicles failed", error);
@@ -866,7 +940,9 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
           return;
         }
         currentVehicles = applyTimelineStepToVehicles(currentVehicles, step);
-        setVehicles(currentVehicles);
+        setVehicles((prev) =>
+          mergeVehicleColors(prev, currentVehicles, vehicleColorMemoryRef.current)
+        );
         setMovementCellsPassed((prev) => prev + 1);
         stepIndex += 1;
       }, 180);
@@ -985,7 +1061,9 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     const safeSnapshot = cloneLayoutState(snapshot || { segments: [], vehicles: [], couplings: [] });
     skipAutoResolvePassesRef.current = skipResolvePasses;
     setSegments(safeSnapshot.segments || []);
-    setVehicles(safeSnapshot.vehicles || []);
+    setVehicles((prev) =>
+      mergeVehicleColors(prev, safeSnapshot.vehicles || [], vehicleColorMemoryRef.current)
+    );
     setCouplings(safeSnapshot.couplings || []);
     return safeSnapshot;
   }
@@ -1087,7 +1165,11 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
             strictCouplings: true,
           });
           if (resolved.ok && Array.isArray(resolved.vehicles)) {
-            instantVehicles = resolved.vehicles;
+            instantVehicles = mergeVehicleColors(
+              instantVehicles,
+              resolved.vehicles,
+              vehicleColorMemoryRef.current
+            );
           }
         } catch {
           // Keep instantVehicles as-is if resolve is temporarily unavailable.
@@ -1501,9 +1583,15 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
           throw new Error(response.message || "Не удалось выполнить шаг сцепки/расцепки.");
         }
         const nextState = response.state || {};
-        workingVehicles = nextState.vehicles || [];
+        workingVehicles = mergeVehicleColors(
+          workingVehicles,
+          nextState.vehicles || [],
+          vehicleColorMemoryRef.current
+        );
         workingCouplings = nextState.couplings || [];
-        setVehicles(workingVehicles);
+        setVehicles((prev) =>
+          mergeVehicleColors(prev, workingVehicles, vehicleColorMemoryRef.current)
+        );
         setCouplings(workingCouplings);
         historyDraft[index] = {
           beforeState,
@@ -1529,7 +1617,9 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         setTargetPathId(lastTargetPathId);
         setTargetPathIndex(lastTargetIndex);
       }
-      setVehicles(workingVehicles);
+      setVehicles((prev) =>
+        mergeVehicleColors(prev, workingVehicles, vehicleColorMemoryRef.current)
+      );
       setCouplings(workingCouplings);
       setScenarioExecutingStep(null);
       setCurrentScenarioStep(steps.length);
@@ -1936,6 +2026,21 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   function handleVehicleClick(event, vehicleId) {
     event.stopPropagation();
 
+    if (isPaintMode) {
+      const vehicle = vehicleById.get(vehicleId);
+      if (!vehicle || vehicle.type !== "wagon") {
+        return;
+      }
+      setVehicles((prev) =>
+        prev.map((item) =>
+          item.id === vehicleId ? { ...item, color: wagonPaintColor } : item
+        )
+      );
+      setSelectedVehicleIds([vehicleId]);
+      setMovementHint(`Вагон покрашен в ${wagonPaintColor}.`);
+      return;
+    }
+
     if (isMoveMode) {
       const vehicle = vehicleById.get(vehicleId);
       if (!vehicle || vehicle.type !== "locomotive") {
@@ -2099,7 +2204,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     setActivePanel(nextPanel);
 
     if (nextPanel === "maneuvers") {
-      if (!["drawTrack", "placeWagon", "placeLocomotive", "edit"].includes(mode)) {
+      if (!["drawTrack", "placeWagon", "placeLocomotive", "paintWagon", "edit"].includes(mode)) {
         switchMode("drawTrack");
       }
       return;
@@ -2140,6 +2245,8 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         ? "Добавление вагонов"
         : mode === "placeLocomotive"
           ? "Добавление локомотивов"
+          : mode === "paintWagon"
+            ? "Покраска вагонов"
           : mode === "move"
             ? "Движение"
             : mode === "edit"
@@ -2188,6 +2295,37 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
               >
                 Добавление локомотивов
               </button>
+              <button
+                type="button"
+                className={`toolButton ${mode === "paintWagon" ? "active" : ""}`}
+                onClick={() => switchMode("paintWagon")}
+              >
+                Покраска
+              </button>
+              <div>
+                <p className="counter" style={{ marginBottom: 6 }}>
+                  Цвет вагона
+                </p>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {WAGON_COLOR_PALETTE.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      onClick={() => setWagonPaintColor(color)}
+                      title={color}
+                      style={{
+                        width: 24,
+                        height: 24,
+                        borderRadius: 6,
+                        background: color,
+                        border: wagonPaintColor === color ? "3px solid #f8fafc" : "2px solid #334155",
+                        boxShadow: wagonPaintColor === color ? "0 0 0 2px #0f172a" : "none",
+                        cursor: "pointer",
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
               <button
                 type="button"
                 className={`toolButton ${mode === "edit" ? "active" : ""}`}
@@ -2563,7 +2701,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                 width={GRID_SIZE - 12}
                 height={GRID_SIZE - 12}
                 rx="8"
-                fill={vehicle.type === "locomotive" ? "#dc2626" : "#0ea5e9"}
+                fill={vehicle.type === "locomotive" ? "#dc2626" : vehicle.color || DEFAULT_WAGON_COLOR}
                 stroke={selectedVehicleSet.has(vehicle.id) ? "#facc15" : vehicle.type === "locomotive" ? "#7f1d1d" : "#0c4a6e"}
                 strokeWidth={selectedVehicleSet.has(vehicle.id) ? "4" : "2"}
                 className={isEditMode ? "slotPoint" : ""}
