@@ -24,6 +24,10 @@ const ZOOM_STEP = 0.1;
 const SCENARIO_STEP_MOVE = "MOVE_LOCO";
 const SCENARIO_STEP_COUPLE = "COUPLE";
 const SCENARIO_STEP_DECOUPLE = "DECOUPLE";
+const PATH_TYPE_MAIN = "main";
+const PATH_TYPE_SORTING = "sorting";
+const PATH_TYPE_LEAD = "lead";
+const PATH_TYPE_OTHER = "other";
 const DEFAULT_WAGON_COLOR = "#0ea5e9";
 const WAGON_COLOR_PALETTE = [
   DEFAULT_WAGON_COLOR,
@@ -35,6 +39,24 @@ const WAGON_COLOR_PALETTE = [
   "#14b8a6",
   "#64748b",
 ];
+const PATH_TYPE_OPTIONS = [
+  { value: PATH_TYPE_MAIN, label: "Главный" },
+  { value: PATH_TYPE_SORTING, label: "Сортировочный" },
+  { value: PATH_TYPE_LEAD, label: "Вытяжной" },
+  { value: PATH_TYPE_OTHER, label: "Прочий" },
+];
+const PATH_TYPE_LABELS = {
+  [PATH_TYPE_MAIN]: "Главный",
+  [PATH_TYPE_SORTING]: "Сортировочный",
+  [PATH_TYPE_LEAD]: "Вытяжной",
+  [PATH_TYPE_OTHER]: "Прочий",
+};
+const PATH_TYPE_COLORS = {
+  [PATH_TYPE_MAIN]: "#f59e0b",
+  [PATH_TYPE_SORTING]: "#22c55e",
+  [PATH_TYPE_LEAD]: "#38bdf8",
+  [PATH_TYPE_OTHER]: "#334155",
+};
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -153,6 +175,25 @@ function normalizeScenarioStepType(type) {
     return normalized;
   }
   return SCENARIO_STEP_MOVE;
+}
+
+function normalizePathType(type) {
+  const normalized = String(type || "").trim().toLowerCase();
+  if (
+    normalized === PATH_TYPE_MAIN ||
+    normalized === PATH_TYPE_SORTING ||
+    normalized === PATH_TYPE_LEAD
+  ) {
+    return normalized;
+  }
+  return PATH_TYPE_OTHER;
+}
+
+function getSegmentStrokeColor(segmentType, isSelected) {
+  if (isSelected) {
+    return "#2563eb";
+  }
+  return PATH_TYPE_COLORS[normalizePathType(segmentType)] || PATH_TYPE_COLORS[PATH_TYPE_OTHER];
 }
 
 function normalizeScenarioStep(step) {
@@ -309,6 +350,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [selectedVehicleIds, setSelectedVehicleIds] = useState([]);
   const [couplings, setCouplings] = useState([]);
   const [selectedLocomotiveId, setSelectedLocomotiveId] = useState(null);
+  const [heuristicLocomotiveId, setHeuristicLocomotiveId] = useState("");
   const [wagonPaintColor, setWagonPaintColor] = useState(DEFAULT_WAGON_COLOR);
   const [targetPathId, setTargetPathId] = useState("");
   const [targetPathIndex, setTargetPathIndex] = useState(null);
@@ -350,6 +392,23 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const selectedVehicleSet = useMemo(() => new Set(selectedVehicleIds), [selectedVehicleIds]);
   const vehicleById = useMemo(() => new Map(vehicles.map((v) => [v.id, v])), [vehicles]);
   const vehicleCodeById = useMemo(() => buildVehicleCodeMap(vehicles), [vehicles]);
+  const locomotiveOptions = useMemo(
+    () => vehicles.filter((vehicle) => vehicle.type === "locomotive"),
+    [vehicles]
+  );
+  const selectedSegmentsType = useMemo(() => {
+    if (!selectedSegmentIds.length) {
+      return "";
+    }
+    const selected = segments.filter((segment) => selectedSegmentSet.has(segment.id));
+    if (!selected.length) {
+      return "";
+    }
+    const firstType = normalizePathType(selected[0].type);
+    return selected.every((segment) => normalizePathType(segment.type) === firstType)
+      ? firstType
+      : "";
+  }, [segments, selectedSegmentIds, selectedSegmentSet]);
 
   const nodes = useMemo(() => {
     const map = new Map();
@@ -687,6 +746,20 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       setMovementHint("Схема удалена.");
     } catch (error) {
       setMovementHint(error.message || "Не удалось удалить схему.");
+    }
+  }
+
+  function handleSelectedSegmentsTypeChange(nextType) {
+    const normalizedType = normalizePathType(nextType);
+    setSegments((prev) =>
+      prev.map((segment) =>
+        selectedSegmentSet.has(segment.id) ? { ...segment, type: normalizedType } : segment
+      )
+    );
+    if (selectedSegmentIds.length > 0) {
+      setMovementHint(
+        `Тип ${selectedSegmentIds.length === 1 ? "пути" : "путей"}: ${PATH_TYPE_LABELS[normalizedType]}.`
+      );
     }
   }
 
@@ -2333,6 +2406,32 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
               >
                 Редактирование
               </button>
+              {selectedSegmentIds.length > 0 && (
+                <select
+                  className="toolInput"
+                  value={selectedSegmentsType}
+                  onChange={(event) => handleSelectedSegmentsTypeChange(event.target.value)}
+                >
+                  <option value="">Тип выбранных путей</option>
+                  {PATH_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <select
+                className="toolInput"
+                value={heuristicLocomotiveId}
+                onChange={(event) => setHeuristicLocomotiveId(event.target.value)}
+              >
+                <option value="">Маневровый локомотив</option>
+                {locomotiveOptions.map((vehicle) => (
+                  <option key={vehicle.id} value={vehicle.id}>
+                    {vehicleCodeById.get(vehicle.id) || vehicle.id}
+                  </option>
+                ))}
+              </select>
               <button type="button" className="toolButton" onClick={deleteSelectedSegments}>
                 Удалить выбранные пути
               </button>
@@ -2626,7 +2725,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                 y1={segment.from.y}
                 x2={segment.to.x}
                 y2={segment.to.y}
-                stroke={selectedSegmentSet.has(segment.id) ? "#2563eb" : "#334155"}
+                stroke={getSegmentStrokeColor(segment.type, selectedSegmentSet.has(segment.id))}
                 strokeWidth={selectedSegmentSet.has(segment.id) ? "8" : "6"}
                 strokeLinecap="round"
                 className={isEditMode ? "draggableLine" : ""}
@@ -2647,7 +2746,9 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                   setSelectedSegmentIds([segment.id]);
                 }}
               >
-                <title>Путь: {segment.id}</title>
+                <title>
+                  Путь: {segment.id} ({PATH_TYPE_LABELS[normalizePathType(segment.type)]})
+                </title>
               </line>
             ))}
 

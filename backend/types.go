@@ -7,6 +7,7 @@ type Point struct {
 
 type Segment struct {
 	ID   string `json:"id"`
+	Type string `json:"type,omitempty"`
 	From Point  `json:"from"`
 	To   Point  `json:"to"`
 }

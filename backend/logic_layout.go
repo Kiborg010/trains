@@ -111,6 +111,7 @@ func applyLayoutOperation(req LayoutOperationRequest) (LayoutState, string, erro
 		}
 		state.Segments = append(state.Segments, Segment{
 			ID:   nextPathID(state.Segments),
+			Type: "other",
 			From: *req.From,
 			To:   *req.To,
 		})
