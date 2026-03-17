@@ -4,6 +4,11 @@ import (
 	"math"
 )
 
+type segmentEndpoint struct {
+	segment Segment
+	side    string
+}
+
 func collectRailSlots(segments []Segment, gridSize float64) []Slot {
 	uniq := map[string]Slot{}
 	for _, segment := range segments {
@@ -82,7 +87,53 @@ func buildSlotAdjacency(segments []Segment, gridSize float64) map[string]map[str
 			adj[b][a] = struct{}{}
 		}
 	}
+
+	connectNearbyEndpoints(adj, segments, gridSize)
 	return adj
+}
+
+type endpointSlot struct {
+	slotID string
+	x      float64
+	y      float64
+}
+
+func connectNearbyEndpoints(adj map[string]map[string]struct{}, segments []Segment, gridSize float64) {
+	endpoints := make([]endpointSlot, 0, len(segments)*2)
+	for _, segment := range segments {
+		points := getSegmentSlots(segment, gridSize)
+		if len(points) == 0 {
+			continue
+		}
+		start := points[0]
+		end := points[len(points)-1]
+		endpoints = append(endpoints,
+			endpointSlot{slotID: slotID(start.X, start.Y), x: start.X, y: start.Y},
+			endpointSlot{slotID: slotID(end.X, end.Y), x: end.X, y: end.Y},
+		)
+	}
+
+	epsilon := math.Max(0.5, gridSize*0.05)
+	for i := 0; i < len(endpoints); i++ {
+		for j := i + 1; j < len(endpoints); j++ {
+			a := endpoints[i]
+			b := endpoints[j]
+			if a.slotID == b.slotID {
+				continue
+			}
+			if math.Hypot(a.x-b.x, a.y-b.y) > epsilon {
+				continue
+			}
+			if _, ok := adj[a.slotID]; !ok {
+				adj[a.slotID] = map[string]struct{}{}
+			}
+			if _, ok := adj[b.slotID]; !ok {
+				adj[b.slotID] = map[string]struct{}{}
+			}
+			adj[a.slotID][b.slotID] = struct{}{}
+			adj[b.slotID][a.slotID] = struct{}{}
+		}
+	}
 }
 
 func buildAdjacentSlotPairs(segments []Segment, gridSize float64) map[string]struct{} {
@@ -107,6 +158,51 @@ func buildAdjacentPathSlotPairs(segments []Segment, gridSize float64) map[string
 		}
 	}
 	return pairs
+}
+
+func buildTrackConnectionsFromSegments(segments []Segment) []MovementTrackConnection {
+	byNode := map[string][]segmentEndpoint{}
+	for _, segment := range segments {
+		byNode[slotID(segment.From.X, segment.From.Y)] = append(byNode[slotID(segment.From.X, segment.From.Y)], segmentEndpoint{
+			segment: segment,
+			side:    "start",
+		})
+		byNode[slotID(segment.To.X, segment.To.Y)] = append(byNode[slotID(segment.To.X, segment.To.Y)], segmentEndpoint{
+			segment: segment,
+			side:    "end",
+		})
+	}
+
+	seen := map[string]struct{}{}
+	result := make([]MovementTrackConnection, 0)
+	for _, entries := range byNode {
+		if len(entries) < 2 {
+			continue
+		}
+		connectionType := "serial"
+		if len(entries) > 2 {
+			connectionType = "switch"
+		}
+		for i := 0; i < len(entries); i++ {
+			for j := i + 1; j < len(entries); j++ {
+				a := entries[i]
+				b := entries[j]
+				id := a.segment.ID + ":" + b.segment.ID + ":" + a.side + ":" + b.side
+				if _, ok := seen[id]; ok {
+					continue
+				}
+				seen[id] = struct{}{}
+				result = append(result, MovementTrackConnection{
+					Track1ID:       a.segment.ID,
+					Track2ID:       b.segment.ID,
+					Track1Side:     a.side,
+					Track2Side:     b.side,
+					ConnectionType: connectionType,
+				})
+			}
+		}
+	}
+	return result
 }
 
 func getSegmentSlots(segment Segment, step float64) []Point {

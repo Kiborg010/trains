@@ -1297,15 +1297,18 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     sourceVehicles,
     sourceCouplings = couplings
   ) {
-    const response = await planMovement({
+    const payload = {
       gridSize: GRID_SIZE,
       segments,
+      trackConnections: buildTrackConnectionsFromSegments(segments),
       vehicles: sourceVehicles,
       couplings: sourceCouplings,
       selectedLocomotiveId: locoId,
       targetPathId: targetPathIdValue,
       targetIndex: targetIndexValue,
-    });
+    };
+
+    const response = await planMovement(payload);
 
     if (!response.ok) {
       throw new Error(response.message || "Не удалось рассчитать движение.");
@@ -2536,7 +2539,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     try {
       await executeMovement(selectedLocomotiveId);
     } catch (error) {
-      setMovementHint("Ошибка связи с backend.");
+      setMovementHint(error.message || "Ошибка связи с backend.");
     }
   }
   function startVehicleDrag(event, vehicleId) {

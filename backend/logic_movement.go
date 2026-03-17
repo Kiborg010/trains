@@ -2,28 +2,58 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"sort"
 	"strings"
 )
 
 func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
+	fail := func(message string) (PlanMovementResponse, error) {
+		return PlanMovementResponse{}, errors.New(message)
+	}
+
 	if req.SelectedLocomotiveID == "" {
-		return PlanMovementResponse{}, errors.New("Select locomotive.")
+		return fail("Select locomotive.")
 	}
 	if strings.TrimSpace(req.TargetPathID) == "" {
-		return PlanMovementResponse{}, errors.New("Select target path.")
+		return fail("Select target path.")
 	}
 
 	pathSlots := collectPathSlots(req.Segments, req.GridSize)
 	if len(pathSlots) == 0 {
-		return PlanMovementResponse{}, errors.New("No rail slots available.")
+		return fail("No rail slots available.")
 	}
-	targetSlot, ok := findPathSlot(pathSlots, req.TargetPathID, req.TargetIndex)
-	if !ok {
-		return PlanMovementResponse{}, errors.New("Target slot is unavailable.")
+
+	targetSegmentFound := false
+	targetCapacity := 0
+	for _, segment := range req.Segments {
+		if segment.ID != req.TargetPathID {
+			continue
+		}
+		targetSegmentFound = true
+		targetCapacity = len(getSegmentSlots(segment, req.GridSize))
+		break
 	}
-	targetSlotID := slotID(targetSlot.X, targetSlot.Y)
+	if !targetSegmentFound {
+		return fail(fmt.Sprintf("Target path was not found: %s.", req.TargetPathID))
+	}
+	if req.TargetIndex < 0 || req.TargetIndex >= targetCapacity {
+		return fail(fmt.Sprintf(
+			"Target index is outside path capacity: track_id=%s index=%d capacity=%d.",
+			req.TargetPathID,
+			req.TargetIndex,
+			targetCapacity,
+		))
+	}
+
+	if _, ok := findPathSlot(pathSlots, req.TargetPathID, req.TargetIndex); !ok {
+		return fail(fmt.Sprintf(
+			"Target slot is unavailable: track_id=%s index=%d.",
+			req.TargetPathID,
+			req.TargetIndex,
+		))
+	}
 
 	normalizedVehicles := make([]Vehicle, 0, len(req.Vehicles))
 	vehicleByID := make(map[string]Vehicle, len(req.Vehicles))
@@ -35,7 +65,7 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 
 	locomotive, exists := vehicleByID[req.SelectedLocomotiveID]
 	if !exists || locomotive.Type != "locomotive" {
-		return PlanMovementResponse{}, errors.New("Selected unit is not a locomotive.")
+		return fail("Selected unit is not a locomotive.")
 	}
 
 	slots := collectRailSlots(req.Segments, req.GridSize)
@@ -45,20 +75,24 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 	}
 
 	slotAdj := buildSlotAdjacency(req.Segments, req.GridSize)
+	trackConnections := req.TrackConnections
+	if len(trackConnections) == 0 {
+		trackConnections = buildTrackConnectionsFromSegments(req.Segments)
+	}
 	trainOrder, err := buildTrainOrder(req.SelectedLocomotiveID, normalizedVehicles, req.Couplings)
 	if err != nil {
-		return PlanMovementResponse{}, err
+		return fail(err.Error())
 	}
 
 	currentSlotByVehicleID := make(map[string]string, len(trainOrder))
 	for _, id := range trainOrder {
 		v, ok := vehicleByID[id]
 		if !ok {
-			return PlanMovementResponse{}, errors.New("Train contains unknown vehicle.")
+			return fail("Train contains unknown vehicle.")
 		}
 		nearest := findNearestSlot(Point{X: v.X, Y: v.Y}, slots)
 		if nearest == nil {
-			return PlanMovementResponse{}, errors.New("No rail slots available.")
+			return fail("No rail slots available.")
 		}
 		currentSlotByVehicleID[id] = nearest.ID
 	}
@@ -72,14 +106,27 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 		a := initialSlots[i]
 		b := initialSlots[i+1]
 		if _, ok := slotAdj[a][b]; !ok {
-			return PlanMovementResponse{}, errors.New("Coupled train must stand on adjacent slots.")
+			return fail("Coupled train must stand on adjacent slots.")
 		}
 	}
 
-	locoStart := currentSlotByVehicleID[req.SelectedLocomotiveID]
-	path := dijkstraPath(slotAdj, locoStart, targetSlotID)
+	trackPath, trackRoute := dijkstraTrackPath(trackConnections, locomotive.PathID, req.TargetPathID)
+	path, routeSlotByID, pathErr := buildSlotPathFromTrackRoute(
+		req.Segments,
+		locomotive.PathID,
+		locomotive.PathIndex,
+		req.TargetPathID,
+		req.TargetIndex,
+		trackPath,
+		trackRoute,
+		req.GridSize,
+	)
+	for id, slot := range routeSlotByID {
+		slotByID[id] = slot
+	}
 	if len(path) < 2 {
-		return PlanMovementResponse{}, errors.New("Path was not found.")
+		_ = pathErr
+		return fail("Path was not found.")
 	}
 
 	currentLocoToTail := make([]string, 0, len(trainOrder))
@@ -92,7 +139,7 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 	if isBackwardPush && len(trainOrder) > 1 {
 		extended, extErr := extendPathForBackwardPush(path, slotAdj, slotByID, len(trainOrder)-1)
 		if extErr != nil {
-			return PlanMovementResponse{}, extErr
+			return fail(extErr.Error())
 		}
 		drivingPath = extended
 	}
@@ -111,7 +158,7 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 
 	maxSteps := len(path) - 1
 	if maxSteps < 1 {
-		return PlanMovementResponse{}, errors.New("Not enough path length.")
+		return fail("Not enough path length.")
 	}
 
 	timeline := make([][]Position, 0, maxSteps)
@@ -170,7 +217,7 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 		}
 
 		if !valid {
-			return PlanMovementResponse{}, errors.New("Movement is blocked: not enough free slots.")
+			return fail("Movement is blocked: not enough free slots.")
 		}
 
 		timeline = append(timeline, stepPositions)
@@ -290,6 +337,202 @@ func buildTrainOrder(locomotiveID string, vehicles []Vehicle, couplings []Coupli
 	}
 
 	return reverseStrings(orderTailToLoco), nil
+}
+
+type trackEdge struct {
+	NextID      string
+	CurrentSide string
+	NextSide    string
+}
+
+type trackRouteEdge struct {
+	FromTrackID string
+	ToTrackID   string
+	FromSide    string
+	ToSide      string
+}
+
+func dijkstraTrackPath(connections []MovementTrackConnection, startTrackID, goalTrackID string) ([]string, []trackRouteEdge) {
+	if startTrackID == "" || goalTrackID == "" {
+		return nil, nil
+	}
+	if startTrackID == goalTrackID {
+		return []string{startTrackID}, nil
+	}
+
+	adjacency := buildTrackAdjacency(connections)
+	if len(adjacency[startTrackID]) == 0 || len(adjacency[goalTrackID]) == 0 {
+		return nil, nil
+	}
+
+	prevTrack := map[string]string{}
+	prevEdge := map[string]trackRouteEdge{}
+	visited := map[string]struct{}{startTrackID: {}}
+	queue := []string{startTrackID}
+
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if cur == goalTrackID {
+			break
+		}
+		for _, edge := range adjacency[cur] {
+			if _, seen := visited[edge.NextID]; seen {
+				continue
+			}
+			visited[edge.NextID] = struct{}{}
+			prevTrack[edge.NextID] = cur
+			prevEdge[edge.NextID] = trackRouteEdge{
+				FromTrackID: cur,
+				ToTrackID:   edge.NextID,
+				FromSide:    edge.CurrentSide,
+				ToSide:      edge.NextSide,
+			}
+			queue = append(queue, edge.NextID)
+		}
+	}
+
+	if _, ok := prevTrack[goalTrackID]; !ok {
+		return nil, nil
+	}
+
+	trackPath := []string{goalTrackID}
+	route := make([]trackRouteEdge, 0)
+	cur := goalTrackID
+	for cur != startTrackID {
+		edge := prevEdge[cur]
+		route = append(route, edge)
+		cur = prevTrack[cur]
+		trackPath = append(trackPath, cur)
+	}
+
+	for i, j := 0, len(trackPath)-1; i < j; i, j = i+1, j-1 {
+		trackPath[i], trackPath[j] = trackPath[j], trackPath[i]
+	}
+	for i, j := 0, len(route)-1; i < j; i, j = i+1, j-1 {
+		route[i], route[j] = route[j], route[i]
+	}
+	return trackPath, route
+}
+
+func buildTrackAdjacency(connections []MovementTrackConnection) map[string][]trackEdge {
+	adjacency := map[string][]trackEdge{}
+	for _, connection := range connections {
+		adjacency[connection.Track1ID] = append(adjacency[connection.Track1ID], trackEdge{
+			NextID:      connection.Track2ID,
+			CurrentSide: connection.Track1Side,
+			NextSide:    connection.Track2Side,
+		})
+		adjacency[connection.Track2ID] = append(adjacency[connection.Track2ID], trackEdge{
+			NextID:      connection.Track1ID,
+			CurrentSide: connection.Track2Side,
+			NextSide:    connection.Track1Side,
+		})
+	}
+	return adjacency
+}
+
+func buildSlotPathFromTrackRoute(
+	segments []Segment,
+	startTrackID string,
+	startIndex int,
+	targetTrackID string,
+	targetIndex int,
+	trackPath []string,
+	route []trackRouteEdge,
+	gridSize float64,
+) ([]string, map[string]Slot, error) {
+	if len(trackPath) == 0 {
+		return nil, nil, errors.New("empty track path")
+	}
+
+	slotsByTrack := map[string][]Point{}
+	for _, segment := range segments {
+		slotsByTrack[segment.ID] = getSegmentSlots(segment, gridSize)
+	}
+
+	slotByID := map[string]Slot{}
+	result := make([]string, 0)
+	appendTrackSlice := func(trackID string, fromIndex, toIndex int) error {
+		points := slotsByTrack[trackID]
+		if len(points) == 0 {
+			return fmt.Errorf("track %s has no slots", trackID)
+		}
+		if fromIndex < 0 || fromIndex >= len(points) || toIndex < 0 || toIndex >= len(points) {
+			return fmt.Errorf("track %s slice is outside capacity: %d -> %d of %d", trackID, fromIndex, toIndex, len(points))
+		}
+		step := 1
+		if fromIndex > toIndex {
+			step = -1
+		}
+		for idx := fromIndex; ; idx += step {
+			point := points[idx]
+			id := slotID(point.X, point.Y)
+			slotByID[id] = Slot{ID: id, X: point.X, Y: point.Y}
+			if len(result) == 0 || result[len(result)-1] != id {
+				result = append(result, id)
+			}
+			if idx == toIndex {
+				break
+			}
+		}
+		return nil
+	}
+
+	sideIndex := func(trackID, side string) (int, error) {
+		points := slotsByTrack[trackID]
+		if len(points) == 0 {
+			return 0, fmt.Errorf("track %s has no slots", trackID)
+		}
+		switch side {
+		case "start":
+			return 0, nil
+		case "end":
+			return len(points) - 1, nil
+		default:
+			return 0, fmt.Errorf("unsupported side %q for track %s", side, trackID)
+		}
+	}
+
+	if len(trackPath) == 1 {
+		if err := appendTrackSlice(startTrackID, startIndex, targetIndex); err != nil {
+			return nil, nil, err
+		}
+		return result, slotByID, nil
+	}
+
+	firstBoundary, err := sideIndex(startTrackID, route[0].FromSide)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := appendTrackSlice(startTrackID, startIndex, firstBoundary); err != nil {
+		return nil, nil, err
+	}
+
+	for i := 1; i < len(trackPath)-1; i++ {
+		trackID := trackPath[i]
+		entryIndex, err := sideIndex(trackID, route[i-1].ToSide)
+		if err != nil {
+			return nil, nil, err
+		}
+		exitIndex, err := sideIndex(trackID, route[i].FromSide)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := appendTrackSlice(trackID, entryIndex, exitIndex); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	lastEntryIndex, err := sideIndex(targetTrackID, route[len(route)-1].ToSide)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := appendTrackSlice(targetTrackID, lastEntryIndex, targetIndex); err != nil {
+		return nil, nil, err
+	}
+
+	return result, slotByID, nil
 }
 
 func dijkstraPath(adjacency map[string]map[string]struct{}, startID, goalID string) []string {

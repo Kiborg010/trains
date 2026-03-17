@@ -51,6 +51,7 @@ type ValidateCouplingResponse struct {
 type PlanMovementRequest struct {
 	GridSize             float64    `json:"gridSize"`
 	Segments             []Segment  `json:"segments"`
+	TrackConnections     []MovementTrackConnection `json:"trackConnections,omitempty"`
 	Vehicles             []Vehicle  `json:"vehicles"`
 	Couplings            []Coupling `json:"couplings"`
 	SelectedLocomotiveID string     `json:"selectedLocomotiveId"`
@@ -69,6 +70,14 @@ type PathSlot struct {
 	Index  int
 	X      float64
 	Y      float64
+}
+
+type MovementTrackConnection struct {
+	Track1ID       string `json:"track1_id"`
+	Track2ID       string `json:"track2_id"`
+	Track1Side     string `json:"track1_side"`
+	Track2Side     string `json:"track2_side"`
+	ConnectionType string `json:"connection_type,omitempty"`
 }
 
 type PlanMovementResponse struct {
