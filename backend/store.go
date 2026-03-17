@@ -78,6 +78,7 @@ type InMemoryStore struct {
 	nextUserID     int
 	nextLayoutID   int
 	nextSchemeID   int
+	nextScenarioID int
 	usersByID      map[int]User
 	userIDsByEmail map[string]int
 	layoutsByID    map[int]Layout
@@ -91,6 +92,7 @@ func NewInMemoryStore() *InMemoryStore {
 		nextUserID:     1,
 		nextLayoutID:   1,
 		nextSchemeID:   1,
+		nextScenarioID: 1,
 		usersByID:      map[int]User{},
 		userIDsByEmail: map[string]int{},
 		layoutsByID:    map[int]Layout{},

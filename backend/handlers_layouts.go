@@ -53,20 +53,11 @@ func layoutsHandler(w http.ResponseWriter, r *http.Request) {
 		req.Name = "Layout"
 	}
 
-	layoutID, err := appStore.SaveLayout(userID, req.Name, req.State)
+	layout, err := createLegacyLayoutNormalizedFirst(userID, req.Name, req.State)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, SaveLayoutResponse{
 			OK:      false,
-			Message: "failed to save layout",
-		})
-		return
-	}
-
-	layout, err := appStore.GetLayout(layoutID, userID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, SaveLayoutResponse{
-			OK:      false,
-			Message: "failed to load saved layout",
+			Message: err.Error(),
 		})
 		return
 	}
@@ -124,11 +115,11 @@ func layoutByIDHandler(w http.ResponseWriter, r *http.Request) {
 		if req.Name == "" {
 			req.Name = "Layout"
 		}
-		if err := appStore.UpdateLayout(layoutID, userID, req.Name, req.State); err != nil {
+		if err := updateLegacyLayoutNormalizedFirst(userID, layoutID, req.Name, req.State); err != nil {
 			http.Error(w, "layout not found", http.StatusNotFound)
 			return
 		}
-		layout, err := appStore.GetLayout(layoutID, userID)
+		layout, err := getLegacyLayoutFromNormalized(userID, layoutID)
 		if err != nil {
 			http.Error(w, "layout not found", http.StatusNotFound)
 			return
@@ -137,7 +128,7 @@ func layoutByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 
 	case http.MethodDelete:
-		if err := appStore.DeleteLayout(layoutID, userID); err != nil {
+		if err := deleteLegacyLayoutNormalizedFirst(userID, layoutID); err != nil {
 			http.Error(w, "layout not found", http.StatusNotFound)
 			return
 		}

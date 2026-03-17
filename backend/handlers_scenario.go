@@ -60,7 +60,7 @@ func scenariosHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if _, err := appStore.GetLayout(req.LayoutID, userID); err != nil {
+	if _, err := getLegacyLayoutFromNormalized(userID, req.LayoutID); err != nil {
 		writeJSON(w, http.StatusBadRequest, CreateScenarioResponse{
 			OK:      false,
 			Message: "layout not found",
@@ -68,20 +68,11 @@ func scenariosHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, err := appStore.SaveScenario(userID, req.LayoutID, req.Name, []CommandSpec{})
+	scenario, err := createLegacyScenarioNormalizedFirst(userID, req.LayoutID, req.Name)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, CreateScenarioResponse{
 			OK:      false,
-			Message: "failed to create scenario",
-		})
-		return
-	}
-
-	scenario, err := appStore.GetScenario(id)
-	if err != nil || scenario.UserID != userID {
-		writeJSON(w, http.StatusInternalServerError, CreateScenarioResponse{
-			OK:      false,
-			Message: "failed to load scenario",
+			Message: err.Error(),
 		})
 		return
 	}
@@ -124,7 +115,7 @@ func scenarioByIDHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(parts) == 1 && r.Method == http.MethodDelete {
-		if err := appStore.DeleteScenario(scenarioID, userID); err != nil {
+		if err := deleteLegacyScenarioNormalizedFirst(userID, scenarioID); err != nil {
 			http.Error(w, "scenario not found", http.StatusNotFound)
 			return
 		}
@@ -167,8 +158,8 @@ func addCommandHandler(w http.ResponseWriter, r *http.Request, userID int, scena
 		return
 	}
 
-	scenario, err := appStore.GetScenario(scenarioID)
-	if err != nil || scenario.UserID != userID {
+	scenario, err := getLegacyScenarioFromNormalized(userID, scenarioID)
+	if err != nil {
 		http.Error(w, "scenario not found", http.StatusNotFound)
 		return
 	}
@@ -180,12 +171,10 @@ func addCommandHandler(w http.ResponseWriter, r *http.Request, userID int, scena
 		Payload: req.Payload,
 	}
 
-	nextCommands := append([]CommandSpec{}, scenario.Commands...)
-	nextCommands = append(nextCommands, command)
-	if err := appStore.UpdateScenarioCommands(scenarioID, userID, nextCommands); err != nil {
+	if err := appendLegacyScenarioCommandNormalizedFirst(userID, scenarioID, command); err != nil {
 		writeJSON(w, http.StatusInternalServerError, AddCommandResponse{
 			OK:      false,
-			Message: "failed to add command",
+			Message: err.Error(),
 		})
 		return
 	}

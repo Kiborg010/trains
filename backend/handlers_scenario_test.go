@@ -15,6 +15,8 @@ func resetScenarioStateForTests() {
 
 func newTestMux() *http.ServeMux {
 	mux := http.NewServeMux()
+	mux.Handle("/api/layouts", authMiddleware(http.HandlerFunc(layoutsHandler)))
+	mux.Handle("/api/layouts/", authMiddleware(http.HandlerFunc(layoutByIDHandler)))
 	mux.Handle("/api/scenarios", authMiddleware(http.HandlerFunc(scenariosHandler)))
 	mux.Handle("/api/scenarios/", authMiddleware(http.HandlerFunc(scenarioByIDHandler)))
 	mux.Handle("/api/executions/", authMiddleware(http.HandlerFunc(executionByIDHandler)))
@@ -55,14 +57,24 @@ func TestScenarioEndpointsStepExecution(t *testing.T) {
 			{ID: "l1", Type: "locomotive", PathID: "1", PathIndex: 0, X: 0, Y: 0},
 		},
 	}
-	layoutID, err := appStore.SaveLayout(1, "layout", initial)
-	if err != nil {
-		t.Fatalf("failed to save layout: %v", err)
+	createLayoutRR := doJSONRequest(t, mux, http.MethodPost, "/api/layouts", SaveLayoutRequest{
+		Name:  "layout",
+		State: initial,
+	}, token)
+	if createLayoutRR.Code != http.StatusOK {
+		t.Fatalf("create layout status: %d", createLayoutRR.Code)
+	}
+	var createLayoutResp SaveLayoutResponse
+	if err := json.Unmarshal(createLayoutRR.Body.Bytes(), &createLayoutResp); err != nil {
+		t.Fatalf("decode create layout response: %v", err)
+	}
+	if !createLayoutResp.OK || createLayoutResp.Layout == nil {
+		t.Fatalf("unexpected create layout response: %+v", createLayoutResp)
 	}
 
 	createRR := doJSONRequest(t, mux, http.MethodPost, "/api/scenarios", CreateScenarioRequest{
 		Name:     "test",
-		LayoutID: layoutID,
+		LayoutID: createLayoutResp.Layout.ID,
 	}, token)
 	if createRR.Code != http.StatusOK {
 		t.Fatalf("create scenario status: %d", createRR.Code)
