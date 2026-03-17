@@ -3204,24 +3204,42 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
              </circle>
             ))}
 
-            {vehicles.map((vehicle) => (
-              <rect
-                key={vehicle.id}
-                x={vehicle.x - GRID_SIZE / 2 + 6}
-                y={vehicle.y - GRID_SIZE / 2 + 6}
-                width={GRID_SIZE - 12}
-                height={GRID_SIZE - 12}
-                rx="8"
-                fill={vehicle.type === "locomotive" ? "#dc2626" : vehicle.color || DEFAULT_WAGON_COLOR}
-                stroke={selectedVehicleSet.has(vehicle.id) ? "#facc15" : vehicle.type === "locomotive" ? "#7f1d1d" : "#0c4a6e"}
-                strokeWidth={selectedVehicleSet.has(vehicle.id) ? "4" : "2"}
-                className={isEditMode ? "slotPoint" : ""}
-                onMouseDown={(event) => startVehicleDrag(event, vehicle.id)}
-                onClick={(event) => handleVehicleClick(event, vehicle.id)}
-              >
-                <title>{vehicleCodeById.get(vehicle.id) || vehicle.id}</title>
-              </rect>
-            ))}
+            {vehicles.map((vehicle) => {
+              const vehicleLabel = vehicleCodeById.get(vehicle.id) || vehicle.id;
+              return (
+                <g key={vehicle.id}>
+                  <rect
+                    x={vehicle.x - GRID_SIZE / 2 + 6}
+                    y={vehicle.y - GRID_SIZE / 2 + 6}
+                    width={GRID_SIZE - 12}
+                    height={GRID_SIZE - 12}
+                    rx="8"
+                    fill={vehicle.type === "locomotive" ? "#dc2626" : vehicle.color || DEFAULT_WAGON_COLOR}
+                    stroke={selectedVehicleSet.has(vehicle.id) ? "#facc15" : vehicle.type === "locomotive" ? "#7f1d1d" : "#0c4a6e"}
+                    strokeWidth={selectedVehicleSet.has(vehicle.id) ? "4" : "2"}
+                    className={isEditMode ? "slotPoint" : ""}
+                    onMouseDown={(event) => startVehicleDrag(event, vehicle.id)}
+                    onClick={(event) => handleVehicleClick(event, vehicle.id)}
+                  >
+                    <title>{vehicleLabel}</title>
+                  </rect>
+                  <text
+                    x={vehicle.x}
+                    y={vehicle.y + 4}
+                    fill="#ffffff"
+                    fontSize="12"
+                    fontWeight="700"
+                    textAnchor="middle"
+                    pointerEvents="none"
+                    stroke="rgba(15,23,42,0.45)"
+                    strokeWidth="0.6"
+                    paintOrder="stroke"
+                  >
+                    {vehicleLabel}
+                  </text>
+                </g>
+              );
+            })}
 
             {nodes.map((node) => (
               <circle
