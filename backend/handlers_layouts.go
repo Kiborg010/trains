@@ -20,11 +20,11 @@ func layoutsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == http.MethodGet {
-		layouts, err := appStore.ListLayouts(userID)
+		layouts, err := listLegacyLayoutsFromNormalized(userID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, ListLayoutsResponse{
 				OK:      false,
-				Message: "failed to list layouts",
+				Message: "failed to list layouts from normalized model",
 			})
 			return
 		}
@@ -103,7 +103,7 @@ func layoutByIDHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		layout, err := appStore.GetLayout(layoutID, userID)
+		layout, err := getLegacyLayoutFromNormalized(userID, layoutID)
 		if err != nil {
 			http.Error(w, "layout not found", http.StatusNotFound)
 			return

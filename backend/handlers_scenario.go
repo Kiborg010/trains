@@ -21,11 +21,11 @@ func scenariosHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == http.MethodGet {
-		scenarios, err := appStore.ListScenarios(userID)
+		scenarios, err := listLegacyScenariosFromNormalized(userID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, ListScenariosResponse{
 				OK:      false,
-				Message: "failed to list scenarios",
+				Message: "failed to list scenarios from normalized model",
 			})
 			return
 		}
@@ -114,8 +114,8 @@ func scenarioByIDHandler(w http.ResponseWriter, r *http.Request) {
 	scenarioID := parts[0]
 
 	if len(parts) == 1 && r.Method == http.MethodGet {
-		scenario, err := appStore.GetScenario(scenarioID)
-		if err != nil || scenario.UserID != userID {
+		scenario, err := getLegacyScenarioFromNormalized(userID, scenarioID)
+		if err != nil {
 			http.Error(w, "scenario not found", http.StatusNotFound)
 			return
 		}
