@@ -227,9 +227,33 @@ function normalizeScenarioStep(step) {
   };
 }
 
-function formatScenarioStepText(step, index) {
+function getSegmentDisplayName(segment, index) {
+  const explicitName = String(segment?.name || "").trim();
+  if (explicitName) {
+    return explicitName;
+  }
+  return String(index + 1);
+}
+
+function getPathDisplayName(pathId, pathNameById) {
+  const normalizedId = String(pathId || "").trim();
+  if (!normalizedId) {
+    return "?";
+  }
+  return pathNameById.get(normalizedId) || normalizedId;
+}
+
+function formatPathReference(pathId, pathIndex, pathNameById) {
+  return `${getPathDisplayName(pathId, pathNameById)}:${pathIndex}`;
+}
+
+function formatScenarioStepText(step, index, pathNameById) {
   if (step.type === SCENARIO_STEP_MOVE) {
-    return `${index + 1}. ${step.payload.unitCode}: ${step.payload.fromPathId}:${step.payload.fromIndex} -> ${step.payload.toPathId}:${step.payload.toIndex}`;
+    return `${index + 1}. ${step.payload.unitCode}: ${formatPathReference(
+      step.payload.fromPathId,
+      step.payload.fromIndex,
+      pathNameById
+    )} -> ${formatPathReference(step.payload.toPathId, step.payload.toIndex, pathNameById)}`;
   }
   if (step.type === SCENARIO_STEP_COUPLE) {
     return `${index + 1}. СЦЕПКА: ${(step.payload.unitCodes || []).join(" + ")}`;
@@ -393,9 +417,9 @@ function normalizeEditorLayoutForSave(
 function buildNormalizedSchemePayload(name, segments, vehicles, couplings) {
   return {
     name: name.trim() || "Схема",
-    tracks: segments.map((segment) => ({
+    tracks: segments.map((segment, index) => ({
       track_id: segment.id,
-      name: String(segment.id),
+      name: getSegmentDisplayName(segment, index),
       type: normalizePathType(segment.type),
       start_x: segment.from.x,
       start_y: segment.from.y,
@@ -433,8 +457,9 @@ function buildNormalizedSchemePayload(name, segments, vehicles, couplings) {
 
 function buildEditorStateFromSchemeDetails(details) {
   const tracks = Array.isArray(details?.tracks) ? details.tracks : [];
-  const segments = tracks.map((track) => ({
+  const segments = tracks.map((track, index) => ({
     id: track.track_id,
+    name: String(track.name || "").trim() || String(index + 1),
     type: normalizePathType(track.type),
     from: { x: track.start_x, y: track.start_y },
     to: { x: track.end_x, y: track.end_y },
@@ -647,6 +672,13 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const selectedVehicleSet = useMemo(() => new Set(selectedVehicleIds), [selectedVehicleIds]);
   const vehicleById = useMemo(() => new Map(vehicles.map((v) => [v.id, v])), [vehicles]);
   const vehicleCodeById = useMemo(() => buildVehicleCodeMap(vehicles), [vehicles]);
+  const segmentDisplayNameById = useMemo(() => {
+    const map = new Map();
+    segments.forEach((segment, index) => {
+      map.set(segment.id, getSegmentDisplayName(segment, index));
+    });
+    return map;
+  }, [segments]);
   const locomotiveOptions = useMemo(
     () => vehicles.filter((vehicle) => vehicle.type === "locomotive"),
     [vehicles]
@@ -694,6 +726,14 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
           .map((vehicle) => `${vehicle.pathId}:${vehicle.pathIndex}`)
       ),
     [vehicles]
+  );
+  const pathOptions = useMemo(
+    () =>
+      segments.map((segment, index) => ({
+        value: segment.id,
+        label: getSegmentDisplayName(segment, index),
+      })),
+    [segments]
   );
 
   useEffect(() => {
@@ -2299,7 +2339,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       event.stopPropagation();
       setTargetPathId(slot.pathId);
       setTargetPathIndex(slot.index);
-      setMovementHint(`Цель: ${slot.pathId}:${slot.index}`);
+      setMovementHint(`Цель: ${formatPathReference(slot.pathId, slot.index, segmentDisplayNameById)}`);
       return;
     }
 
@@ -2773,24 +2813,36 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                     onChange={(event) => setScenarioUnitCode(event.target.value)}
                     placeholder="Номер объекта (л1, в1)"
                   />
-                  <input
+                  <select
                     className="toolInput"
                     value={scenarioFromPathId}
                     onChange={(event) => setScenarioFromPathId(event.target.value)}
-                    placeholder="Откуда путь (id)"
-                  />
+                  >
+                    <option value="">Откуда путь</option>
+                    {pathOptions.map((path) => (
+                      <option key={`from-${path.value}`} value={path.value}>
+                        Путь {path.label}
+                      </option>
+                    ))}
+                  </select>
                   <input
                     className="toolInput"
                     value={scenarioFromIndex}
                     onChange={(event) => setScenarioFromIndex(event.target.value)}
                     placeholder="Откуда индекс"
                   />
-                  <input
+                  <select
                     className="toolInput"
                     value={scenarioToPathId}
                     onChange={(event) => setScenarioToPathId(event.target.value)}
-                    placeholder="Куда путь (id)"
-                  />
+                  >
+                    <option value="">Куда путь</option>
+                    {pathOptions.map((path) => (
+                      <option key={`to-${path.value}`} value={path.value}>
+                        Путь {path.label}
+                      </option>
+                    ))}
+                  </select>
                   <input
                     className="toolInput"
                     value={scenarioToIndex}
@@ -2844,7 +2896,11 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                       className={`scenarioStepRow ${index === scenarioActiveStepIndex ? "current" : ""}`}
                     >
                       <span className="scenarioStepText">
-                        {formatScenarioStepText(normalizeScenarioStep(step), index)}
+                        {formatScenarioStepText(
+                          normalizeScenarioStep(step),
+                          index,
+                          segmentDisplayNameById
+                        )}
                       </span>
                       <button
                         type="button"
@@ -2942,39 +2998,56 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
             <rect x={camera.x} y={camera.y} width={viewWidth} height={viewHeight} fill="url(#rail-grid-minor)" />
             <rect x={camera.x} y={camera.y} width={viewWidth} height={viewHeight} fill="url(#rail-grid-major)" />
 
-            {segments.map((segment) => (
-              <line
-                key={segment.id}
-                x1={segment.from.x}
-                y1={segment.from.y}
-                x2={segment.to.x}
-                y2={segment.to.y}
-                stroke={getSegmentStrokeColor(segment.type, selectedSegmentSet.has(segment.id))}
-                strokeWidth={selectedSegmentSet.has(segment.id) ? "8" : "6"}
-                strokeLinecap="round"
-                className={isEditMode ? "draggableLine" : ""}
-                onMouseDown={(event) => startLineDrag(event, segment)}
-                onClick={(event) => {
-                  if (!isEditMode) {
-                    return;
-                  }
-                  event.stopPropagation();
-                  if (event.shiftKey) {
-                    setSelectedSegmentIds((prev) =>
-                      prev.includes(segment.id)
-                        ? prev.filter((id) => id !== segment.id)
-                        : [...prev, segment.id]
-                    );
-                    return;
-                  }
-                  setSelectedSegmentIds([segment.id]);
-                }}
-              >
-                <title>
-                  Путь: {segment.id} ({PATH_TYPE_LABELS[normalizePathType(segment.type)]})
-                </title>
-              </line>
-            ))}
+            {segments.map((segment) => {
+              const pathName = getPathDisplayName(segment.id, segmentDisplayNameById);
+              const midpointX = (segment.from.x + segment.to.x) / 2;
+              const midpointY = (segment.from.y + segment.to.y) / 2 - 10;
+              return (
+                <g key={segment.id}>
+                  <line
+                    x1={segment.from.x}
+                    y1={segment.from.y}
+                    x2={segment.to.x}
+                    y2={segment.to.y}
+                    stroke={getSegmentStrokeColor(segment.type, selectedSegmentSet.has(segment.id))}
+                    strokeWidth={selectedSegmentSet.has(segment.id) ? "8" : "6"}
+                    strokeLinecap="round"
+                    className={isEditMode ? "draggableLine" : ""}
+                    onMouseDown={(event) => startLineDrag(event, segment)}
+                    onClick={(event) => {
+                      if (!isEditMode) {
+                        return;
+                      }
+                      event.stopPropagation();
+                      if (event.shiftKey) {
+                        setSelectedSegmentIds((prev) =>
+                          prev.includes(segment.id)
+                            ? prev.filter((id) => id !== segment.id)
+                            : [...prev, segment.id]
+                        );
+                        return;
+                      }
+                      setSelectedSegmentIds([segment.id]);
+                    }}
+                  >
+                    <title>
+                      Путь {pathName} ({PATH_TYPE_LABELS[normalizePathType(segment.type)]})
+                    </title>
+                  </line>
+                  <text
+                    x={midpointX}
+                    y={midpointY}
+                    fill="#0f172a"
+                    fontSize="14"
+                    fontWeight="700"
+                    textAnchor="middle"
+                    pointerEvents="none"
+                  >
+                    {pathName}
+                  </text>
+                </g>
+              );
+            })}
 
             {couplings.map((coupling) => {
               const a = vehicleById.get(coupling.a);
@@ -3013,7 +3086,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                 onClick={(event) => handleSlotClick(event, slot)}
               >
                 <title>
-                  Путь: {slot.pathId}, звено: {slot.index}
+                  Путь {getPathDisplayName(slot.pathId, segmentDisplayNameById)}, звено: {slot.index}
                 </title>
              </circle>
             ))}
