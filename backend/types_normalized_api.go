@@ -11,6 +11,15 @@ type SchemeDTO struct {
 	Name     string `json:"name"`
 }
 
+type UpsertNormalizedSchemeRequest struct {
+	Name             string               `json:"name"`
+	Tracks           []TrackDTO           `json:"tracks"`
+	TrackConnections []TrackConnectionDTO `json:"track_connections"`
+	Wagons           []WagonDTO           `json:"wagons"`
+	Locomotives      []LocomotiveDTO      `json:"locomotives"`
+	Couplings        []CouplingDTO        `json:"couplings"`
+}
+
 type TrackDTO struct {
 	TrackID        string  `json:"track_id"`
 	SchemeID       int     `json:"scheme_id"`
@@ -63,6 +72,12 @@ type ScenarioDTO struct {
 	ScenarioID string `json:"scenario_id"`
 	SchemeID   int    `json:"scheme_id"`
 	Name       string `json:"name"`
+}
+
+type UpsertNormalizedScenarioRequest struct {
+	SchemeID      int               `json:"scheme_id"`
+	Name          string            `json:"name"`
+	ScenarioSteps []ScenarioStepDTO `json:"scenario_steps"`
 }
 
 type ScenarioStepDTO struct {
@@ -278,6 +293,130 @@ func toScenarioStepDTOs(items []normalized.ScenarioStep) []ScenarioStepDTO {
 	result := make([]ScenarioStepDTO, 0, len(items))
 	for _, item := range items {
 		result = append(result, toScenarioStepDTO(item))
+	}
+	return result
+}
+
+func dtoToTrack(item TrackDTO) normalized.Track {
+	return normalized.Track{
+		TrackID:        item.TrackID,
+		SchemeID:       item.SchemeID,
+		Name:           item.Name,
+		Type:           item.Type,
+		StartX:         item.StartX,
+		StartY:         item.StartY,
+		EndX:           item.EndX,
+		EndY:           item.EndY,
+		Capacity:       item.Capacity,
+		StorageAllowed: item.StorageAllowed,
+	}
+}
+
+func dtoToTrackConnection(item TrackConnectionDTO) normalized.TrackConnection {
+	return normalized.TrackConnection{
+		ConnectionID:   item.ConnectionID,
+		SchemeID:       item.SchemeID,
+		Track1ID:       item.Track1ID,
+		Track2ID:       item.Track2ID,
+		Track1Side:     item.Track1Side,
+		Track2Side:     item.Track2Side,
+		ConnectionType: item.ConnectionType,
+	}
+}
+
+func dtoToWagon(item WagonDTO) normalized.Wagon {
+	return normalized.Wagon{
+		WagonID:    item.WagonID,
+		SchemeID:   item.SchemeID,
+		Name:       item.Name,
+		Color:      item.Color,
+		TrackID:    item.TrackID,
+		TrackIndex: item.TrackIndex,
+	}
+}
+
+func dtoToLocomotive(item LocomotiveDTO) normalized.Locomotive {
+	return normalized.Locomotive{
+		LocoID:     item.LocoID,
+		SchemeID:   item.SchemeID,
+		Name:       item.Name,
+		Color:      item.Color,
+		TrackID:    item.TrackID,
+		TrackIndex: item.TrackIndex,
+	}
+}
+
+func dtoToCoupling(item CouplingDTO) normalized.Coupling {
+	return normalized.Coupling{
+		CouplingID: item.CouplingID,
+		SchemeID:   item.SchemeID,
+		Object1ID:  item.Object1ID,
+		Object2ID:  item.Object2ID,
+	}
+}
+
+func dtoToScenarioStep(item ScenarioStepDTO) normalized.ScenarioStep {
+	payload := make([]byte, len(item.PayloadJSON))
+	copy(payload, item.PayloadJSON)
+	return normalized.ScenarioStep{
+		StepID:      item.StepID,
+		ScenarioID:  item.ScenarioID,
+		StepOrder:   item.StepOrder,
+		StepType:    item.StepType,
+		FromTrackID: item.FromTrackID,
+		FromIndex:   item.FromIndex,
+		ToTrackID:   item.ToTrackID,
+		ToIndex:     item.ToIndex,
+		Object1ID:   item.Object1ID,
+		Object2ID:   item.Object2ID,
+		PayloadJSON: json.RawMessage(payload),
+	}
+}
+
+func dtoToTracks(items []TrackDTO) []normalized.Track {
+	result := make([]normalized.Track, 0, len(items))
+	for _, item := range items {
+		result = append(result, dtoToTrack(item))
+	}
+	return result
+}
+
+func dtoToTrackConnections(items []TrackConnectionDTO) []normalized.TrackConnection {
+	result := make([]normalized.TrackConnection, 0, len(items))
+	for _, item := range items {
+		result = append(result, dtoToTrackConnection(item))
+	}
+	return result
+}
+
+func dtoToWagons(items []WagonDTO) []normalized.Wagon {
+	result := make([]normalized.Wagon, 0, len(items))
+	for _, item := range items {
+		result = append(result, dtoToWagon(item))
+	}
+	return result
+}
+
+func dtoToLocomotives(items []LocomotiveDTO) []normalized.Locomotive {
+	result := make([]normalized.Locomotive, 0, len(items))
+	for _, item := range items {
+		result = append(result, dtoToLocomotive(item))
+	}
+	return result
+}
+
+func dtoToCouplings(items []CouplingDTO) []normalized.Coupling {
+	result := make([]normalized.Coupling, 0, len(items))
+	for _, item := range items {
+		result = append(result, dtoToCoupling(item))
+	}
+	return result
+}
+
+func dtoToScenarioSteps(items []ScenarioStepDTO) []normalized.ScenarioStep {
+	result := make([]normalized.ScenarioStep, 0, len(items))
+	for _, item := range items {
+		result = append(result, dtoToScenarioStep(item))
 	}
 	return result
 }

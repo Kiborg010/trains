@@ -46,6 +46,8 @@ type Store interface {
 	CreateNormalizedScheme(userID int, scheme normalized.Scheme) (int, error)
 	GetNormalizedScheme(schemeID int, userID int) (*normalized.Scheme, error)
 	ListNormalizedSchemes(userID int) ([]normalized.Scheme, error)
+	UpdateNormalizedScheme(userID int, scheme normalized.Scheme) error
+	DeleteNormalizedScheme(userID int, schemeID int) error
 
 	CreateTracks(userID int, schemeID int, tracks []normalized.Track) error
 	GetTracksByScheme(userID int, schemeID int) ([]normalized.Track, error)
@@ -70,6 +72,8 @@ type Store interface {
 	CreateNormalizedScenario(userID int, scenario normalized.Scenario) (string, error)
 	GetNormalizedScenario(id string, userID int) (*normalized.Scenario, error)
 	ListNormalizedScenarios(userID int) ([]normalized.Scenario, error)
+	UpdateNormalizedScenario(userID int, scenario normalized.Scenario) error
+	DeleteNormalizedScenario(userID int, scenarioID string) error
 
 	CreateScenarioSteps(userID int, scenarioID string, steps []normalized.ScenarioStep) error
 	GetScenarioStepsByScenario(userID int, scenarioID string) ([]normalized.ScenarioStep, error)

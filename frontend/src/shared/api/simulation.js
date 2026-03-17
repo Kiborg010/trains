@@ -89,6 +89,46 @@ export async function getCurrentUser() {
   return getJSON("/auth/me");
 }
 
+export async function createScheme(payload) {
+  return postJSON("/normalized/schemes", payload);
+}
+
+export async function listSchemes() {
+  return getJSON("/normalized/schemes");
+}
+
+export async function getSchemeDetails(schemeId) {
+  return getJSON(`/normalized/schemes/${schemeId}/details`);
+}
+
+export async function updateScheme(schemeId, payload) {
+  return putJSON(`/normalized/schemes/${schemeId}`, payload);
+}
+
+export async function deleteScheme(schemeId) {
+  return deleteJSON(`/normalized/schemes/${schemeId}`);
+}
+
+export async function createNormalizedScenario(payload) {
+  return postJSON("/normalized/scenarios", payload);
+}
+
+export async function listNormalizedScenarios() {
+  return getJSON("/normalized/scenarios");
+}
+
+export async function getNormalizedScenarioDetails(scenarioId) {
+  return getJSON(`/normalized/scenarios/${scenarioId}/details`);
+}
+
+export async function updateNormalizedScenario(scenarioId, payload) {
+  return putJSON(`/normalized/scenarios/${scenarioId}`, payload);
+}
+
+export async function deleteNormalizedScenario(scenarioId) {
+  return deleteJSON(`/normalized/scenarios/${scenarioId}`);
+}
+
 export async function saveLayout(payload) {
   return postJSON("/layouts", payload);
 }

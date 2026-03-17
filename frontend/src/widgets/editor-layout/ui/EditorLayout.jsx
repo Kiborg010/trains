@@ -1,19 +1,19 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { GRID_SIZE, getSegmentSlots, keyOf, snap } from "../../../shared/lib/geometry.js";
 import {
-  addScenarioCommand,
   applyLayoutOperation,
-  createScenario,
-  deleteScenario,
-  deleteLayout,
-  getLayout,
-  getScenario,
-  listLayouts,
-  listScenarios,
+  createNormalizedScenario,
+  createScheme,
+  deleteNormalizedScenario,
+  deleteScheme,
+  getNormalizedScenarioDetails,
+  getSchemeDetails,
+  listNormalizedScenarios,
+  listSchemes,
   planMovement,
   resolveVehicles,
-  saveLayout,
-  updateLayout,
+  updateNormalizedScenario,
+  updateScheme,
 } from "../../../shared/api/simulation.js";
 
 const DEFAULT_VIEWPORT_WIDTH = 1200;
@@ -269,30 +269,214 @@ function mergeVehicleColors(previousVehicles, nextVehicles, rememberedColors) {
   });
 }
 
-function buildScenarioStepsFromBackendScenario(scenario, sourceVehicles = []) {
-  if (!scenario || !Array.isArray(scenario.commands)) {
+function getTrackStorageAllowed(type) {
+  const normalizedType = normalizePathType(type);
+  return normalizedType === PATH_TYPE_SORTING || normalizedType === PATH_TYPE_LEAD;
+}
+
+function buildTrackConnectionsFromSegments(segments) {
+  const byNode = new Map();
+
+  for (const segment of segments) {
+    const endpoints = [
+      { key: keyOf(segment.from.x, segment.from.y), side: "start" },
+      { key: keyOf(segment.to.x, segment.to.y), side: "end" },
+    ];
+    for (const endpoint of endpoints) {
+      const list = byNode.get(endpoint.key) || [];
+      list.push({ segment, side: endpoint.side });
+      byNode.set(endpoint.key, list);
+    }
+  }
+
+  const seen = new Set();
+  const connections = [];
+  for (const entries of byNode.values()) {
+    if (entries.length < 2) {
+      continue;
+    }
+    const connectionType = entries.length > 2 ? "switch" : "serial";
+    for (let i = 0; i < entries.length; i += 1) {
+      for (let j = i + 1; j < entries.length; j += 1) {
+        const a = entries[i];
+        const b = entries[j];
+        const id = `${a.segment.id}:${b.segment.id}:${a.side}:${b.side}`;
+        if (seen.has(id)) {
+          continue;
+        }
+        seen.add(id);
+        connections.push({
+          connection_id: id,
+          track1_id: a.segment.id,
+          track2_id: b.segment.id,
+          track1_side: a.side,
+          track2_side: b.side,
+          connection_type: connectionType,
+        });
+      }
+    }
+  }
+  return connections;
+}
+
+function buildNormalizedSchemePayload(name, segments, vehicles, couplings) {
+  return {
+    name: name.trim() || "Схема",
+    tracks: segments.map((segment) => ({
+      track_id: segment.id,
+      name: String(segment.id),
+      type: normalizePathType(segment.type),
+      start_x: segment.from.x,
+      start_y: segment.from.y,
+      end_x: segment.to.x,
+      end_y: segment.to.y,
+      capacity: getSegmentSlots(segment, GRID_SIZE).length,
+      storage_allowed: getTrackStorageAllowed(segment.type),
+    })),
+    track_connections: buildTrackConnectionsFromSegments(segments),
+    wagons: vehicles
+      .filter((vehicle) => vehicle.type === "wagon")
+      .map((vehicle) => ({
+        wagon_id: vehicle.id,
+        name: vehicle.code || vehicle.id,
+        color: vehicle.color || DEFAULT_WAGON_COLOR,
+        track_id: vehicle.pathId || "",
+        track_index: Number(vehicle.pathIndex ?? 0),
+      })),
+    locomotives: vehicles
+      .filter((vehicle) => vehicle.type === "locomotive")
+      .map((vehicle) => ({
+        loco_id: vehicle.id,
+        name: vehicle.code || vehicle.id,
+        color: vehicle.color || "#dc2626",
+        track_id: vehicle.pathId || "",
+        track_index: Number(vehicle.pathIndex ?? 0),
+      })),
+    couplings: couplings.map((coupling) => ({
+      coupling_id: coupling.id,
+      object1_id: coupling.a,
+      object2_id: coupling.b,
+    })),
+  };
+}
+
+function buildEditorStateFromSchemeDetails(details) {
+  const tracks = Array.isArray(details?.tracks) ? details.tracks : [];
+  const segments = tracks.map((track) => ({
+    id: track.track_id,
+    type: normalizePathType(track.type),
+    from: { x: track.start_x, y: track.start_y },
+    to: { x: track.end_x, y: track.end_y },
+  }));
+  const segmentById = new Map(segments.map((segment) => [segment.id, segment]));
+
+  function buildVehicle(item, type) {
+    const segment = segmentById.get(item.track_id);
+    const slots = segment ? getSegmentSlots(segment, GRID_SIZE) : [];
+    const point = slots[item.track_index] || segment?.from || { x: 0, y: 0 };
+    return {
+      id: type === "locomotive" ? item.loco_id : item.wagon_id,
+      type,
+      code: item.name,
+      color: type === "wagon" ? item.color || DEFAULT_WAGON_COLOR : item.color || "#dc2626",
+      pathId: item.track_id,
+      pathIndex: item.track_index,
+      x: point.x,
+      y: point.y,
+    };
+  }
+
+  return {
+    segments,
+    vehicles: [
+      ...(details?.wagons || []).map((item) => buildVehicle(item, "wagon")),
+      ...(details?.locomotives || []).map((item) => buildVehicle(item, "locomotive")),
+    ],
+    couplings: (details?.couplings || []).map((coupling) => ({
+      id: coupling.coupling_id,
+      a: coupling.object1_id,
+      b: coupling.object2_id,
+    })),
+  };
+}
+
+function buildNormalizedScenarioPayload(name, schemeId, scenarioSteps, sourceVehicles) {
+  const codeByVehicleId = buildVehicleCodeMap(sourceVehicles);
+  const idByCode = new Map();
+  for (const vehicle of sourceVehicles) {
+    const code = normalizeUnitCode(codeByVehicleId.get(vehicle.id));
+    if (code) {
+      idByCode.set(code, vehicle.id);
+    }
+  }
+
+  return {
+    name: name.trim() || "Сценарий",
+    scheme_id: schemeId,
+    scenario_steps: scenarioSteps.map((rawStep, index) => {
+      const step = normalizeScenarioStep(rawStep);
+      if (step.type === SCENARIO_STEP_MOVE) {
+        const locoId = idByCode.get(normalizeUnitCode(step.payload.unitCode));
+        if (!locoId) {
+          throw new Error(`Локомотив ${step.payload.unitCode || "?"} не найден для сохранения.`);
+        }
+        return {
+          step_id: step.id || crypto.randomUUID(),
+          step_order: index,
+          step_type: "move_loco",
+          from_track_id: step.payload.fromPathId,
+          from_index: step.payload.fromIndex,
+          to_track_id: step.payload.toPathId,
+          to_index: step.payload.toIndex,
+          object1_id: locoId,
+        };
+      }
+
+      const [aCode, bCode] = step.payload.unitCodes || [];
+      const aId = idByCode.get(normalizeUnitCode(aCode));
+      const bId = idByCode.get(normalizeUnitCode(bCode));
+      if (!aId || !bId) {
+        throw new Error(`Объекты ${aCode || "?"} и ${bCode || "?"} не найдены для сохранения.`);
+      }
+      return {
+        step_id: step.id || crypto.randomUUID(),
+        step_order: index,
+        step_type: step.type === SCENARIO_STEP_COUPLE ? "couple" : "decouple",
+        object1_id: aId,
+        object2_id: bId,
+      };
+    }),
+  };
+}
+
+function buildScenarioStepsFromNormalizedScenario(details, sourceVehicles = []) {
+  if (!details || !Array.isArray(details.scenario_steps)) {
     return [];
   }
 
   const steps = [];
   const codeByVehicleId = buildVehicleCodeMap(sourceVehicles);
 
-  for (const command of scenario.commands) {
-    const type = normalizeScenarioStepType(command.type);
-    const payload = command.payload || {};
+  for (const step of details.scenario_steps) {
+    const type =
+      step.step_type === "couple"
+        ? SCENARIO_STEP_COUPLE
+        : step.step_type === "decouple"
+          ? SCENARIO_STEP_DECOUPLE
+          : SCENARIO_STEP_MOVE;
 
     if (type === SCENARIO_STEP_MOVE) {
-      const locoId = payload.locoId;
-      const fromPathId = String(payload.fromPathId || "").trim();
+      const locoId = step.object1_id;
+      const fromPathId = String(step.from_track_id || "").trim();
       const fromIndex =
-        payload.fromIndex == null || payload.fromIndex === ""
+        step.from_index == null || step.from_index === ""
           ? Number.NaN
-          : Number(payload.fromIndex);
-      const toPathId = String(payload.toPathId || payload.targetPathId || "").trim();
-      const toIndex = Number(payload.toIndex ?? payload.targetIndex ?? 0);
+          : Number(step.from_index);
+      const toPathId = String(step.to_track_id || "").trim();
+      const toIndex = Number(step.to_index ?? 0);
 
       steps.push({
-        id: command.id || crypto.randomUUID(),
+        id: step.step_id || crypto.randomUUID(),
         type,
         payload: {
           unitCode: normalizeUnitCode(codeByVehicleId.get(locoId)) || "",
@@ -306,12 +490,12 @@ function buildScenarioStepsFromBackendScenario(scenario, sourceVehicles = []) {
     }
 
     steps.push({
-      id: command.id || crypto.randomUUID(),
+      id: step.step_id || crypto.randomUUID(),
       type,
       payload: {
         unitCodes: [
-          normalizeUnitCode(codeByVehicleId.get(payload.aId)) || "",
-          normalizeUnitCode(codeByVehicleId.get(payload.bId)) || "",
+          normalizeUnitCode(codeByVehicleId.get(step.object1_id)) || "",
+          normalizeUnitCode(codeByVehicleId.get(step.object2_id)) || "",
         ].filter(Boolean),
       },
     });
@@ -584,11 +768,11 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     async function loadSavedData() {
       try {
         const [layoutsResp, scenariosResp] = await Promise.all([
-          listLayouts(),
-          listScenarios(),
+          listSchemes(),
+          listNormalizedScenarios(),
         ]);
         if (!cancelled) {
-          setSavedLayouts(layoutsResp.layouts || []);
+          setSavedLayouts(layoutsResp.schemes || []);
           setSavedScenarios(scenariosResp.scenarios || []);
         }
       } catch (error) {
@@ -662,12 +846,12 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   }
 
   async function refreshSavedLayouts() {
-    const response = await listLayouts();
-    setSavedLayouts(response.layouts || []);
+    const response = await listSchemes();
+    setSavedLayouts(response.schemes || []);
   }
 
   async function refreshSavedScenarios() {
-    const response = await listScenarios();
+    const response = await listNormalizedScenarios();
     setSavedScenarios(response.scenarios || []);
   }
 
@@ -683,21 +867,23 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         };
       });
 
-      const payload = {
-        name: layoutName.trim() || "Схема",
-        state: { segments, vehicles: vehiclesForSave, couplings },
-      };
+      const payload = buildNormalizedSchemePayload(
+        layoutName,
+        segments,
+        vehiclesForSave,
+        couplings
+      );
 
       let response;
       if (selectedLayoutId) {
-        response = await updateLayout(selectedLayoutId, payload);
+        response = await updateScheme(selectedLayoutId, payload);
       } else {
-        response = await saveLayout(payload);
+        response = await createScheme(payload);
       }
 
-      const saved = response.layout;
-      if (saved?.id != null) {
-        setSelectedLayoutId(String(saved.id));
+      const saved = response.scheme;
+      if (saved?.scheme_id != null) {
+        setSelectedLayoutId(String(saved.scheme_id));
       }
       await refreshSavedLayouts();
       setMovementHint("Схема сохранена.");
@@ -712,14 +898,14 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       return;
     }
     try {
-      const response = await getLayout(selectedLayoutId);
-      const state = response.layout?.state || {};
+      const response = await getSchemeDetails(selectedLayoutId);
+      const state = buildEditorStateFromSchemeDetails(response);
       stopMovement(true);
-      setSegments(state.segments || []);
+      setSegments(state.segments);
       setVehicles((prev) =>
-        mergeVehicleColors(prev, state.vehicles || [], vehicleColorMemoryRef.current)
+        mergeVehicleColors(prev, state.vehicles, vehicleColorMemoryRef.current)
       );
-      setCouplings(state.couplings || []);
+      setCouplings(state.couplings);
       setScenarioInitialState(null);
       setScenarioViewMode("start");
       setScenarioExecutingStep(null);
@@ -740,7 +926,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       return;
     }
     try {
-      await deleteLayout(selectedLayoutId);
+      await deleteScheme(selectedLayoutId);
       setSelectedLayoutId("");
       await refreshSavedLayouts();
       setMovementHint("Схема удалена.");
@@ -773,71 +959,31 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         setMovementHint("Перед сохранением сценария выбери сохраненную схему.");
         return;
       }
-      const layoutID = Number.parseInt(selectedLayoutId, 10);
-      if (Number.isNaN(layoutID) || layoutID <= 0) {
-        setMovementHint("Некорректный layout_id для сценария.");
+      const schemeId = Number.parseInt(selectedLayoutId, 10);
+      if (Number.isNaN(schemeId) || schemeId <= 0) {
+        setMovementHint("Некорректный scheme_id для сценария.");
         return;
       }
 
-      const createResp = await createScenario({
-        name: scenarioName.trim() || "Сценарий",
-        layoutId: layoutID,
-      });
-      if (!createResp.ok || !createResp.scenario?.id) {
-        throw new Error(createResp.message || "Не удалось создать сценарий.");
+      const payload = buildNormalizedScenarioPayload(
+        scenarioName,
+        schemeId,
+        scenarioSteps,
+        vehicles
+      );
+
+      let response;
+      if (selectedScenarioId) {
+        response = await updateNormalizedScenario(selectedScenarioId, payload);
+      } else {
+        response = await createNormalizedScenario(payload);
       }
 
-      const codeMap = buildVehicleCodeMap(vehicles);
-      const idByCode = new Map();
-      for (const vehicle of vehicles) {
-        const code = normalizeUnitCode(codeMap.get(vehicle.id));
-        if (code) {
-          idByCode.set(code, vehicle.id);
-        }
+      if (!response.ok || !response.scenario?.scenario_id) {
+        throw new Error(response.message || "Не удалось сохранить сценарий.");
       }
 
-      for (const rawStep of scenarioSteps) {
-        const step = normalizeScenarioStep(rawStep);
-
-        if (step.type === SCENARIO_STEP_MOVE) {
-          const code = normalizeUnitCode(step.payload.unitCode);
-          const locoId = idByCode.get(code);
-          if (!locoId) {
-            throw new Error(`Локомотив ${code || step.payload.unitCode} не найден для сохранения.`);
-          }
-
-          await addScenarioCommand(createResp.scenario.id, {
-            type: SCENARIO_STEP_MOVE,
-            payload: {
-              locoId,
-              fromPathId: step.payload.fromPathId,
-              fromIndex: step.payload.fromIndex,
-              toPathId: step.payload.toPathId,
-              toIndex: step.payload.toIndex,
-              targetPathId: step.payload.toPathId,
-              targetIndex: step.payload.toIndex,
-            },
-          });
-          continue;
-        }
-
-        const [aCode, bCode] = step.payload.unitCodes || [];
-        const aId = idByCode.get(aCode);
-        const bId = idByCode.get(bCode);
-        if (!aId || !bId) {
-          throw new Error(`Объекты ${aCode || "?"} и ${bCode || "?"} не найдены для сохранения.`);
-        }
-
-        await addScenarioCommand(createResp.scenario.id, {
-          type: step.type,
-          payload: {
-            aId,
-            bId,
-          },
-        });
-      }
-
-      setSelectedScenarioId(String(createResp.scenario.id));
+      setSelectedScenarioId(String(response.scenario.scenario_id));
       await refreshSavedScenarios();
       setMovementHint("Сценарий сохранен.");
     } catch (error) {
@@ -851,32 +997,29 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       return;
     }
     try {
-      const scenario = await getScenario(selectedScenarioId);
-      console.log("SCENARIO INITIAL STATE", scenario.initialState);
-      console.log(
-        "INITIAL VEHICLE POSITIONS",
-        scenario.initialState?.vehicles?.map((v) => ({
-          id: v.id,
-          code: v.code,
-          pathId: v.pathId,
-          pathIndex: v.pathIndex,
-          x: v.x,
-          y: v.y,
-        }))
-      );
+      const scenario = await getNormalizedScenarioDetails(selectedScenarioId);
+      const schemeId = scenario.scenario?.scheme_id;
+      let sourceVehicles = vehicles;
+      let initialSnapshot = null;
+      if (schemeId) {
+        const schemeDetails = await getSchemeDetails(schemeId);
+        const mappedState = buildEditorStateFromSchemeDetails(schemeDetails);
+        sourceVehicles = mappedState.vehicles;
+        initialSnapshot = cloneLayoutState(mappedState);
+      }
       stopMovement(true);
       scenarioStopRequestedRef.current = false;
-      setScenarioName(scenario.name || "Сценарий");
+      setScenarioName(scenario.scenario?.name || "Сценарий");
       setScenarioLayoutId(
-        scenario.layoutId == null || scenario.layoutId === ""
+        schemeId == null || schemeId === ""
           ? ""
-          : String(scenario.layoutId)
+          : String(schemeId)
       );
-      const loadedSteps = buildScenarioStepsFromBackendScenario(scenario, vehicles);
+      const loadedSteps = buildScenarioStepsFromNormalizedScenario(scenario, sourceVehicles);
       setScenarioSteps(loadedSteps);
       setCurrentScenarioStep(0);
       setScenarioStateHistory([]);
-      setScenarioInitialState(null);
+      setScenarioInitialState(initialSnapshot);
       setScenarioViewMode("start");
       setScenarioExecutingStep(null);
 
@@ -1028,7 +1171,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       return;
     }
     try {
-      await deleteScenario(selectedScenarioId);
+      await deleteNormalizedScenario(selectedScenarioId);
       setSelectedScenarioId("");
       setScenarioSteps([]);
       setCurrentScenarioStep(0);
@@ -1155,19 +1298,14 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   }
 
   async function loadScenarioStartLayoutState() {
-    const layoutId = Number.parseInt(String(scenarioLayoutId || selectedLayoutId || ""), 10);
-    if (Number.isNaN(layoutId) || layoutId <= 0) {
+    const schemeId = Number.parseInt(String(scenarioLayoutId || selectedLayoutId || ""), 10);
+    if (Number.isNaN(schemeId) || schemeId <= 0) {
       throw new Error("Для сценария не выбрана стартовая схема.");
     }
 
-    const response = await getLayout(layoutId);
-    const state = response.layout?.state || {};
-    const snapshot = cloneLayoutState({
-      segments: state.segments || [],
-      vehicles: state.vehicles || [],
-      couplings: state.couplings || [],
-    });
-    setSelectedLayoutId(String(layoutId));
+    const response = await getSchemeDetails(schemeId);
+    const snapshot = cloneLayoutState(buildEditorStateFromSchemeDetails(response));
+    setSelectedLayoutId(String(schemeId));
     return snapshot;
   }
 
@@ -2457,8 +2595,8 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
               >
                 <option value="">Выбери схему</option>
                 {savedLayouts.map((layout) => (
-                  <option key={layout.id} value={String(layout.id)}>
-                    {layout.name || `Схема ${layout.id}`}
+                  <option key={layout.scheme_id} value={String(layout.scheme_id)}>
+                    {layout.name || `Схема ${layout.scheme_id}`}
                   </option>
                 ))}
               </select>
@@ -2518,8 +2656,8 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
               >
                 <option value="">Выбери сценарий</option>
                 {savedScenarios.map((scenario) => (
-                  <option key={scenario.id} value={String(scenario.id)}>
-                    {scenario.name || `Сценарий ${scenario.id}`}
+                  <option key={scenario.scenario_id} value={String(scenario.scenario_id)}>
+                    {scenario.name || `Сценарий ${scenario.scenario_id}`}
                   </option>
                 ))}
               </select>

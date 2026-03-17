@@ -44,6 +44,35 @@ func (s *InMemoryStore) ListNormalizedSchemes(userID int) ([]normalized.Scheme, 
 	return result, nil
 }
 
+func (s *InMemoryStore) UpdateNormalizedScheme(userID int, scheme normalized.Scheme) error {
+	return s.updateSchemePart(scheme.SchemeID, func(current *normalized.Scheme) {
+		current.Name = scheme.Name
+		assignSchemeID(&scheme)
+		current.Tracks = cloneTracks(scheme.Tracks)
+		current.TrackConnections = cloneTrackConnections(scheme.TrackConnections)
+		current.Wagons = cloneWagons(scheme.Wagons)
+		current.Locomotives = cloneLocomotives(scheme.Locomotives)
+		current.Couplings = cloneNormalizedCouplings(scheme.Couplings)
+	})
+}
+
+func (s *InMemoryStore) DeleteNormalizedScheme(userID int, schemeID int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.schemesByID[schemeID]; !ok {
+		return fmt.Errorf("scheme not found")
+	}
+	delete(s.schemesByID, schemeID)
+
+	for scenarioID, scenario := range s.normalizedScenariosByID {
+		if scenario.SchemeID == schemeID {
+			delete(s.normalizedScenariosByID, scenarioID)
+		}
+	}
+	return nil
+}
+
 func (s *InMemoryStore) CreateTracks(userID int, schemeID int, tracks []normalized.Track) error {
 	return s.updateSchemePart(schemeID, func(scheme *normalized.Scheme) {
 		scheme.Tracks = cloneTracks(withSchemeIDForTracks(schemeID, tracks))
@@ -183,6 +212,33 @@ func (s *InMemoryStore) ListNormalizedScenarios(userID int) ([]normalized.Scenar
 	return result, nil
 }
 
+func (s *InMemoryStore) UpdateNormalizedScenario(userID int, scenario normalized.Scenario) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.normalizedScenariosByID[scenario.ScenarioID]; !ok {
+		return fmt.Errorf("scenario not found")
+	}
+	s.normalizedScenariosByID[scenario.ScenarioID] = normalized.Scenario{
+		ScenarioID: scenario.ScenarioID,
+		SchemeID:   scenario.SchemeID,
+		Name:       scenario.Name,
+		Steps:      cloneScenarioSteps(withScenarioIDForSteps(scenario.ScenarioID, scenario.Steps)),
+	}
+	return nil
+}
+
+func (s *InMemoryStore) DeleteNormalizedScenario(userID int, scenarioID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.normalizedScenariosByID[scenarioID]; !ok {
+		return fmt.Errorf("scenario not found")
+	}
+	delete(s.normalizedScenariosByID, scenarioID)
+	return nil
+}
+
 func (s *InMemoryStore) CreateScenarioSteps(userID int, scenarioID string, steps []normalized.ScenarioStep) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -275,6 +331,29 @@ func (s *PostgresStore) ListNormalizedSchemes(userID int) ([]normalized.Scheme, 
 		result = append(result, scheme)
 	}
 	return result, rows.Err()
+}
+
+func (s *PostgresStore) UpdateNormalizedScheme(userID int, scheme normalized.Scheme) error {
+	if _, err := s.db.Exec(`UPDATE schemes SET name = $1 WHERE scheme_id = $2`, scheme.Name, scheme.SchemeID); err != nil {
+		return err
+	}
+	assignSchemeID(&scheme)
+	return s.replaceNormalizedSchemeData(scheme.SchemeID, scheme)
+}
+
+func (s *PostgresStore) DeleteNormalizedScheme(userID int, schemeID int) error {
+	result, err := s.db.Exec(`DELETE FROM schemes WHERE scheme_id = $1`, schemeID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("scheme not found")
+	}
+	return nil
 }
 
 func (s *PostgresStore) CreateTracks(userID int, schemeID int, tracks []normalized.Track) error {
@@ -493,6 +572,62 @@ func (s *PostgresStore) ListNormalizedScenarios(userID int) ([]normalized.Scenar
 		result = append(result, scenario)
 	}
 	return result, rows.Err()
+}
+
+func (s *PostgresStore) UpdateNormalizedScenario(userID int, scenario normalized.Scenario) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(`UPDATE scenarios SET scheme_id = $1, name = $2, updated_at = $3 WHERE scenario_id = $4`,
+		scenario.SchemeID,
+		scenario.Name,
+		time.Now(),
+		scenario.ScenarioID,
+	)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("scenario not found")
+	}
+
+	if _, err := tx.Exec(`DELETE FROM scenario_steps WHERE scenario_id = $1`, scenario.ScenarioID); err != nil {
+		return err
+	}
+	for _, step := range withScenarioIDForSteps(scenario.ScenarioID, scenario.Steps) {
+		if _, err := tx.Exec(`
+			INSERT INTO scenario_steps (
+				step_id, scenario_id, step_order, step_type, from_track_id, from_index,
+				to_track_id, to_index, object1_id, object2_id, payload_json
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		`, step.StepID, step.ScenarioID, step.StepOrder, step.StepType, step.FromTrackID, step.FromIndex, step.ToTrackID, step.ToIndex, step.Object1ID, step.Object2ID, nullJSON(step.PayloadJSON)); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *PostgresStore) DeleteNormalizedScenario(userID int, scenarioID string) error {
+	result, err := s.db.Exec(`DELETE FROM scenarios WHERE scenario_id = $1`, scenarioID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("scenario not found")
+	}
+	return nil
 }
 
 func (s *PostgresStore) CreateScenarioSteps(userID int, scenarioID string, steps []normalized.ScenarioStep) error {
