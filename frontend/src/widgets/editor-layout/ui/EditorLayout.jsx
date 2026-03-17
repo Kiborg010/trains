@@ -25,6 +25,7 @@ const SCENARIO_STEP_MOVE = "MOVE_LOCO";
 const SCENARIO_STEP_COUPLE = "COUPLE";
 const SCENARIO_STEP_DECOUPLE = "DECOUPLE";
 const PATH_TYPE_MAIN = "main";
+const PATH_TYPE_BYPASS = "bypass";
 const PATH_TYPE_SORTING = "sorting";
 const PATH_TYPE_LEAD = "lead";
 const PATH_TYPE_NORMAL = "normal";
@@ -41,18 +42,21 @@ const WAGON_COLOR_PALETTE = [
 ];
 const PATH_TYPE_OPTIONS = [
   { value: PATH_TYPE_MAIN, label: "Главный" },
+  { value: PATH_TYPE_BYPASS, label: "Объездной" },
   { value: PATH_TYPE_SORTING, label: "Сортировочный" },
   { value: PATH_TYPE_LEAD, label: "Вытяжной" },
   { value: PATH_TYPE_NORMAL, label: "Прочий" },
 ];
 const PATH_TYPE_LABELS = {
   [PATH_TYPE_MAIN]: "Главный",
+  [PATH_TYPE_BYPASS]: "Объездной",
   [PATH_TYPE_SORTING]: "Сортировочный",
   [PATH_TYPE_LEAD]: "Вытяжной",
   [PATH_TYPE_NORMAL]: "Прочий",
 };
 const PATH_TYPE_COLORS = {
   [PATH_TYPE_MAIN]: "#f59e0b",
+  [PATH_TYPE_BYPASS]: "#e11d48",
   [PATH_TYPE_SORTING]: "#22c55e",
   [PATH_TYPE_LEAD]: "#38bdf8",
   [PATH_TYPE_NORMAL]: "#334155",
@@ -181,6 +185,7 @@ function normalizePathType(type) {
   const normalized = String(type || "").trim().toLowerCase();
   if (
     normalized === PATH_TYPE_MAIN ||
+    normalized === PATH_TYPE_BYPASS ||
     normalized === PATH_TYPE_SORTING ||
     normalized === PATH_TYPE_LEAD ||
     normalized === PATH_TYPE_NORMAL
@@ -3155,6 +3160,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                     fontWeight="700"
                     textAnchor="middle"
                     pointerEvents="none"
+                    style={{ userSelect: "none" }}
                   >
                     {pathName}
                   </text>
@@ -3231,6 +3237,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                     fontWeight="700"
                     textAnchor="middle"
                     pointerEvents="none"
+                    style={{ userSelect: "none" }}
                     stroke="rgba(15,23,42,0.45)"
                     strokeWidth="0.6"
                     paintOrder="stroke"
