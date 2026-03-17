@@ -168,6 +168,7 @@ func deleteLegacyLayoutNormalizedFirstInMemory(store *InMemoryStore, userID int,
 			continue
 		}
 		delete(store.scenariosByID, scenarioID)
+		delete(store.normalizedScenariosByID, scenarioID)
 		for executionID, execution := range store.executionsByID {
 			if execution.ScenarioID == scenarioID && execution.UserID == userID {
 				delete(store.executionsByID, executionID)
@@ -200,6 +201,12 @@ func createLegacyScenarioNormalizedFirstInMemory(store *InMemoryStore, userID in
 		CommandsMap: map[string]CommandSpec{},
 	}
 	store.scenariosByID[id] = scenario
+	store.normalizedScenariosByID[id] = normalized.Scenario{
+		ScenarioID: id,
+		SchemeID:   layoutID,
+		Name:       name,
+		Steps:      []normalized.ScenarioStep{},
+	}
 	return &scenario, nil
 }
 
@@ -212,6 +219,7 @@ func deleteLegacyScenarioNormalizedFirstInMemory(store *InMemoryStore, userID in
 		return fmt.Errorf("scenario not found")
 	}
 	delete(store.scenariosByID, scenarioID)
+	delete(store.normalizedScenariosByID, scenarioID)
 	for executionID, execution := range store.executionsByID {
 		if execution.ScenarioID == scenarioID && execution.UserID == userID {
 			delete(store.executionsByID, executionID)
@@ -238,7 +246,10 @@ func appendLegacyScenarioCommandNormalizedFirstInMemory(store *InMemoryStore, us
 		scenario.CommandsMap[command.ID] = command
 	}
 	store.scenariosByID[scenarioID] = scenario
-	_ = steps
+	if normalizedScenario, ok := store.normalizedScenariosByID[scenarioID]; ok {
+		normalizedScenario.Steps = cloneScenarioSteps(withScenarioIDForSteps(scenarioID, steps))
+		store.normalizedScenariosByID[scenarioID] = normalizedScenario
+	}
 	return nil
 }
 

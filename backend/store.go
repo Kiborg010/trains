@@ -74,31 +74,33 @@ type Store interface {
 
 // InMemoryStore implements Store interface for local development/testing fallback.
 type InMemoryStore struct {
-	mu             sync.Mutex
-	nextUserID     int
-	nextLayoutID   int
-	nextSchemeID   int
-	nextScenarioID int
-	usersByID      map[int]User
-	userIDsByEmail map[string]int
-	layoutsByID    map[int]Layout
-	scenariosByID  map[string]Scenario
-	executionsByID map[string]Execution
-	schemesByID    map[int]normalized.Scheme
+	mu                      sync.Mutex
+	nextUserID              int
+	nextLayoutID            int
+	nextSchemeID            int
+	nextScenarioID          int
+	usersByID               map[int]User
+	userIDsByEmail          map[string]int
+	layoutsByID             map[int]Layout
+	scenariosByID           map[string]Scenario
+	executionsByID          map[string]Execution
+	schemesByID             map[int]normalized.Scheme
+	normalizedScenariosByID map[string]normalized.Scenario
 }
 
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
-		nextUserID:     1,
-		nextLayoutID:   1,
-		nextSchemeID:   1,
-		nextScenarioID: 1,
-		usersByID:      map[int]User{},
-		userIDsByEmail: map[string]int{},
-		layoutsByID:    map[int]Layout{},
-		scenariosByID:  map[string]Scenario{},
-		executionsByID: map[string]Execution{},
-		schemesByID:    map[int]normalized.Scheme{},
+		nextUserID:              1,
+		nextLayoutID:            1,
+		nextSchemeID:            1,
+		nextScenarioID:          1,
+		usersByID:               map[int]User{},
+		userIDsByEmail:          map[string]int{},
+		layoutsByID:             map[int]Layout{},
+		scenariosByID:           map[string]Scenario{},
+		executionsByID:          map[string]Execution{},
+		schemesByID:             map[int]normalized.Scheme{},
+		normalizedScenariosByID: map[string]normalized.Scenario{},
 	}
 }
 
@@ -282,17 +284,13 @@ func (s *InMemoryStore) DeleteScenario(id string, userID int) error {
 }
 
 func (s *InMemoryStore) SaveExecution(userID int, scenarioID string) (string, error) {
+	runtime, err := buildExecutionRuntimeFromNormalized(s, userID, scenarioID)
+	if err != nil {
+		return "", err
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	scenario, ok := s.scenariosByID[scenarioID]
-	if !ok || scenario.UserID != userID {
-		return "", fmt.Errorf("scenario not found")
-	}
-	layout, ok := s.layoutsByID[scenario.LayoutID]
-	if !ok || layout.UserID != userID {
-		return "", fmt.Errorf("layout not found")
-	}
 
 	id := fmt.Sprintf("ex-%d", time.Now().UnixNano())
 	execution := Execution{
@@ -301,7 +299,7 @@ func (s *InMemoryStore) SaveExecution(userID int, scenarioID string) (string, er
 		ScenarioID:     scenarioID,
 		Status:         "running",
 		CurrentCommand: 0,
-		State:          layout.State,
+		State:          runtime.LayoutState,
 		Log:            []string{"execution created"},
 	}
 	s.executionsByID[id] = execution
@@ -723,19 +721,12 @@ func (s *PostgresStore) DeleteScenario(id string, userID int) error {
 
 // SaveExecution saves an execution
 func (s *PostgresStore) SaveExecution(userID int, scenarioID string) (string, error) {
-	scenario, err := s.GetScenario(scenarioID)
+	runtime, err := buildExecutionRuntimeFromNormalized(s, userID, scenarioID)
 	if err != nil {
 		return "", err
 	}
-	if scenario.UserID != userID {
-		return "", fmt.Errorf("scenario not found")
-	}
-	layout, err := s.GetLayout(scenario.LayoutID, userID)
-	if err != nil {
-		return "", fmt.Errorf("layout not found")
-	}
 
-	stateJSON, err := json.Marshal(layout.State)
+	stateJSON, err := json.Marshal(runtime.LayoutState)
 	if err != nil {
 		return "", err
 	}

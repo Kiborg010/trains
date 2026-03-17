@@ -141,7 +141,12 @@ func (s *InMemoryStore) CreateNormalizedScenario(userID int, scenario normalized
 	if scenario.ScenarioID == "" {
 		scenario.ScenarioID = fmt.Sprintf("nsc-%d", time.Now().UnixNano())
 	}
-	s.scenariosByID[scenario.ScenarioID] = convertNormalizedScenarioToLegacy(scenario)
+	s.normalizedScenariosByID[scenario.ScenarioID] = normalized.Scenario{
+		ScenarioID: scenario.ScenarioID,
+		SchemeID:   scenario.SchemeID,
+		Name:       scenario.Name,
+		Steps:      cloneScenarioSteps(scenario.Steps),
+	}
 	return scenario.ScenarioID, nil
 }
 
@@ -149,21 +154,31 @@ func (s *InMemoryStore) GetNormalizedScenario(id string, userID int) (*normalize
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	scenario, ok := s.scenariosByID[id]
+	scenario, ok := s.normalizedScenariosByID[id]
 	if !ok {
 		return nil, fmt.Errorf("scenario not found")
 	}
-	normalizedScenario := convertLegacyScenarioToNormalized(scenario)
-	return &normalizedScenario, nil
+	copy := normalized.Scenario{
+		ScenarioID: scenario.ScenarioID,
+		SchemeID:   scenario.SchemeID,
+		Name:       scenario.Name,
+		Steps:      cloneScenarioSteps(scenario.Steps),
+	}
+	return &copy, nil
 }
 
 func (s *InMemoryStore) ListNormalizedScenarios(userID int) ([]normalized.Scenario, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	result := make([]normalized.Scenario, 0, len(s.scenariosByID))
-	for _, scenario := range s.scenariosByID {
-		result = append(result, convertLegacyScenarioToNormalized(scenario))
+	result := make([]normalized.Scenario, 0, len(s.normalizedScenariosByID))
+	for _, scenario := range s.normalizedScenariosByID {
+		result = append(result, normalized.Scenario{
+			ScenarioID: scenario.ScenarioID,
+			SchemeID:   scenario.SchemeID,
+			Name:       scenario.Name,
+			Steps:      cloneScenarioSteps(scenario.Steps),
+		})
 	}
 	return result, nil
 }
@@ -172,13 +187,12 @@ func (s *InMemoryStore) CreateScenarioSteps(userID int, scenarioID string, steps
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	scenario, ok := s.scenariosByID[scenarioID]
+	scenario, ok := s.normalizedScenariosByID[scenarioID]
 	if !ok {
 		return fmt.Errorf("scenario not found")
 	}
-	normalizedScenario := convertLegacyScenarioToNormalized(scenario)
-	normalizedScenario.Steps = cloneScenarioSteps(withScenarioIDForSteps(scenarioID, steps))
-	s.scenariosByID[scenarioID] = convertNormalizedScenarioToLegacy(normalizedScenario)
+	scenario.Steps = cloneScenarioSteps(withScenarioIDForSteps(scenarioID, steps))
+	s.normalizedScenariosByID[scenarioID] = scenario
 	return nil
 }
 

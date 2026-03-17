@@ -186,8 +186,7 @@ func addCommandHandler(w http.ResponseWriter, r *http.Request, userID int, scena
 }
 
 func runScenarioHandler(w http.ResponseWriter, r *http.Request, userID int, scenarioID string) {
-	scenario, err := appStore.GetScenario(scenarioID)
-	if err != nil || scenario.UserID != userID {
+	if _, err := getLegacyScenarioFromNormalized(userID, scenarioID); err != nil {
 		http.Error(w, "scenario not found", http.StatusNotFound)
 		return
 	}
@@ -270,12 +269,12 @@ func stepExecutionHandler(w http.ResponseWriter, r *http.Request, userID int, ex
 		return
 	}
 
-	scenario, err := appStore.GetScenario(execution.ScenarioID)
-	if err != nil || scenario.UserID != userID {
+	runtime, err := buildExecutionRuntimeFromNormalized(appStore, userID, execution.ScenarioID)
+	if err != nil {
 		http.Error(w, "scenario not found", http.StatusNotFound)
 		return
 	}
-	if execution.CurrentCommand >= len(scenario.Commands) {
+	if execution.CurrentCommand >= len(runtime.Commands) {
 		execution.Status = "completed"
 		execution.Log = append(execution.Log, "completed")
 		_ = appStore.UpdateExecution(executionID, userID, *execution)
@@ -287,7 +286,7 @@ func stepExecutionHandler(w http.ResponseWriter, r *http.Request, userID int, ex
 		return
 	}
 
-	command := scenario.Commands[execution.CurrentCommand]
+	command := runtime.Commands[execution.CurrentCommand]
 	nextState, msg, err := applyCommand(execution.State, command)
 	if err != nil {
 		execution.Status = "failed"
@@ -304,7 +303,7 @@ func stepExecutionHandler(w http.ResponseWriter, r *http.Request, userID int, ex
 	execution.State = nextState
 	execution.CurrentCommand++
 	execution.Log = append(execution.Log, fmt.Sprintf("command %s ok %s", command.Type, msg))
-	if execution.CurrentCommand >= len(scenario.Commands) {
+	if execution.CurrentCommand >= len(runtime.Commands) {
 		execution.Status = "completed"
 		execution.Log = append(execution.Log, "completed")
 	}

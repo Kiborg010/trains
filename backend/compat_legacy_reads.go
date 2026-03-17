@@ -6,14 +6,18 @@ import (
 )
 
 func listLegacyLayoutsFromNormalized(userID int) ([]Layout, error) {
-	schemes, err := appStore.ListNormalizedSchemes(userID)
+	return listLegacyLayoutsFromNormalizedStore(appStore, userID)
+}
+
+func listLegacyLayoutsFromNormalizedStore(store Store, userID int) ([]Layout, error) {
+	schemes, err := store.ListNormalizedSchemes(userID)
 	if err != nil {
 		return nil, err
 	}
 
 	result := make([]Layout, 0, len(schemes))
 	for _, scheme := range schemes {
-		layout, err := getLegacyLayoutFromNormalized(userID, scheme.SchemeID)
+		layout, err := getLegacyLayoutFromNormalizedStore(store, userID, scheme.SchemeID)
 		if err != nil {
 			return nil, err
 		}
@@ -23,28 +27,32 @@ func listLegacyLayoutsFromNormalized(userID int) ([]Layout, error) {
 }
 
 func getLegacyLayoutFromNormalized(userID int, schemeID int) (*Layout, error) {
-	scheme, err := appStore.GetNormalizedScheme(schemeID, userID)
+	return getLegacyLayoutFromNormalizedStore(appStore, userID, schemeID)
+}
+
+func getLegacyLayoutFromNormalizedStore(store Store, userID int, schemeID int) (*Layout, error) {
+	scheme, err := store.GetNormalizedScheme(schemeID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("normalized scheme %d not found: %w", schemeID, err)
 	}
 
-	tracks, err := appStore.ListTracksByScheme(userID, schemeID)
+	tracks, err := store.ListTracksByScheme(userID, schemeID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load normalized tracks for scheme %d: %w", schemeID, err)
 	}
-	connections, err := appStore.ListTrackConnectionsByScheme(userID, schemeID)
+	connections, err := store.ListTrackConnectionsByScheme(userID, schemeID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load normalized track connections for scheme %d: %w", schemeID, err)
 	}
-	wagons, err := appStore.ListWagonsByScheme(userID, schemeID)
+	wagons, err := store.ListWagonsByScheme(userID, schemeID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load normalized wagons for scheme %d: %w", schemeID, err)
 	}
-	locomotives, err := appStore.ListLocomotivesByScheme(userID, schemeID)
+	locomotives, err := store.ListLocomotivesByScheme(userID, schemeID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load normalized locomotives for scheme %d: %w", schemeID, err)
 	}
-	couplings, err := appStore.ListNormalizedCouplingsByScheme(userID, schemeID)
+	couplings, err := store.ListNormalizedCouplingsByScheme(userID, schemeID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load normalized couplings for scheme %d: %w", schemeID, err)
 	}
@@ -73,14 +81,18 @@ func getLegacyLayoutFromNormalized(userID int, schemeID int) (*Layout, error) {
 }
 
 func listLegacyScenariosFromNormalized(userID int) ([]Scenario, error) {
-	scenarios, err := appStore.ListNormalizedScenarios(userID)
+	return listLegacyScenariosFromNormalizedStore(appStore, userID)
+}
+
+func listLegacyScenariosFromNormalizedStore(store Store, userID int) ([]Scenario, error) {
+	scenarios, err := store.ListNormalizedScenarios(userID)
 	if err != nil {
 		return nil, err
 	}
 
 	result := make([]Scenario, 0, len(scenarios))
 	for _, normalizedScenario := range scenarios {
-		scenario, err := getLegacyScenarioFromNormalized(userID, normalizedScenario.ScenarioID)
+		scenario, err := getLegacyScenarioFromNormalizedStore(store, userID, normalizedScenario.ScenarioID)
 		if err != nil {
 			return nil, err
 		}
@@ -90,12 +102,16 @@ func listLegacyScenariosFromNormalized(userID int) ([]Scenario, error) {
 }
 
 func getLegacyScenarioFromNormalized(userID int, scenarioID string) (*Scenario, error) {
-	scenario, err := appStore.GetNormalizedScenario(scenarioID, userID)
+	return getLegacyScenarioFromNormalizedStore(appStore, userID, scenarioID)
+}
+
+func getLegacyScenarioFromNormalizedStore(store Store, userID int, scenarioID string) (*Scenario, error) {
+	scenario, err := store.GetNormalizedScenario(scenarioID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("normalized scenario %s not found: %w", scenarioID, err)
 	}
 
-	steps, err := appStore.ListScenarioStepsByScenario(userID, scenarioID)
+	steps, err := store.ListScenarioStepsByScenario(userID, scenarioID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load normalized scenario steps for scenario %s: %w", scenarioID, err)
 	}
