@@ -19,7 +19,7 @@ async function postJSON(path, body) {
   });
 
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+    throw await buildHTTPError(response, path);
   }
 
   return response.json();
@@ -33,7 +33,7 @@ async function putJSON(path, body) {
   });
 
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+    throw await buildHTTPError(response, path);
   }
 
   return response.json();
@@ -46,7 +46,7 @@ async function deleteJSON(path) {
   });
 
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+    throw await buildHTTPError(response, path);
   }
 
   return response.json();
@@ -59,10 +59,37 @@ async function getJSON(path) {
   });
 
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+    throw await buildHTTPError(response, path);
   }
 
   return response.json();
+}
+
+async function buildHTTPError(response, path) {
+  let message = `HTTP ${response.status} (${path})`;
+
+  try {
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const data = await response.json();
+      const detailed =
+        data?.message ||
+        data?.error ||
+        (typeof data === "string" ? data : "");
+      if (detailed) {
+        message = detailed;
+      }
+    } else {
+      const text = (await response.text()).trim();
+      if (text) {
+        message = text;
+      }
+    }
+  } catch {
+    // Keep fallback HTTP status message.
+  }
+
+  return new Error(message);
 }
 
 export async function validateCoupling(payload) {
@@ -129,48 +156,8 @@ export async function deleteNormalizedScenario(scenarioId) {
   return deleteJSON(`/normalized/scenarios/${scenarioId}`);
 }
 
-export async function saveLayout(payload) {
-  return postJSON("/layouts", payload);
-}
-
-export async function listLayouts() {
-  return getJSON("/layouts");
-}
-
-export async function getLayout(layoutId) {
-  return getJSON(`/layouts/${layoutId}`);
-}
-
-export async function updateLayout(layoutId, payload) {
-  return putJSON(`/layouts/${layoutId}`, payload);
-}
-
-export async function deleteLayout(layoutId) {
-  return deleteJSON(`/layouts/${layoutId}`);
-}
-
-export async function createScenario(payload) {
-  return postJSON("/scenarios", payload);
-}
-
-export async function listScenarios() {
-  return getJSON("/scenarios");
-}
-
-export async function getScenario(scenarioId) {
-  return getJSON(`/scenarios/${scenarioId}`);
-}
-
-export async function addScenarioCommand(scenarioId, payload) {
-  return postJSON(`/scenarios/${scenarioId}/commands`, payload);
-}
-
-export async function deleteScenario(scenarioId) {
-  return deleteJSON(`/scenarios/${scenarioId}`);
-}
-
 export async function runScenario(scenarioId) {
-  return postJSON(`/scenarios/${scenarioId}/run`, {});
+  return postJSON(`/normalized/scenarios/${scenarioId}/run`, {});
 }
 
 export async function getExecution(executionId) {

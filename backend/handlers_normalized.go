@@ -35,7 +35,7 @@ func normalizedSchemesHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, ListNormalizedSchemesResponse{
 			OK:      false,
-			Message: "failed to list normalized schemes",
+			Message: fmt.Sprintf("failed to list normalized schemes: %v", err),
 		})
 		return
 	}
@@ -81,7 +81,7 @@ func normalizedSchemeByIDHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeJSON(w, http.StatusNotFound, GetNormalizedSchemeResponse{
 				OK:      false,
-				Message: "normalized scheme not found",
+				Message: fmt.Sprintf("normalized scheme not found: %v", err),
 			})
 			return
 		}
@@ -150,7 +150,7 @@ func normalizedScenariosHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, ListNormalizedScenariosResponse{
 			OK:      false,
-			Message: "failed to list normalized scenarios",
+			Message: fmt.Sprintf("failed to list normalized scenarios: %v", err),
 		})
 		return
 	}
@@ -192,7 +192,7 @@ func normalizedScenarioByIDHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeJSON(w, http.StatusNotFound, GetNormalizedScenarioResponse{
 				OK:      false,
-				Message: "normalized scenario not found",
+				Message: fmt.Sprintf("normalized scenario not found: %v", err),
 			})
 			return
 		}
@@ -233,7 +233,7 @@ func normalizedScenarioByIDHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeJSON(w, http.StatusNotFound, ListScenarioStepsResponse{
 				OK:      false,
-				Message: "normalized scenario steps not found",
+				Message: fmt.Sprintf("normalized scenario steps not found: %v", err),
 			})
 			return
 		}
@@ -253,6 +253,15 @@ func normalizedScenarioByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(parts) == 2 && parts[1] == "run" {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		runNormalizedScenarioHandler(w, r, userID, scenarioID)
+		return
+	}
+
 	http.Error(w, "not found", http.StatusNotFound)
 }
 
@@ -261,7 +270,7 @@ func writeNormalizedSchemeDetails(w http.ResponseWriter, userID int, schemeID in
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, SchemeDetailsResponse{
 			OK:      false,
-			Message: "normalized scheme not found",
+			Message: fmt.Sprintf("normalized scheme not found: %v", err),
 		})
 		return
 	}
@@ -270,7 +279,7 @@ func writeNormalizedSchemeDetails(w http.ResponseWriter, userID int, schemeID in
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, SchemeDetailsResponse{
 			OK:      false,
-			Message: "failed to load tracks",
+			Message: fmt.Sprintf("failed to load tracks: %v", err),
 		})
 		return
 	}
@@ -278,7 +287,7 @@ func writeNormalizedSchemeDetails(w http.ResponseWriter, userID int, schemeID in
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, SchemeDetailsResponse{
 			OK:      false,
-			Message: "failed to load track connections",
+			Message: fmt.Sprintf("failed to load track connections: %v", err),
 		})
 		return
 	}
@@ -286,7 +295,7 @@ func writeNormalizedSchemeDetails(w http.ResponseWriter, userID int, schemeID in
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, SchemeDetailsResponse{
 			OK:      false,
-			Message: "failed to load wagons",
+			Message: fmt.Sprintf("failed to load wagons: %v", err),
 		})
 		return
 	}
@@ -294,7 +303,7 @@ func writeNormalizedSchemeDetails(w http.ResponseWriter, userID int, schemeID in
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, SchemeDetailsResponse{
 			OK:      false,
-			Message: "failed to load locomotives",
+			Message: fmt.Sprintf("failed to load locomotives: %v", err),
 		})
 		return
 	}
@@ -302,7 +311,7 @@ func writeNormalizedSchemeDetails(w http.ResponseWriter, userID int, schemeID in
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, SchemeDetailsResponse{
 			OK:      false,
-			Message: "failed to load couplings",
+			Message: fmt.Sprintf("failed to load couplings: %v", err),
 		})
 		return
 	}
@@ -324,7 +333,7 @@ func writeNormalizedScenarioDetails(w http.ResponseWriter, userID int, scenarioI
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, ScenarioDetailsResponse{
 			OK:      false,
-			Message: "normalized scenario not found",
+			Message: fmt.Sprintf("normalized scenario not found: %v", err),
 		})
 		return
 	}
@@ -332,7 +341,7 @@ func writeNormalizedScenarioDetails(w http.ResponseWriter, userID int, scenarioI
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, ScenarioDetailsResponse{
 			OK:      false,
-			Message: "failed to load scenario steps",
+			Message: fmt.Sprintf("failed to load scenario steps: %v", err),
 		})
 		return
 	}
@@ -360,7 +369,7 @@ func handleCreateNormalizedScheme(w http.ResponseWriter, r *http.Request, userID
 
 	schemeID, err := appStore.CreateNormalizedScheme(userID, scheme)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, SchemeDetailsResponse{OK: false, Message: "failed to create normalized scheme"})
+		writeJSON(w, http.StatusInternalServerError, SchemeDetailsResponse{OK: false, Message: fmt.Sprintf("failed to create normalized scheme: %v", err)})
 		return
 	}
 
@@ -381,7 +390,7 @@ func handleUpdateNormalizedScheme(w http.ResponseWriter, r *http.Request, userID
 	}
 
 	if err := appStore.UpdateNormalizedScheme(userID, scheme); err != nil {
-		writeJSON(w, http.StatusNotFound, SchemeDetailsResponse{OK: false, Message: err.Error()})
+		writeJSON(w, http.StatusNotFound, SchemeDetailsResponse{OK: false, Message: fmt.Sprintf("failed to update normalized scheme: %v", err)})
 		return
 	}
 
@@ -403,7 +412,7 @@ func handleCreateNormalizedScenario(w http.ResponseWriter, r *http.Request, user
 
 	scenarioID, err := appStore.CreateNormalizedScenario(userID, scenario)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, ScenarioDetailsResponse{OK: false, Message: "failed to create normalized scenario"})
+		writeJSON(w, http.StatusInternalServerError, ScenarioDetailsResponse{OK: false, Message: fmt.Sprintf("failed to create normalized scenario: %v", err)})
 		return
 	}
 
@@ -424,7 +433,7 @@ func handleUpdateNormalizedScenario(w http.ResponseWriter, r *http.Request, user
 	}
 
 	if err := appStore.UpdateNormalizedScenario(userID, scenario); err != nil {
-		writeJSON(w, http.StatusNotFound, ScenarioDetailsResponse{OK: false, Message: err.Error()})
+		writeJSON(w, http.StatusNotFound, ScenarioDetailsResponse{OK: false, Message: fmt.Sprintf("failed to update normalized scenario: %v", err)})
 		return
 	}
 

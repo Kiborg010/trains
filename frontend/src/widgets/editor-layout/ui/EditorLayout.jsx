@@ -27,7 +27,7 @@ const SCENARIO_STEP_DECOUPLE = "DECOUPLE";
 const PATH_TYPE_MAIN = "main";
 const PATH_TYPE_SORTING = "sorting";
 const PATH_TYPE_LEAD = "lead";
-const PATH_TYPE_OTHER = "other";
+const PATH_TYPE_NORMAL = "normal";
 const DEFAULT_WAGON_COLOR = "#0ea5e9";
 const WAGON_COLOR_PALETTE = [
   DEFAULT_WAGON_COLOR,
@@ -43,19 +43,19 @@ const PATH_TYPE_OPTIONS = [
   { value: PATH_TYPE_MAIN, label: "Главный" },
   { value: PATH_TYPE_SORTING, label: "Сортировочный" },
   { value: PATH_TYPE_LEAD, label: "Вытяжной" },
-  { value: PATH_TYPE_OTHER, label: "Прочий" },
+  { value: PATH_TYPE_NORMAL, label: "Прочий" },
 ];
 const PATH_TYPE_LABELS = {
   [PATH_TYPE_MAIN]: "Главный",
   [PATH_TYPE_SORTING]: "Сортировочный",
   [PATH_TYPE_LEAD]: "Вытяжной",
-  [PATH_TYPE_OTHER]: "Прочий",
+  [PATH_TYPE_NORMAL]: "Прочий",
 };
 const PATH_TYPE_COLORS = {
   [PATH_TYPE_MAIN]: "#f59e0b",
   [PATH_TYPE_SORTING]: "#22c55e",
   [PATH_TYPE_LEAD]: "#38bdf8",
-  [PATH_TYPE_OTHER]: "#334155",
+  [PATH_TYPE_NORMAL]: "#334155",
 };
 
 function clamp(value, min, max) {
@@ -182,18 +182,19 @@ function normalizePathType(type) {
   if (
     normalized === PATH_TYPE_MAIN ||
     normalized === PATH_TYPE_SORTING ||
-    normalized === PATH_TYPE_LEAD
+    normalized === PATH_TYPE_LEAD ||
+    normalized === PATH_TYPE_NORMAL
   ) {
     return normalized;
   }
-  return PATH_TYPE_OTHER;
+  return PATH_TYPE_NORMAL;
 }
 
 function getSegmentStrokeColor(segmentType, isSelected) {
   if (isSelected) {
     return "#2563eb";
   }
-  return PATH_TYPE_COLORS[normalizePathType(segmentType)] || PATH_TYPE_COLORS[PATH_TYPE_OTHER];
+  return PATH_TYPE_COLORS[normalizePathType(segmentType)] || PATH_TYPE_COLORS[PATH_TYPE_NORMAL];
 }
 
 function normalizeScenarioStep(step) {
@@ -317,6 +318,76 @@ function buildTrackConnectionsFromSegments(segments) {
     }
   }
   return connections;
+}
+
+function normalizeEditorLayoutForSave(
+  segments,
+  vehicles,
+  couplings,
+  scenarioSteps = [],
+  schemeKey = ""
+) {
+  const prefix = schemeKey ? `scheme-${schemeKey}` : `draft-${crypto.randomUUID()}`;
+  const nextSegments = (segments || []).map((segment, index) => ({
+    ...segment,
+    id: `${prefix}-track-${index + 1}`,
+  }));
+
+  const findNearestSlot = (vehicle) => {
+    let best = null;
+    for (const segment of nextSegments) {
+      const slots = getSegmentSlots(segment, GRID_SIZE);
+      for (let index = 0; index < slots.length; index += 1) {
+        const slot = slots[index];
+        const dx = slot.x - Number(vehicle.x || 0);
+        const dy = slot.y - Number(vehicle.y || 0);
+        const distance = dx * dx + dy * dy;
+        if (!best || distance < best.distance) {
+          best = { pathId: segment.id, pathIndex: index, distance };
+        }
+      }
+    }
+    return best;
+  };
+
+  const nextVehicles = (vehicles || []).map((vehicle) => {
+    const nearest = findNearestSlot(vehicle);
+    if (!nearest) {
+      return { ...vehicle };
+    }
+    return {
+      ...vehicle,
+      pathId: nearest.pathId,
+      pathIndex: nearest.pathIndex,
+    };
+  });
+
+  const fallbackPathMap = new Map();
+  nextSegments.forEach((segment, index) => {
+    fallbackPathMap.set((segments[index]?.id || "").trim(), segment.id);
+  });
+
+  const nextScenarioSteps = (scenarioSteps || []).map((step) => {
+    const normalized = normalizeScenarioStep(step);
+    if (normalized.type !== SCENARIO_STEP_MOVE) {
+      return normalized;
+    }
+    return {
+      ...normalized,
+      payload: {
+        ...normalized.payload,
+        fromPathId: fallbackPathMap.get(normalized.payload.fromPathId) || normalized.payload.fromPathId,
+        toPathId: fallbackPathMap.get(normalized.payload.toPathId) || normalized.payload.toPathId,
+      },
+    };
+  });
+
+  return {
+    segments: nextSegments,
+    vehicles: nextVehicles,
+    couplings: (couplings || []).map((coupling) => ({ ...coupling })),
+    scenarioSteps: nextScenarioSteps,
+  };
 }
 
 function buildNormalizedSchemePayload(name, segments, vehicles, couplings) {
@@ -857,22 +928,30 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
   async function handleSaveLayout() {
     try {
-      const vehiclesForSave = vehicles.map((vehicle) => {
-        if (vehicle.type !== "wagon") {
-          return { ...vehicle };
-        }
-        return {
-          ...vehicle,
-          color: vehicle.color || DEFAULT_WAGON_COLOR,
-        };
-      });
+      const normalizedState = normalizeEditorLayoutForSave(
+        segments,
+        vehicles,
+        couplings,
+        scenarioSteps,
+        selectedLayoutId
+      );
+      const normalizedVehiclesForSave = normalizedState.vehicles.map((vehicle) =>
+        vehicle.type === "wagon" ? { ...vehicle, color: vehicle.color || DEFAULT_WAGON_COLOR } : { ...vehicle }
+      );
 
       const payload = buildNormalizedSchemePayload(
         layoutName,
-        segments,
-        vehiclesForSave,
-        couplings
+        normalizedState.segments,
+        normalizedVehiclesForSave,
+        normalizedState.couplings
       );
+
+      setSegments(normalizedState.segments);
+      setVehicles((prev) =>
+        mergeVehicleColors(prev, normalizedVehiclesForSave, vehicleColorMemoryRef.current)
+      );
+      setCouplings(normalizedState.couplings);
+      setScenarioSteps(normalizedState.scenarioSteps);
 
       let response;
       if (selectedLayoutId) {
@@ -951,6 +1030,13 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
   async function handleSaveScenario() {
     try {
+      const normalizedState = normalizeEditorLayoutForSave(
+        segments,
+        vehicles,
+        couplings,
+        scenarioSteps,
+        selectedLayoutId
+      );
       if (!scenarioSteps.length) {
         setMovementHint("Добавь шаги сценария перед сохранением.");
         return;
@@ -968,8 +1054,8 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       const payload = buildNormalizedScenarioPayload(
         scenarioName,
         schemeId,
-        scenarioSteps,
-        vehicles
+        normalizedState.scenarioSteps,
+        normalizedState.vehicles
       );
 
       let response;

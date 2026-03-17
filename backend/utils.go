@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-func cloneLayoutState(state LayoutState) LayoutState {
-	next := LayoutState{
+func cloneRuntimeState(state RuntimeState) RuntimeState {
+	next := RuntimeState{
 		Segments:  make([]Segment, len(state.Segments)),
 		Vehicles:  make([]Vehicle, len(state.Vehicles)),
 		Couplings: make([]Coupling, len(state.Couplings)),
@@ -75,7 +75,7 @@ func pairKey(a, b string) string {
 	return b + "|" + a
 }
 
-func normalizeSegmentIDs(state LayoutState) LayoutState {
+func normalizeSegmentIDs(state RuntimeState) RuntimeState {
 	if len(state.Segments) == 0 {
 		return state
 	}

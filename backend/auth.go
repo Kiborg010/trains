@@ -97,16 +97,6 @@ func VerifyJWT(tokenString string, secretKey string) (*Claims, error) {
 	return claims, nil
 }
 
-// Layout represents a saved layout
-type Layout struct {
-	ID        int         `json:"id"`
-	UserID    int         `json:"userId"`
-	Name      string      `json:"name"`
-	State     LayoutState `json:"state"`
-	CreatedAt time.Time   `json:"createdAt"`
-	UpdatedAt time.Time   `json:"updatedAt"`
-}
-
 var (
 	ErrUserNotFound    = errors.New("user not found")
 	ErrInvalidPassword = errors.New("invalid password")

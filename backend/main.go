@@ -46,10 +46,6 @@ func main() {
 
 	// Protected endpoints
 	mux.Handle("/api/auth/me", authMiddleware(http.HandlerFunc(meHandler)))
-	mux.Handle("/api/layouts", authMiddleware(http.HandlerFunc(layoutsHandler)))
-	mux.Handle("/api/layouts/", authMiddleware(http.HandlerFunc(layoutByIDHandler)))
-	mux.Handle("/api/scenarios", authMiddleware(http.HandlerFunc(scenariosHandler)))
-	mux.Handle("/api/scenarios/", authMiddleware(http.HandlerFunc(scenarioByIDHandler)))
 	mux.Handle("/api/executions/", authMiddleware(http.HandlerFunc(executionByIDHandler)))
 	mux.Handle("/api/normalized/schemes", authMiddleware(http.HandlerFunc(normalizedSchemesHandler)))
 	mux.Handle("/api/normalized/schemes/", authMiddleware(http.HandlerFunc(normalizedSchemeByIDHandler)))

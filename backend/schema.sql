@@ -1,4 +1,4 @@
--- PostgreSQL schema for trains application
+-- PostgreSQL schema for trains application (normalized-only)
 
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
@@ -8,49 +8,12 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS layouts (
-    id SERIAL PRIMARY KEY,
-    user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    name VARCHAR(255) NOT NULL,
-    -- Legacy compatibility shadow only. Normalized tables are the active source of truth.
-    state JSONB NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS scenarios (
-    id SERIAL PRIMARY KEY,
-    user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    layout_id INT NOT NULL REFERENCES layouts(id) ON DELETE CASCADE,
-    name VARCHAR(255) NOT NULL,
-    -- Legacy compatibility shadow only. Normalized tables are the active source of truth.
-    commands JSONB NOT NULL DEFAULT '[]',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS executions (
-    id SERIAL PRIMARY KEY,
-    user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    scenario_id INT NOT NULL REFERENCES scenarios(id) ON DELETE CASCADE,
-    status VARCHAR(50) DEFAULT 'running',
-    current_command INT DEFAULT 0,
-    state JSONB NOT NULL,
-    log JSONB NOT NULL DEFAULT '[]',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Indices for better query performance
-CREATE INDEX IF NOT EXISTS idx_layouts_user_id ON layouts(user_id);
-CREATE INDEX IF NOT EXISTS idx_scenarios_user_id ON scenarios(user_id);
-CREATE INDEX IF NOT EXISTS idx_executions_user_id ON executions(user_id);
-CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-
--- Parallel normalized schema (additive, legacy JSON flow remains in place)
 CREATE TABLE IF NOT EXISTS schemes (
     scheme_id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL
+    user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS tracks (
@@ -101,13 +64,14 @@ CREATE TABLE IF NOT EXISTS couplings (
     object2_id VARCHAR(255) NOT NULL
 );
 
-ALTER TABLE scenarios
-    ADD COLUMN IF NOT EXISTS scenario_id VARCHAR(255),
-    ADD COLUMN IF NOT EXISTS scheme_id INT REFERENCES schemes(scheme_id) ON DELETE CASCADE;
-
-ALTER TABLE scenarios
-    ALTER COLUMN user_id DROP NOT NULL,
-    ALTER COLUMN layout_id DROP NOT NULL;
+CREATE TABLE IF NOT EXISTS scenarios (
+    scenario_id VARCHAR(255) PRIMARY KEY,
+    user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    scheme_id INT NOT NULL REFERENCES schemes(scheme_id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
 CREATE TABLE IF NOT EXISTS scenario_steps (
     step_id VARCHAR(255) PRIMARY KEY,
@@ -123,10 +87,25 @@ CREATE TABLE IF NOT EXISTS scenario_steps (
     payload_json JSONB
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_scenarios_scenario_id_unique ON scenarios(scenario_id) WHERE scenario_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_scenarios_scheme_id ON scenarios(scheme_id);
+CREATE TABLE IF NOT EXISTS executions (
+    id SERIAL PRIMARY KEY,
+    user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    scenario_id VARCHAR(255) NOT NULL REFERENCES scenarios(scenario_id) ON DELETE CASCADE,
+    status VARCHAR(50) DEFAULT 'running',
+    current_step INT DEFAULT 0,
+    state JSONB NOT NULL,
+    log JSONB NOT NULL DEFAULT '[]',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_schemes_user_id ON schemes(user_id);
 CREATE INDEX IF NOT EXISTS idx_tracks_scheme_id ON tracks(scheme_id);
 CREATE INDEX IF NOT EXISTS idx_track_connections_scheme_id ON track_connections(scheme_id);
 CREATE INDEX IF NOT EXISTS idx_wagons_scheme_track_index ON wagons(scheme_id, track_id, track_index);
 CREATE INDEX IF NOT EXISTS idx_locomotives_scheme_track_index ON locomotives(scheme_id, track_id, track_index);
+CREATE INDEX IF NOT EXISTS idx_scenarios_user_id ON scenarios(user_id);
+CREATE INDEX IF NOT EXISTS idx_scenarios_scheme_id ON scenarios(scheme_id);
 CREATE INDEX IF NOT EXISTS idx_scenario_steps_scenario_order ON scenario_steps(scenario_id, step_order);
+CREATE INDEX IF NOT EXISTS idx_executions_user_id ON executions(user_id);

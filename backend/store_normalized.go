@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"trains/backend/normalized"
@@ -279,7 +278,7 @@ func (s *InMemoryStore) updateSchemePart(schemeID int, updater func(*normalized.
 
 func (s *PostgresStore) CreateNormalizedScheme(userID int, scheme normalized.Scheme) (int, error) {
 	var schemeID int
-	if err := s.db.QueryRow(`INSERT INTO schemes (name) VALUES ($1) RETURNING scheme_id`, scheme.Name).Scan(&schemeID); err != nil {
+	if err := s.db.QueryRow(`INSERT INTO schemes (user_id, name) VALUES ($1, $2) RETURNING scheme_id`, userID, scheme.Name).Scan(&schemeID); err != nil {
 		return 0, err
 	}
 	assignSchemeID(&scheme)
@@ -292,7 +291,7 @@ func (s *PostgresStore) CreateNormalizedScheme(userID int, scheme normalized.Sch
 
 func (s *PostgresStore) GetNormalizedScheme(schemeID int, userID int) (*normalized.Scheme, error) {
 	var scheme normalized.Scheme
-	if err := s.db.QueryRow(`SELECT scheme_id, name FROM schemes WHERE scheme_id = $1`, schemeID).Scan(&scheme.SchemeID, &scheme.Name); err != nil {
+	if err := s.db.QueryRow(`SELECT scheme_id, name FROM schemes WHERE scheme_id = $1 AND user_id = $2`, schemeID, userID).Scan(&scheme.SchemeID, &scheme.Name); err != nil {
 		return nil, err
 	}
 
@@ -316,7 +315,7 @@ func (s *PostgresStore) GetNormalizedScheme(schemeID int, userID int) (*normaliz
 }
 
 func (s *PostgresStore) ListNormalizedSchemes(userID int) ([]normalized.Scheme, error) {
-	rows, err := s.db.Query(`SELECT scheme_id, name FROM schemes ORDER BY scheme_id`)
+	rows, err := s.db.Query(`SELECT scheme_id, name FROM schemes WHERE user_id = $1 ORDER BY scheme_id`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -334,15 +333,23 @@ func (s *PostgresStore) ListNormalizedSchemes(userID int) ([]normalized.Scheme, 
 }
 
 func (s *PostgresStore) UpdateNormalizedScheme(userID int, scheme normalized.Scheme) error {
-	if _, err := s.db.Exec(`UPDATE schemes SET name = $1 WHERE scheme_id = $2`, scheme.Name, scheme.SchemeID); err != nil {
+	result, err := s.db.Exec(`UPDATE schemes SET name = $1 WHERE scheme_id = $2 AND user_id = $3`, scheme.Name, scheme.SchemeID, userID)
+	if err != nil {
 		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("scheme not found")
 	}
 	assignSchemeID(&scheme)
 	return s.replaceNormalizedSchemeData(scheme.SchemeID, scheme)
 }
 
 func (s *PostgresStore) DeleteNormalizedScheme(userID int, schemeID int) error {
-	result, err := s.db.Exec(`DELETE FROM schemes WHERE scheme_id = $1`, schemeID)
+	result, err := s.db.Exec(`DELETE FROM schemes WHERE scheme_id = $1 AND user_id = $2`, schemeID, userID)
 	if err != nil {
 		return err
 	}
@@ -534,7 +541,7 @@ func (s *PostgresStore) CreateNormalizedScenario(userID int, scenario normalized
 	if scenario.ScenarioID == "" {
 		scenario.ScenarioID = fmt.Sprintf("nsc-%d", time.Now().UnixNano())
 	}
-	if _, err := s.db.Exec(`INSERT INTO scenarios (scenario_id, scheme_id, name) VALUES ($1, $2, $3)`, scenario.ScenarioID, scenario.SchemeID, scenario.Name); err != nil {
+	if _, err := s.db.Exec(`INSERT INTO scenarios (scenario_id, user_id, scheme_id, name) VALUES ($1, $2, $3, $4)`, scenario.ScenarioID, userID, scenario.SchemeID, scenario.Name); err != nil {
 		return "", err
 	}
 	if err := s.CreateScenarioSteps(userID, scenario.ScenarioID, scenario.Steps); err != nil {
@@ -545,7 +552,7 @@ func (s *PostgresStore) CreateNormalizedScenario(userID int, scenario normalized
 
 func (s *PostgresStore) GetNormalizedScenario(id string, userID int) (*normalized.Scenario, error) {
 	var scenario normalized.Scenario
-	if err := s.db.QueryRow(`SELECT scenario_id, scheme_id, name FROM scenarios WHERE scenario_id = $1`, id).Scan(&scenario.ScenarioID, &scenario.SchemeID, &scenario.Name); err != nil {
+	if err := s.db.QueryRow(`SELECT scenario_id, scheme_id, name FROM scenarios WHERE scenario_id = $1 AND user_id = $2`, id, userID).Scan(&scenario.ScenarioID, &scenario.SchemeID, &scenario.Name); err != nil {
 		return nil, err
 	}
 	steps, err := s.ListScenarioStepsByScenario(userID, id)
@@ -557,7 +564,7 @@ func (s *PostgresStore) GetNormalizedScenario(id string, userID int) (*normalize
 }
 
 func (s *PostgresStore) ListNormalizedScenarios(userID int) ([]normalized.Scenario, error) {
-	rows, err := s.db.Query(`SELECT scenario_id, scheme_id, name FROM scenarios WHERE scenario_id IS NOT NULL ORDER BY scenario_id`)
+	rows, err := s.db.Query(`SELECT scenario_id, scheme_id, name FROM scenarios WHERE user_id = $1 ORDER BY scenario_id`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -581,11 +588,12 @@ func (s *PostgresStore) UpdateNormalizedScenario(userID int, scenario normalized
 	}
 	defer tx.Rollback()
 
-	result, err := tx.Exec(`UPDATE scenarios SET scheme_id = $1, name = $2, updated_at = $3 WHERE scenario_id = $4`,
+	result, err := tx.Exec(`UPDATE scenarios SET scheme_id = $1, name = $2, updated_at = $3 WHERE scenario_id = $4 AND user_id = $5`,
 		scenario.SchemeID,
 		scenario.Name,
 		time.Now(),
 		scenario.ScenarioID,
+		userID,
 	)
 	if err != nil {
 		return err
@@ -616,7 +624,7 @@ func (s *PostgresStore) UpdateNormalizedScenario(userID int, scenario normalized
 }
 
 func (s *PostgresStore) DeleteNormalizedScenario(userID int, scenarioID string) error {
-	result, err := s.db.Exec(`DELETE FROM scenarios WHERE scenario_id = $1`, scenarioID)
+	result, err := s.db.Exec(`DELETE FROM scenarios WHERE scenario_id = $1 AND user_id = $2`, scenarioID, userID)
 	if err != nil {
 		return err
 	}
@@ -894,96 +902,4 @@ func nullJSON(raw json.RawMessage) any {
 		return nil
 	}
 	return raw
-}
-
-func convertNormalizedScenarioToLegacy(s normalized.Scenario) Scenario {
-	stepsAsCommands := make([]CommandSpec, 0, len(s.Steps))
-	for _, step := range s.Steps {
-		command := CommandSpec{
-			ID:    step.StepID,
-			Order: step.StepOrder,
-			Type:  strings.ToUpper(step.StepType),
-		}
-		if step.FromTrackID != nil {
-			command.Payload.FromPathID = *step.FromTrackID
-		}
-		if step.FromIndex != nil {
-			command.Payload.FromIndex = *step.FromIndex
-		}
-		if step.ToTrackID != nil {
-			command.Payload.ToPathID = *step.ToTrackID
-			command.Payload.TargetPathID = *step.ToTrackID
-		}
-		if step.ToIndex != nil {
-			command.Payload.ToIndex = *step.ToIndex
-			command.Payload.TargetIndex = *step.ToIndex
-		}
-		if step.Object1ID != nil {
-			command.Payload.AID = *step.Object1ID
-			command.Payload.LocoID = *step.Object1ID
-		}
-		if step.Object2ID != nil {
-			command.Payload.BID = *step.Object2ID
-		}
-		stepsAsCommands = append(stepsAsCommands, command)
-	}
-	return Scenario{
-		ID:       s.ScenarioID,
-		LayoutID: s.SchemeID,
-		Name:     s.Name,
-		Commands: stepsAsCommands,
-	}
-}
-
-func convertLegacyScenarioToNormalized(s Scenario) normalized.Scenario {
-	steps := make([]normalized.ScenarioStep, 0, len(s.Commands))
-	for _, command := range s.Commands {
-		stepType := strings.ToLower(command.Type)
-		step := normalized.ScenarioStep{
-			StepID:     command.ID,
-			ScenarioID: s.ID,
-			StepOrder:  command.Order,
-			StepType:   stepType,
-		}
-		if command.Payload.FromPathID != "" {
-			value := command.Payload.FromPathID
-			step.FromTrackID = &value
-		}
-		if command.Payload.FromIndex != 0 {
-			value := command.Payload.FromIndex
-			step.FromIndex = &value
-		}
-		toTrackID := command.Payload.ToPathID
-		if toTrackID == "" {
-			toTrackID = command.Payload.TargetPathID
-		}
-		if toTrackID != "" {
-			value := toTrackID
-			step.ToTrackID = &value
-		}
-		toIndex := command.Payload.ToIndex
-		if toIndex == 0 {
-			toIndex = command.Payload.TargetIndex
-		}
-		valueToIndex := toIndex
-		step.ToIndex = &valueToIndex
-		if command.Payload.AID != "" {
-			value := command.Payload.AID
-			step.Object1ID = &value
-		} else if command.Payload.LocoID != "" {
-			value := command.Payload.LocoID
-			step.Object1ID = &value
-		}
-		if command.Payload.BID != "" {
-			value := command.Payload.BID
-			step.Object2ID = &value
-		}
-		steps = append(steps, step)
-	}
-	return normalized.Scenario{
-		ScenarioID: s.ID,
-		SchemeID:   s.LayoutID,
-		Name:       s.Name,
-		Steps:      steps,
-	}
 }

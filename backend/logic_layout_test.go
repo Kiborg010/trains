@@ -3,7 +3,7 @@ package main
 import "testing"
 
 func TestApplyLayoutOperationAddSegmentAssignsNumericID(t *testing.T) {
-	state := LayoutState{}
+	state := RuntimeState{}
 	from := Point{X: 0, Y: 0}
 	to := Point{X: 64, Y: 0}
 
@@ -26,7 +26,7 @@ func TestApplyLayoutOperationAddSegmentAssignsNumericID(t *testing.T) {
 }
 
 func TestApplyLayoutOperationCoupleFailsForNonAdjacent(t *testing.T) {
-	state := LayoutState{
+	state := RuntimeState{
 		Segments: []Segment{
 			{
 				ID:   "1",
@@ -54,3 +54,4 @@ func TestApplyLayoutOperationCoupleFailsForNonAdjacent(t *testing.T) {
 		t.Fatal("expected coupling validation error, got nil")
 	}
 }
+

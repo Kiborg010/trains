@@ -108,14 +108,14 @@ type ResolveVehiclesResponse struct {
 	Vehicles []Vehicle `json:"vehicles,omitempty"`
 }
 
-type LayoutState struct {
-	Segments  []Segment   `json:"segments"`
-	Vehicles  []Vehicle   `json:"vehicles"`
-	Couplings []Coupling  `json:"couplings"`
-	Paths     []PathState `json:"paths,omitempty"`
+type RuntimeState struct {
+	Segments  []Segment          `json:"segments"`
+	Vehicles  []Vehicle          `json:"vehicles"`
+	Couplings []Coupling         `json:"couplings"`
+	Paths     []RuntimePathState `json:"paths,omitempty"`
 }
 
-type PathState struct {
+type RuntimePathState struct {
 	ID         string   `json:"id"`
 	Capacity   int      `json:"capacity"`
 	VehicleIDs []string `json:"vehicleIds,omitempty"`
@@ -123,9 +123,9 @@ type PathState struct {
 }
 
 type LayoutOperationRequest struct {
-	GridSize float64     `json:"gridSize"`
-	State    LayoutState `json:"state"`
-	Action   string      `json:"action"`
+	GridSize float64      `json:"gridSize"`
+	State    RuntimeState `json:"state"`
+	Action   string       `json:"action"`
 
 	From               *Point   `json:"from,omitempty"`
 	To                 *Point   `json:"to,omitempty"`
@@ -139,70 +139,19 @@ type LayoutOperationRequest struct {
 }
 
 type LayoutOperationResponse struct {
-	OK      bool        `json:"ok"`
-	Message string      `json:"message,omitempty"`
-	State   LayoutState `json:"state"`
-}
-
-type Scenario struct {
-	ID           string                 `json:"id"`
-	Name         string                 `json:"name"`
-	UserID       int                    `json:"userId,omitempty"`
-	LayoutID     int                    `json:"layoutId"`
-	InitialState LayoutState            `json:"initialState,omitempty"` // legacy compatibility only
-	Commands     []CommandSpec          `json:"commands"`
-	CommandsMap  map[string]CommandSpec `json:"-"`
-}
-
-type CommandSpec struct {
-	ID      string         `json:"id"`
-	Order   int            `json:"order"`
-	Type    string         `json:"type"`
-	Payload CommandPayload `json:"payload"`
-}
-
-type CommandPayload struct {
-	LocoID       string `json:"locoId,omitempty"`
-	FromPathID   string `json:"fromPathId,omitempty"`
-	FromIndex    int    `json:"fromIndex,omitempty"`
-	ToPathID     string `json:"toPathId,omitempty"`
-	ToIndex      int    `json:"toIndex,omitempty"`
-	TargetPathID string `json:"targetPathId,omitempty"`
-	TargetIndex  int    `json:"targetIndex,omitempty"`
-	AID          string `json:"aId,omitempty"`
-	BID          string `json:"bId,omitempty"`
+	OK      bool         `json:"ok"`
+	Message string       `json:"message,omitempty"`
+	State   RuntimeState `json:"state"`
 }
 
 type Execution struct {
-	ID             string      `json:"id"`
-	ScenarioID     string      `json:"scenarioId"`
-	UserID         int         `json:"userId,omitempty"`
-	Status         string      `json:"status"`
-	CurrentCommand int         `json:"currentCommand"`
-	State          LayoutState `json:"state"`
-	Log            []string    `json:"log"`
-}
-
-type CreateScenarioRequest struct {
-	Name     string `json:"name"`
-	LayoutID int    `json:"layoutId"`
-}
-
-type CreateScenarioResponse struct {
-	OK       bool     `json:"ok"`
-	Message  string   `json:"message,omitempty"`
-	Scenario Scenario `json:"scenario"`
-}
-
-type AddCommandRequest struct {
-	Type    string         `json:"type"`
-	Payload CommandPayload `json:"payload"`
-}
-
-type AddCommandResponse struct {
-	OK      bool        `json:"ok"`
-	Message string      `json:"message,omitempty"`
-	Command CommandSpec `json:"command"`
+	ID          string       `json:"id"`
+	ScenarioID  string       `json:"scenarioId"`
+	UserID      int          `json:"userId,omitempty"`
+	Status      string       `json:"status"`
+	CurrentStep int          `json:"currentStep"`
+	State       RuntimeState `json:"state"`
+	Log         []string     `json:"log"`
 }
 
 type RunScenarioResponse struct {
@@ -215,27 +164,4 @@ type StepExecutionResponse struct {
 	OK        bool      `json:"ok"`
 	Message   string    `json:"message,omitempty"`
 	Execution Execution `json:"execution"`
-}
-
-type SaveLayoutRequest struct {
-	Name  string      `json:"name"`
-	State LayoutState `json:"state"`
-}
-
-type SaveLayoutResponse struct {
-	OK      bool    `json:"ok"`
-	Message string  `json:"message,omitempty"`
-	Layout  *Layout `json:"layout,omitempty"`
-}
-
-type ListLayoutsResponse struct {
-	OK      bool     `json:"ok"`
-	Message string   `json:"message,omitempty"`
-	Layouts []Layout `json:"layouts,omitempty"`
-}
-
-type ListScenariosResponse struct {
-	OK        bool       `json:"ok"`
-	Message   string     `json:"message,omitempty"`
-	Scenarios []Scenario `json:"scenarios,omitempty"`
 }

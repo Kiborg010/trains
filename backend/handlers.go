@@ -152,7 +152,7 @@ func layoutApplyHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	nextState = finalizeLayoutState(nextState, req.GridSize)
+	nextState = finalizeRuntimeState(nextState, req.GridSize)
 
 	writeJSON(w, http.StatusOK, LayoutOperationResponse{
 		OK:      true,

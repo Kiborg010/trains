@@ -4,22 +4,24 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"trains/backend/normalized"
 )
 
-func applyCommand(state LayoutState, command CommandSpec) (LayoutState, string, error) {
-	switch command.Type {
-	case "MOVE_LOCO":
-		if command.Payload.LocoID == "" || command.Payload.TargetPathID == "" {
-			return state, "", errors.New("MOVE_LOCO requires locoId and targetPathId")
+func applyScenarioStep(state RuntimeState, step normalized.ScenarioStep) (RuntimeState, string, error) {
+	switch step.StepType {
+	case "move_loco":
+		if step.Object1ID == nil || step.ToTrackID == nil || step.ToIndex == nil {
+			return state, "", errors.New("move_loco requires object1_id, to_track_id and to_index")
 		}
 		plan, err := buildMovementPlan(PlanMovementRequest{
 			GridSize:             32,
 			Segments:             state.Segments,
 			Vehicles:             state.Vehicles,
 			Couplings:            state.Couplings,
-			SelectedLocomotiveID: command.Payload.LocoID,
-			TargetPathID:         command.Payload.TargetPathID,
-			TargetIndex:          command.Payload.TargetIndex,
+			SelectedLocomotiveID: *step.Object1ID,
+			TargetPathID:         *step.ToTrackID,
+			TargetIndex:          *step.ToIndex,
 		})
 		if err != nil {
 			return state, "", err
@@ -50,24 +52,24 @@ func applyCommand(state LayoutState, command CommandSpec) (LayoutState, string, 
 				Y:         pos.Y,
 			})
 		}
-		state.Vehicles = finalizeLayoutState(LayoutState{
+		state.Vehicles = finalizeRuntimeState(RuntimeState{
 			Segments:  state.Segments,
 			Vehicles:  nextVehicles,
 			Couplings: state.Couplings,
 		}, 32).Vehicles
 		return state, "move applied", nil
 
-	case "COUPLE":
-		if command.Payload.AID == "" || command.Payload.BID == "" {
-			return state, "", errors.New("COUPLE requires aId and bId")
+	case "couple":
+		if step.Object1ID == nil || step.Object2ID == nil {
+			return state, "", errors.New("couple requires object1_id and object2_id")
 		}
 		next, _, err := applyLayoutOperation(LayoutOperationRequest{
 			GridSize: 32,
 			State:    state,
 			Action:   "couple",
 			SelectedVehicleIDs: []string{
-				command.Payload.AID,
-				command.Payload.BID,
+				*step.Object1ID,
+				*step.Object2ID,
 			},
 		})
 		if err != nil {
@@ -75,17 +77,17 @@ func applyCommand(state LayoutState, command CommandSpec) (LayoutState, string, 
 		}
 		return next, "couple applied", nil
 
-	case "DECOUPLE":
-		if command.Payload.AID == "" || command.Payload.BID == "" {
-			return state, "", errors.New("DECOUPLE requires aId and bId")
+	case "decouple":
+		if step.Object1ID == nil || step.Object2ID == nil {
+			return state, "", errors.New("decouple requires object1_id and object2_id")
 		}
 		next, _, err := applyLayoutOperation(LayoutOperationRequest{
 			GridSize: 32,
 			State:    state,
 			Action:   "decouple",
 			SelectedVehicleIDs: []string{
-				command.Payload.AID,
-				command.Payload.BID,
+				*step.Object1ID,
+				*step.Object2ID,
 			},
 		})
 		if err != nil {
@@ -94,11 +96,11 @@ func applyCommand(state LayoutState, command CommandSpec) (LayoutState, string, 
 		return next, "decouple applied", nil
 
 	default:
-		return state, "", errors.New("unsupported command type")
+		return state, "", errors.New("unsupported scenario step type")
 	}
 }
 
-func applyLayoutOperation(req LayoutOperationRequest) (LayoutState, string, error) {
+func applyLayoutOperation(req LayoutOperationRequest) (RuntimeState, string, error) {
 	state := req.State
 
 	switch req.Action {
@@ -111,7 +113,7 @@ func applyLayoutOperation(req LayoutOperationRequest) (LayoutState, string, erro
 		}
 		state.Segments = append(state.Segments, Segment{
 			ID:   nextPathID(state.Segments),
-			Type: "other",
+			Type: "normal",
 			From: *req.From,
 			To:   *req.To,
 		})
@@ -183,7 +185,7 @@ func applyLayoutOperation(req LayoutOperationRequest) (LayoutState, string, erro
 		return state, "", nil
 
 	case "clear":
-		return LayoutState{}, "", nil
+		return RuntimeState{}, "", nil
 
 	case "place_vehicle":
 		resp, err := placeVehicleInternal(PlaceVehicleRequest{
@@ -445,7 +447,7 @@ func normalizeVehicleToPath(vehicle Vehicle, pathSlots []PathSlot) Vehicle {
 	return vehicle
 }
 
-func finalizeLayoutState(state LayoutState, gridSize float64) LayoutState {
+func finalizeRuntimeState(state RuntimeState, gridSize float64) RuntimeState {
 	state = normalizeSegmentIDs(state)
 	pathSlots := collectPathSlots(state.Segments, gridSize)
 	normalized := make([]Vehicle, 0, len(state.Vehicles))
@@ -457,7 +459,7 @@ func finalizeLayoutState(state LayoutState, gridSize float64) LayoutState {
 	return state
 }
 
-func buildPathStates(segments []Segment, vehicles []Vehicle, gridSize float64) []PathState {
+func buildPathStates(segments []Segment, vehicles []Vehicle, gridSize float64) []RuntimePathState {
 	vehicleByPath := map[string][]string{}
 	for _, v := range vehicles {
 		if v.PathID == "" {
@@ -467,10 +469,10 @@ func buildPathStates(segments []Segment, vehicles []Vehicle, gridSize float64) [
 	}
 
 	neighbors := buildPathAdjacency(segments)
-	states := make([]PathState, 0, len(segments))
+	states := make([]RuntimePathState, 0, len(segments))
 	for _, segment := range segments {
 		capacity := len(getSegmentSlots(segment, gridSize))
-		states = append(states, PathState{
+		states = append(states, RuntimePathState{
 			ID:         segment.ID,
 			Capacity:   capacity,
 			VehicleIDs: vehicleByPath[segment.ID],
@@ -515,3 +517,4 @@ func buildPathAdjacency(segments []Segment) map[string][]string {
 	}
 	return result
 }
+
