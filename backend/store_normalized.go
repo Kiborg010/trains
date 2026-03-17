@@ -1,0 +1,840 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"trains/backend/normalized"
+)
+
+func (s *InMemoryStore) CreateNormalizedScheme(userID int, scheme normalized.Scheme) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	schemeID := s.nextSchemeID
+	s.nextSchemeID++
+	scheme.SchemeID = schemeID
+	assignSchemeID(&scheme)
+	s.schemesByID[schemeID] = cloneNormalizedScheme(scheme)
+	return schemeID, nil
+}
+
+func (s *InMemoryStore) GetNormalizedScheme(schemeID int, userID int) (*normalized.Scheme, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	scheme, ok := s.schemesByID[schemeID]
+	if !ok {
+		return nil, fmt.Errorf("scheme not found")
+	}
+	copy := cloneNormalizedScheme(scheme)
+	return &copy, nil
+}
+
+func (s *InMemoryStore) ListNormalizedSchemes(userID int) ([]normalized.Scheme, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result := make([]normalized.Scheme, 0, len(s.schemesByID))
+	for _, scheme := range s.schemesByID {
+		result = append(result, cloneNormalizedScheme(scheme))
+	}
+	return result, nil
+}
+
+func (s *InMemoryStore) CreateTracks(userID int, schemeID int, tracks []normalized.Track) error {
+	return s.updateSchemePart(schemeID, func(scheme *normalized.Scheme) {
+		scheme.Tracks = cloneTracks(withSchemeIDForTracks(schemeID, tracks))
+	})
+}
+
+func (s *InMemoryStore) GetTracksByScheme(userID int, schemeID int) ([]normalized.Track, error) {
+	return s.ListTracksByScheme(userID, schemeID)
+}
+
+func (s *InMemoryStore) ListTracksByScheme(userID int, schemeID int) ([]normalized.Track, error) {
+	scheme, err := s.GetNormalizedScheme(schemeID, userID)
+	if err != nil {
+		return nil, err
+	}
+	return cloneTracks(scheme.Tracks), nil
+}
+
+func (s *InMemoryStore) CreateTrackConnections(userID int, schemeID int, connections []normalized.TrackConnection) error {
+	return s.updateSchemePart(schemeID, func(scheme *normalized.Scheme) {
+		scheme.TrackConnections = cloneTrackConnections(withSchemeIDForConnections(schemeID, connections))
+	})
+}
+
+func (s *InMemoryStore) GetTrackConnectionsByScheme(userID int, schemeID int) ([]normalized.TrackConnection, error) {
+	return s.ListTrackConnectionsByScheme(userID, schemeID)
+}
+
+func (s *InMemoryStore) ListTrackConnectionsByScheme(userID int, schemeID int) ([]normalized.TrackConnection, error) {
+	scheme, err := s.GetNormalizedScheme(schemeID, userID)
+	if err != nil {
+		return nil, err
+	}
+	return cloneTrackConnections(scheme.TrackConnections), nil
+}
+
+func (s *InMemoryStore) CreateWagons(userID int, schemeID int, wagons []normalized.Wagon) error {
+	return s.updateSchemePart(schemeID, func(scheme *normalized.Scheme) {
+		scheme.Wagons = cloneWagons(withSchemeIDForWagons(schemeID, wagons))
+	})
+}
+
+func (s *InMemoryStore) GetWagonsByScheme(userID int, schemeID int) ([]normalized.Wagon, error) {
+	return s.ListWagonsByScheme(userID, schemeID)
+}
+
+func (s *InMemoryStore) ListWagonsByScheme(userID int, schemeID int) ([]normalized.Wagon, error) {
+	scheme, err := s.GetNormalizedScheme(schemeID, userID)
+	if err != nil {
+		return nil, err
+	}
+	return cloneWagons(scheme.Wagons), nil
+}
+
+func (s *InMemoryStore) CreateLocomotives(userID int, schemeID int, locomotives []normalized.Locomotive) error {
+	return s.updateSchemePart(schemeID, func(scheme *normalized.Scheme) {
+		scheme.Locomotives = cloneLocomotives(withSchemeIDForLocomotives(schemeID, locomotives))
+	})
+}
+
+func (s *InMemoryStore) GetLocomotivesByScheme(userID int, schemeID int) ([]normalized.Locomotive, error) {
+	return s.ListLocomotivesByScheme(userID, schemeID)
+}
+
+func (s *InMemoryStore) ListLocomotivesByScheme(userID int, schemeID int) ([]normalized.Locomotive, error) {
+	scheme, err := s.GetNormalizedScheme(schemeID, userID)
+	if err != nil {
+		return nil, err
+	}
+	return cloneLocomotives(scheme.Locomotives), nil
+}
+
+func (s *InMemoryStore) CreateNormalizedCouplings(userID int, schemeID int, couplings []normalized.Coupling) error {
+	return s.updateSchemePart(schemeID, func(scheme *normalized.Scheme) {
+		scheme.Couplings = cloneNormalizedCouplings(withSchemeIDForCouplings(schemeID, couplings))
+	})
+}
+
+func (s *InMemoryStore) GetNormalizedCouplingsByScheme(userID int, schemeID int) ([]normalized.Coupling, error) {
+	return s.ListNormalizedCouplingsByScheme(userID, schemeID)
+}
+
+func (s *InMemoryStore) ListNormalizedCouplingsByScheme(userID int, schemeID int) ([]normalized.Coupling, error) {
+	scheme, err := s.GetNormalizedScheme(schemeID, userID)
+	if err != nil {
+		return nil, err
+	}
+	return cloneNormalizedCouplings(scheme.Couplings), nil
+}
+
+func (s *InMemoryStore) CreateNormalizedScenario(userID int, scenario normalized.Scenario) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if scenario.ScenarioID == "" {
+		scenario.ScenarioID = fmt.Sprintf("nsc-%d", time.Now().UnixNano())
+	}
+	s.scenariosByID[scenario.ScenarioID] = convertNormalizedScenarioToLegacy(scenario)
+	return scenario.ScenarioID, nil
+}
+
+func (s *InMemoryStore) GetNormalizedScenario(id string, userID int) (*normalized.Scenario, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	scenario, ok := s.scenariosByID[id]
+	if !ok {
+		return nil, fmt.Errorf("scenario not found")
+	}
+	normalizedScenario := convertLegacyScenarioToNormalized(scenario)
+	return &normalizedScenario, nil
+}
+
+func (s *InMemoryStore) ListNormalizedScenarios(userID int) ([]normalized.Scenario, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result := make([]normalized.Scenario, 0, len(s.scenariosByID))
+	for _, scenario := range s.scenariosByID {
+		result = append(result, convertLegacyScenarioToNormalized(scenario))
+	}
+	return result, nil
+}
+
+func (s *InMemoryStore) CreateScenarioSteps(userID int, scenarioID string, steps []normalized.ScenarioStep) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	scenario, ok := s.scenariosByID[scenarioID]
+	if !ok {
+		return fmt.Errorf("scenario not found")
+	}
+	normalizedScenario := convertLegacyScenarioToNormalized(scenario)
+	normalizedScenario.Steps = cloneScenarioSteps(withScenarioIDForSteps(scenarioID, steps))
+	s.scenariosByID[scenarioID] = convertNormalizedScenarioToLegacy(normalizedScenario)
+	return nil
+}
+
+func (s *InMemoryStore) GetScenarioStepsByScenario(userID int, scenarioID string) ([]normalized.ScenarioStep, error) {
+	return s.ListScenarioStepsByScenario(userID, scenarioID)
+}
+
+func (s *InMemoryStore) ListScenarioStepsByScenario(userID int, scenarioID string) ([]normalized.ScenarioStep, error) {
+	scenario, err := s.GetNormalizedScenario(scenarioID, userID)
+	if err != nil {
+		return nil, err
+	}
+	return cloneScenarioSteps(scenario.Steps), nil
+}
+
+func (s *InMemoryStore) updateSchemePart(schemeID int, updater func(*normalized.Scheme)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	scheme, ok := s.schemesByID[schemeID]
+	if !ok {
+		return fmt.Errorf("scheme not found")
+	}
+	updater(&scheme)
+	s.schemesByID[schemeID] = cloneNormalizedScheme(scheme)
+	return nil
+}
+
+func (s *PostgresStore) CreateNormalizedScheme(userID int, scheme normalized.Scheme) (int, error) {
+	var schemeID int
+	if err := s.db.QueryRow(`INSERT INTO schemes (name) VALUES ($1) RETURNING scheme_id`, scheme.Name).Scan(&schemeID); err != nil {
+		return 0, err
+	}
+	assignSchemeID(&scheme)
+	scheme.SchemeID = schemeID
+	if err := s.replaceNormalizedSchemeData(schemeID, scheme); err != nil {
+		return 0, err
+	}
+	return schemeID, nil
+}
+
+func (s *PostgresStore) GetNormalizedScheme(schemeID int, userID int) (*normalized.Scheme, error) {
+	var scheme normalized.Scheme
+	if err := s.db.QueryRow(`SELECT scheme_id, name FROM schemes WHERE scheme_id = $1`, schemeID).Scan(&scheme.SchemeID, &scheme.Name); err != nil {
+		return nil, err
+	}
+
+	var err error
+	if scheme.Tracks, err = s.ListTracksByScheme(userID, schemeID); err != nil {
+		return nil, err
+	}
+	if scheme.TrackConnections, err = s.ListTrackConnectionsByScheme(userID, schemeID); err != nil {
+		return nil, err
+	}
+	if scheme.Wagons, err = s.ListWagonsByScheme(userID, schemeID); err != nil {
+		return nil, err
+	}
+	if scheme.Locomotives, err = s.ListLocomotivesByScheme(userID, schemeID); err != nil {
+		return nil, err
+	}
+	if scheme.Couplings, err = s.ListNormalizedCouplingsByScheme(userID, schemeID); err != nil {
+		return nil, err
+	}
+	return &scheme, nil
+}
+
+func (s *PostgresStore) ListNormalizedSchemes(userID int) ([]normalized.Scheme, error) {
+	rows, err := s.db.Query(`SELECT scheme_id, name FROM schemes ORDER BY scheme_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]normalized.Scheme, 0)
+	for rows.Next() {
+		var scheme normalized.Scheme
+		if err := rows.Scan(&scheme.SchemeID, &scheme.Name); err != nil {
+			return nil, err
+		}
+		result = append(result, scheme)
+	}
+	return result, rows.Err()
+}
+
+func (s *PostgresStore) CreateTracks(userID int, schemeID int, tracks []normalized.Track) error {
+	return s.replaceTracks(schemeID, tracks)
+}
+
+func (s *PostgresStore) GetTracksByScheme(userID int, schemeID int) ([]normalized.Track, error) {
+	return s.ListTracksByScheme(userID, schemeID)
+}
+
+func (s *PostgresStore) ListTracksByScheme(userID int, schemeID int) ([]normalized.Track, error) {
+	rows, err := s.db.Query(`
+		SELECT track_id, scheme_id, name, type, start_x, start_y, end_x, end_y, capacity, storage_allowed
+		FROM tracks
+		WHERE scheme_id = $1
+		ORDER BY track_id
+	`, schemeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]normalized.Track, 0)
+	for rows.Next() {
+		var track normalized.Track
+		if err := rows.Scan(
+			&track.TrackID,
+			&track.SchemeID,
+			&track.Name,
+			&track.Type,
+			&track.StartX,
+			&track.StartY,
+			&track.EndX,
+			&track.EndY,
+			&track.Capacity,
+			&track.StorageAllowed,
+		); err != nil {
+			return nil, err
+		}
+		result = append(result, track)
+	}
+	return result, rows.Err()
+}
+
+func (s *PostgresStore) CreateTrackConnections(userID int, schemeID int, connections []normalized.TrackConnection) error {
+	return s.replaceTrackConnections(schemeID, connections)
+}
+
+func (s *PostgresStore) GetTrackConnectionsByScheme(userID int, schemeID int) ([]normalized.TrackConnection, error) {
+	return s.ListTrackConnectionsByScheme(userID, schemeID)
+}
+
+func (s *PostgresStore) ListTrackConnectionsByScheme(userID int, schemeID int) ([]normalized.TrackConnection, error) {
+	rows, err := s.db.Query(`
+		SELECT connection_id, scheme_id, track1_id, track2_id, track1_side, track2_side, connection_type
+		FROM track_connections
+		WHERE scheme_id = $1
+		ORDER BY connection_id
+	`, schemeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]normalized.TrackConnection, 0)
+	for rows.Next() {
+		var item normalized.TrackConnection
+		if err := rows.Scan(
+			&item.ConnectionID,
+			&item.SchemeID,
+			&item.Track1ID,
+			&item.Track2ID,
+			&item.Track1Side,
+			&item.Track2Side,
+			&item.ConnectionType,
+		); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s *PostgresStore) CreateWagons(userID int, schemeID int, wagons []normalized.Wagon) error {
+	return s.replaceWagons(schemeID, wagons)
+}
+
+func (s *PostgresStore) GetWagonsByScheme(userID int, schemeID int) ([]normalized.Wagon, error) {
+	return s.ListWagonsByScheme(userID, schemeID)
+}
+
+func (s *PostgresStore) ListWagonsByScheme(userID int, schemeID int) ([]normalized.Wagon, error) {
+	rows, err := s.db.Query(`
+		SELECT wagon_id, scheme_id, name, color, track_id, track_index
+		FROM wagons
+		WHERE scheme_id = $1
+		ORDER BY track_id, track_index, wagon_id
+	`, schemeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]normalized.Wagon, 0)
+	for rows.Next() {
+		var item normalized.Wagon
+		if err := rows.Scan(&item.WagonID, &item.SchemeID, &item.Name, &item.Color, &item.TrackID, &item.TrackIndex); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s *PostgresStore) CreateLocomotives(userID int, schemeID int, locomotives []normalized.Locomotive) error {
+	return s.replaceLocomotives(schemeID, locomotives)
+}
+
+func (s *PostgresStore) GetLocomotivesByScheme(userID int, schemeID int) ([]normalized.Locomotive, error) {
+	return s.ListLocomotivesByScheme(userID, schemeID)
+}
+
+func (s *PostgresStore) ListLocomotivesByScheme(userID int, schemeID int) ([]normalized.Locomotive, error) {
+	rows, err := s.db.Query(`
+		SELECT loco_id, scheme_id, name, color, track_id, track_index
+		FROM locomotives
+		WHERE scheme_id = $1
+		ORDER BY track_id, track_index, loco_id
+	`, schemeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]normalized.Locomotive, 0)
+	for rows.Next() {
+		var item normalized.Locomotive
+		if err := rows.Scan(&item.LocoID, &item.SchemeID, &item.Name, &item.Color, &item.TrackID, &item.TrackIndex); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s *PostgresStore) CreateNormalizedCouplings(userID int, schemeID int, couplings []normalized.Coupling) error {
+	return s.replaceNormalizedCouplings(schemeID, couplings)
+}
+
+func (s *PostgresStore) GetNormalizedCouplingsByScheme(userID int, schemeID int) ([]normalized.Coupling, error) {
+	return s.ListNormalizedCouplingsByScheme(userID, schemeID)
+}
+
+func (s *PostgresStore) ListNormalizedCouplingsByScheme(userID int, schemeID int) ([]normalized.Coupling, error) {
+	rows, err := s.db.Query(`
+		SELECT coupling_id, scheme_id, object1_id, object2_id
+		FROM couplings
+		WHERE scheme_id = $1
+		ORDER BY coupling_id
+	`, schemeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]normalized.Coupling, 0)
+	for rows.Next() {
+		var item normalized.Coupling
+		if err := rows.Scan(&item.CouplingID, &item.SchemeID, &item.Object1ID, &item.Object2ID); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s *PostgresStore) CreateNormalizedScenario(userID int, scenario normalized.Scenario) (string, error) {
+	if scenario.ScenarioID == "" {
+		scenario.ScenarioID = fmt.Sprintf("nsc-%d", time.Now().UnixNano())
+	}
+	if _, err := s.db.Exec(`INSERT INTO scenarios (scenario_id, scheme_id, name) VALUES ($1, $2, $3)`, scenario.ScenarioID, scenario.SchemeID, scenario.Name); err != nil {
+		return "", err
+	}
+	if err := s.CreateScenarioSteps(userID, scenario.ScenarioID, scenario.Steps); err != nil {
+		return "", err
+	}
+	return scenario.ScenarioID, nil
+}
+
+func (s *PostgresStore) GetNormalizedScenario(id string, userID int) (*normalized.Scenario, error) {
+	var scenario normalized.Scenario
+	if err := s.db.QueryRow(`SELECT scenario_id, scheme_id, name FROM scenarios WHERE scenario_id = $1`, id).Scan(&scenario.ScenarioID, &scenario.SchemeID, &scenario.Name); err != nil {
+		return nil, err
+	}
+	steps, err := s.ListScenarioStepsByScenario(userID, id)
+	if err != nil {
+		return nil, err
+	}
+	scenario.Steps = steps
+	return &scenario, nil
+}
+
+func (s *PostgresStore) ListNormalizedScenarios(userID int) ([]normalized.Scenario, error) {
+	rows, err := s.db.Query(`SELECT scenario_id, scheme_id, name FROM scenarios WHERE scenario_id IS NOT NULL ORDER BY scenario_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]normalized.Scenario, 0)
+	for rows.Next() {
+		var scenario normalized.Scenario
+		if err := rows.Scan(&scenario.ScenarioID, &scenario.SchemeID, &scenario.Name); err != nil {
+			return nil, err
+		}
+		result = append(result, scenario)
+	}
+	return result, rows.Err()
+}
+
+func (s *PostgresStore) CreateScenarioSteps(userID int, scenarioID string, steps []normalized.ScenarioStep) error {
+	if _, err := s.db.Exec(`DELETE FROM scenario_steps WHERE scenario_id = $1`, scenarioID); err != nil {
+		return err
+	}
+	for _, step := range withScenarioIDForSteps(scenarioID, steps) {
+		if step.StepID == "" {
+			step.StepID = fmt.Sprintf("nst-%d", time.Now().UnixNano())
+		}
+		if _, err := s.db.Exec(`
+			INSERT INTO scenario_steps (
+				step_id, scenario_id, step_order, step_type, from_track_id, from_index,
+				to_track_id, to_index, object1_id, object2_id, payload_json
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		`, step.StepID, step.ScenarioID, step.StepOrder, step.StepType, step.FromTrackID, step.FromIndex, step.ToTrackID, step.ToIndex, step.Object1ID, step.Object2ID, nullJSON(step.PayloadJSON)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *PostgresStore) GetScenarioStepsByScenario(userID int, scenarioID string) ([]normalized.ScenarioStep, error) {
+	return s.ListScenarioStepsByScenario(userID, scenarioID)
+}
+
+func (s *PostgresStore) ListScenarioStepsByScenario(userID int, scenarioID string) ([]normalized.ScenarioStep, error) {
+	rows, err := s.db.Query(`
+		SELECT step_id, scenario_id, step_order, step_type, from_track_id, from_index, to_track_id, to_index, object1_id, object2_id, payload_json
+		FROM scenario_steps
+		WHERE scenario_id = $1
+		ORDER BY step_order, step_id
+	`, scenarioID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]normalized.ScenarioStep, 0)
+	for rows.Next() {
+		var step normalized.ScenarioStep
+		var payload []byte
+		if err := rows.Scan(
+			&step.StepID,
+			&step.ScenarioID,
+			&step.StepOrder,
+			&step.StepType,
+			&step.FromTrackID,
+			&step.FromIndex,
+			&step.ToTrackID,
+			&step.ToIndex,
+			&step.Object1ID,
+			&step.Object2ID,
+			&payload,
+		); err != nil {
+			return nil, err
+		}
+		step.PayloadJSON = payload
+		result = append(result, step)
+	}
+	return result, rows.Err()
+}
+
+func (s *PostgresStore) replaceNormalizedSchemeData(schemeID int, scheme normalized.Scheme) error {
+	if err := s.replaceTracks(schemeID, scheme.Tracks); err != nil {
+		return err
+	}
+	if err := s.replaceTrackConnections(schemeID, scheme.TrackConnections); err != nil {
+		return err
+	}
+	if err := s.replaceWagons(schemeID, scheme.Wagons); err != nil {
+		return err
+	}
+	if err := s.replaceLocomotives(schemeID, scheme.Locomotives); err != nil {
+		return err
+	}
+	if err := s.replaceNormalizedCouplings(schemeID, scheme.Couplings); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *PostgresStore) replaceTracks(schemeID int, tracks []normalized.Track) error {
+	if _, err := s.db.Exec(`DELETE FROM tracks WHERE scheme_id = $1`, schemeID); err != nil {
+		return err
+	}
+	for _, track := range withSchemeIDForTracks(schemeID, tracks) {
+		if _, err := s.db.Exec(`
+			INSERT INTO tracks (track_id, scheme_id, name, type, start_x, start_y, end_x, end_y, capacity, storage_allowed)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		`, track.TrackID, track.SchemeID, track.Name, track.Type, track.StartX, track.StartY, track.EndX, track.EndY, track.Capacity, track.StorageAllowed); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *PostgresStore) replaceTrackConnections(schemeID int, connections []normalized.TrackConnection) error {
+	if _, err := s.db.Exec(`DELETE FROM track_connections WHERE scheme_id = $1`, schemeID); err != nil {
+		return err
+	}
+	for _, item := range withSchemeIDForConnections(schemeID, connections) {
+		if _, err := s.db.Exec(`
+			INSERT INTO track_connections (connection_id, scheme_id, track1_id, track2_id, track1_side, track2_side, connection_type)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)
+		`, item.ConnectionID, item.SchemeID, item.Track1ID, item.Track2ID, item.Track1Side, item.Track2Side, item.ConnectionType); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *PostgresStore) replaceWagons(schemeID int, wagons []normalized.Wagon) error {
+	if _, err := s.db.Exec(`DELETE FROM wagons WHERE scheme_id = $1`, schemeID); err != nil {
+		return err
+	}
+	for _, item := range withSchemeIDForWagons(schemeID, wagons) {
+		if _, err := s.db.Exec(`
+			INSERT INTO wagons (wagon_id, scheme_id, name, color, track_id, track_index)
+			VALUES ($1,$2,$3,$4,$5,$6)
+		`, item.WagonID, item.SchemeID, item.Name, item.Color, item.TrackID, item.TrackIndex); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *PostgresStore) replaceLocomotives(schemeID int, locomotives []normalized.Locomotive) error {
+	if _, err := s.db.Exec(`DELETE FROM locomotives WHERE scheme_id = $1`, schemeID); err != nil {
+		return err
+	}
+	for _, item := range withSchemeIDForLocomotives(schemeID, locomotives) {
+		if _, err := s.db.Exec(`
+			INSERT INTO locomotives (loco_id, scheme_id, name, color, track_id, track_index)
+			VALUES ($1,$2,$3,$4,$5,$6)
+		`, item.LocoID, item.SchemeID, item.Name, item.Color, item.TrackID, item.TrackIndex); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *PostgresStore) replaceNormalizedCouplings(schemeID int, couplings []normalized.Coupling) error {
+	if _, err := s.db.Exec(`DELETE FROM couplings WHERE scheme_id = $1`, schemeID); err != nil {
+		return err
+	}
+	for _, item := range withSchemeIDForCouplings(schemeID, couplings) {
+		if _, err := s.db.Exec(`
+			INSERT INTO couplings (coupling_id, scheme_id, object1_id, object2_id)
+			VALUES ($1,$2,$3,$4)
+		`, item.CouplingID, item.SchemeID, item.Object1ID, item.Object2ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func assignSchemeID(scheme *normalized.Scheme) {
+	scheme.Tracks = withSchemeIDForTracks(scheme.SchemeID, scheme.Tracks)
+	scheme.TrackConnections = withSchemeIDForConnections(scheme.SchemeID, scheme.TrackConnections)
+	scheme.Wagons = withSchemeIDForWagons(scheme.SchemeID, scheme.Wagons)
+	scheme.Locomotives = withSchemeIDForLocomotives(scheme.SchemeID, scheme.Locomotives)
+	scheme.Couplings = withSchemeIDForCouplings(scheme.SchemeID, scheme.Couplings)
+}
+
+func withSchemeIDForTracks(schemeID int, tracks []normalized.Track) []normalized.Track {
+	result := cloneTracks(tracks)
+	for i := range result {
+		result[i].SchemeID = schemeID
+	}
+	return result
+}
+
+func withSchemeIDForConnections(schemeID int, items []normalized.TrackConnection) []normalized.TrackConnection {
+	result := cloneTrackConnections(items)
+	for i := range result {
+		result[i].SchemeID = schemeID
+	}
+	return result
+}
+
+func withSchemeIDForWagons(schemeID int, items []normalized.Wagon) []normalized.Wagon {
+	result := cloneWagons(items)
+	for i := range result {
+		result[i].SchemeID = schemeID
+	}
+	return result
+}
+
+func withSchemeIDForLocomotives(schemeID int, items []normalized.Locomotive) []normalized.Locomotive {
+	result := cloneLocomotives(items)
+	for i := range result {
+		result[i].SchemeID = schemeID
+	}
+	return result
+}
+
+func withSchemeIDForCouplings(schemeID int, items []normalized.Coupling) []normalized.Coupling {
+	result := cloneNormalizedCouplings(items)
+	for i := range result {
+		result[i].SchemeID = schemeID
+	}
+	return result
+}
+
+func withScenarioIDForSteps(scenarioID string, steps []normalized.ScenarioStep) []normalized.ScenarioStep {
+	result := cloneScenarioSteps(steps)
+	for i := range result {
+		result[i].ScenarioID = scenarioID
+	}
+	return result
+}
+
+func cloneNormalizedScheme(scheme normalized.Scheme) normalized.Scheme {
+	return normalized.Scheme{
+		SchemeID:         scheme.SchemeID,
+		Name:             scheme.Name,
+		Tracks:           cloneTracks(scheme.Tracks),
+		TrackConnections: cloneTrackConnections(scheme.TrackConnections),
+		Wagons:           cloneWagons(scheme.Wagons),
+		Locomotives:      cloneLocomotives(scheme.Locomotives),
+		Couplings:        cloneNormalizedCouplings(scheme.Couplings),
+	}
+}
+
+func cloneTracks(items []normalized.Track) []normalized.Track {
+	result := make([]normalized.Track, len(items))
+	copy(result, items)
+	return result
+}
+
+func cloneTrackConnections(items []normalized.TrackConnection) []normalized.TrackConnection {
+	result := make([]normalized.TrackConnection, len(items))
+	copy(result, items)
+	return result
+}
+
+func cloneWagons(items []normalized.Wagon) []normalized.Wagon {
+	result := make([]normalized.Wagon, len(items))
+	copy(result, items)
+	return result
+}
+
+func cloneLocomotives(items []normalized.Locomotive) []normalized.Locomotive {
+	result := make([]normalized.Locomotive, len(items))
+	copy(result, items)
+	return result
+}
+
+func cloneNormalizedCouplings(items []normalized.Coupling) []normalized.Coupling {
+	result := make([]normalized.Coupling, len(items))
+	copy(result, items)
+	return result
+}
+
+func cloneScenarioSteps(items []normalized.ScenarioStep) []normalized.ScenarioStep {
+	result := make([]normalized.ScenarioStep, len(items))
+	copy(result, items)
+	return result
+}
+
+func nullJSON(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	return raw
+}
+
+func convertNormalizedScenarioToLegacy(s normalized.Scenario) Scenario {
+	stepsAsCommands := make([]CommandSpec, 0, len(s.Steps))
+	for _, step := range s.Steps {
+		command := CommandSpec{
+			ID:    step.StepID,
+			Order: step.StepOrder,
+			Type:  strings.ToUpper(step.StepType),
+		}
+		if step.FromTrackID != nil {
+			command.Payload.FromPathID = *step.FromTrackID
+		}
+		if step.FromIndex != nil {
+			command.Payload.FromIndex = *step.FromIndex
+		}
+		if step.ToTrackID != nil {
+			command.Payload.ToPathID = *step.ToTrackID
+			command.Payload.TargetPathID = *step.ToTrackID
+		}
+		if step.ToIndex != nil {
+			command.Payload.ToIndex = *step.ToIndex
+			command.Payload.TargetIndex = *step.ToIndex
+		}
+		if step.Object1ID != nil {
+			command.Payload.AID = *step.Object1ID
+			command.Payload.LocoID = *step.Object1ID
+		}
+		if step.Object2ID != nil {
+			command.Payload.BID = *step.Object2ID
+		}
+		stepsAsCommands = append(stepsAsCommands, command)
+	}
+	return Scenario{
+		ID:       s.ScenarioID,
+		LayoutID: s.SchemeID,
+		Name:     s.Name,
+		Commands: stepsAsCommands,
+	}
+}
+
+func convertLegacyScenarioToNormalized(s Scenario) normalized.Scenario {
+	steps := make([]normalized.ScenarioStep, 0, len(s.Commands))
+	for _, command := range s.Commands {
+		stepType := strings.ToLower(command.Type)
+		step := normalized.ScenarioStep{
+			StepID:     command.ID,
+			ScenarioID: s.ID,
+			StepOrder:  command.Order,
+			StepType:   stepType,
+		}
+		if command.Payload.FromPathID != "" {
+			value := command.Payload.FromPathID
+			step.FromTrackID = &value
+		}
+		if command.Payload.FromIndex != 0 {
+			value := command.Payload.FromIndex
+			step.FromIndex = &value
+		}
+		toTrackID := command.Payload.ToPathID
+		if toTrackID == "" {
+			toTrackID = command.Payload.TargetPathID
+		}
+		if toTrackID != "" {
+			value := toTrackID
+			step.ToTrackID = &value
+		}
+		toIndex := command.Payload.ToIndex
+		if toIndex == 0 {
+			toIndex = command.Payload.TargetIndex
+		}
+		valueToIndex := toIndex
+		step.ToIndex = &valueToIndex
+		if command.Payload.AID != "" {
+			value := command.Payload.AID
+			step.Object1ID = &value
+		} else if command.Payload.LocoID != "" {
+			value := command.Payload.LocoID
+			step.Object1ID = &value
+		}
+		if command.Payload.BID != "" {
+			value := command.Payload.BID
+			step.Object2ID = &value
+		}
+		steps = append(steps, step)
+	}
+	return normalized.Scenario{
+		ScenarioID: s.ID,
+		SchemeID:   s.LayoutID,
+		Name:       s.Name,
+		Steps:      steps,
+	}
+}

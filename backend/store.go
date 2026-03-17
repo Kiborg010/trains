@@ -9,6 +9,7 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
+	"trains/backend/normalized"
 )
 
 // Store interface for data persistence
@@ -36,6 +37,39 @@ type Store interface {
 	SaveExecution(userID int, scenarioID string) (string, error)
 	GetExecution(id string, userID int) (*Execution, error)
 	UpdateExecution(id string, userID int, execution Execution) error
+
+	// Normalized model operations
+	CreateNormalizedScheme(userID int, scheme normalized.Scheme) (int, error)
+	GetNormalizedScheme(schemeID int, userID int) (*normalized.Scheme, error)
+	ListNormalizedSchemes(userID int) ([]normalized.Scheme, error)
+
+	CreateTracks(userID int, schemeID int, tracks []normalized.Track) error
+	GetTracksByScheme(userID int, schemeID int) ([]normalized.Track, error)
+	ListTracksByScheme(userID int, schemeID int) ([]normalized.Track, error)
+
+	CreateTrackConnections(userID int, schemeID int, connections []normalized.TrackConnection) error
+	GetTrackConnectionsByScheme(userID int, schemeID int) ([]normalized.TrackConnection, error)
+	ListTrackConnectionsByScheme(userID int, schemeID int) ([]normalized.TrackConnection, error)
+
+	CreateWagons(userID int, schemeID int, wagons []normalized.Wagon) error
+	GetWagonsByScheme(userID int, schemeID int) ([]normalized.Wagon, error)
+	ListWagonsByScheme(userID int, schemeID int) ([]normalized.Wagon, error)
+
+	CreateLocomotives(userID int, schemeID int, locomotives []normalized.Locomotive) error
+	GetLocomotivesByScheme(userID int, schemeID int) ([]normalized.Locomotive, error)
+	ListLocomotivesByScheme(userID int, schemeID int) ([]normalized.Locomotive, error)
+
+	CreateNormalizedCouplings(userID int, schemeID int, couplings []normalized.Coupling) error
+	GetNormalizedCouplingsByScheme(userID int, schemeID int) ([]normalized.Coupling, error)
+	ListNormalizedCouplingsByScheme(userID int, schemeID int) ([]normalized.Coupling, error)
+
+	CreateNormalizedScenario(userID int, scenario normalized.Scenario) (string, error)
+	GetNormalizedScenario(id string, userID int) (*normalized.Scenario, error)
+	ListNormalizedScenarios(userID int) ([]normalized.Scenario, error)
+
+	CreateScenarioSteps(userID int, scenarioID string, steps []normalized.ScenarioStep) error
+	GetScenarioStepsByScenario(userID int, scenarioID string) ([]normalized.ScenarioStep, error)
+	ListScenarioStepsByScenario(userID int, scenarioID string) ([]normalized.ScenarioStep, error)
 }
 
 // InMemoryStore implements Store interface for local development/testing fallback.
@@ -43,22 +77,26 @@ type InMemoryStore struct {
 	mu             sync.Mutex
 	nextUserID     int
 	nextLayoutID   int
+	nextSchemeID   int
 	usersByID      map[int]User
 	userIDsByEmail map[string]int
 	layoutsByID    map[int]Layout
 	scenariosByID  map[string]Scenario
 	executionsByID map[string]Execution
+	schemesByID    map[int]normalized.Scheme
 }
 
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
 		nextUserID:     1,
 		nextLayoutID:   1,
+		nextSchemeID:   1,
 		usersByID:      map[int]User{},
 		userIDsByEmail: map[string]int{},
 		layoutsByID:    map[int]Layout{},
 		scenariosByID:  map[string]Scenario{},
 		executionsByID: map[string]Execution{},
+		schemesByID:    map[int]normalized.Scheme{},
 	}
 }
 
@@ -182,11 +220,11 @@ func (s *InMemoryStore) SaveScenario(userID int, layoutID int, name string, comm
 
 	id := fmt.Sprintf("sc-%d", time.Now().UnixNano())
 	scenario := Scenario{
-		ID:           id,
-		UserID:       userID,
-		LayoutID:     layoutID,
-		Name:         name,
-		Commands:     append([]CommandSpec{}, commands...),
+		ID:       id,
+		UserID:   userID,
+		LayoutID: layoutID,
+		Name:     name,
+		Commands: append([]CommandSpec{}, commands...),
 	}
 	s.scenariosByID[id] = scenario
 	return id, nil
