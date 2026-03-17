@@ -247,6 +247,105 @@ function formatPathReference(pathId, pathIndex, pathNameById) {
   return `${getPathDisplayName(pathId, pathNameById)}:${pathIndex}`;
 }
 
+function extractTrackOrdinalCandidate(pathId) {
+  const raw = String(pathId || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const directDigits = raw.match(/^\d+$/);
+  if (directDigits) {
+    return directDigits[0];
+  }
+  const suffix = raw.match(/track-(\d+)$/i);
+  if (suffix) {
+    return suffix[1];
+  }
+  return "";
+}
+
+function buildSegmentTrackIdAliasMap(segments) {
+  const map = new Map();
+  (segments || []).forEach((segment) => {
+    const segmentId = String(segment?.id || "").trim();
+    const ordinalCandidate = extractTrackOrdinalCandidate(segmentId);
+    if (segmentId) {
+      map.set(segmentId, segmentId);
+    }
+    if (ordinalCandidate) {
+      map.set(ordinalCandidate, segmentId);
+    }
+  });
+  return map;
+}
+
+function canonicalizeTrackIdForSegments(pathId, segments) {
+  const raw = String(pathId || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const aliasMap = buildSegmentTrackIdAliasMap(segments);
+  const ordinalCandidate = extractTrackOrdinalCandidate(raw);
+  return aliasMap.get(raw) || aliasMap.get(ordinalCandidate) || raw;
+}
+
+function remapScenarioStepsToCurrentSegments(rawSteps, segments) {
+  return (rawSteps || []).map((rawStep) => {
+    const step = normalizeScenarioStep(rawStep);
+    if (step.type !== SCENARIO_STEP_MOVE) {
+      return step;
+    }
+    return {
+      ...step,
+      payload: {
+        ...step.payload,
+        fromPathId: canonicalizeTrackIdForSegments(step.payload.fromPathId, segments),
+        toPathId: canonicalizeTrackIdForSegments(step.payload.toPathId, segments),
+      },
+    };
+  });
+}
+
+function buildPersistedTrackIdMap(tracks) {
+  const map = new Map();
+  (tracks || []).forEach((track) => {
+    const trackId = String(track?.track_id || "").trim();
+    const ordinalCandidate = extractTrackOrdinalCandidate(trackId);
+    if (trackId) {
+      map.set(trackId, trackId);
+    }
+    if (ordinalCandidate) {
+      map.set(ordinalCandidate, trackId);
+    }
+  });
+  return map;
+}
+
+function remapScenarioStepsToPersistedTracks(rawSteps, tracks) {
+  const persistedTrackIdMap = buildPersistedTrackIdMap(tracks);
+  return (rawSteps || []).map((rawStep) => {
+    const step = normalizeScenarioStep(rawStep);
+    if (step.type !== SCENARIO_STEP_MOVE) {
+      return step;
+    }
+    const fromCandidate = extractTrackOrdinalCandidate(step.payload.fromPathId);
+    const toCandidate = extractTrackOrdinalCandidate(step.payload.toPathId);
+    return {
+      ...step,
+      payload: {
+        ...step.payload,
+        fromPathId:
+          persistedTrackIdMap.get(step.payload.fromPathId) ||
+          persistedTrackIdMap.get(fromCandidate) ||
+          step.payload.fromPathId,
+        toPathId:
+          persistedTrackIdMap.get(step.payload.toPathId) ||
+          persistedTrackIdMap.get(toCandidate) ||
+          step.payload.toPathId,
+      },
+    };
+  });
+}
+
 function formatScenarioStepText(step, index, pathNameById) {
   if (step.type === SCENARIO_STEP_MOVE) {
     return `${index + 1}. ${step.payload.unitCode}: ${formatPathReference(
@@ -1070,13 +1169,6 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
   async function handleSaveScenario() {
     try {
-      const normalizedState = normalizeEditorLayoutForSave(
-        segments,
-        vehicles,
-        couplings,
-        scenarioSteps,
-        selectedLayoutId
-      );
       if (!scenarioSteps.length) {
         setMovementHint("Добавь шаги сценария перед сохранением.");
         return;
@@ -1090,12 +1182,17 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         setMovementHint("Некорректный scheme_id для сценария.");
         return;
       }
+      const schemeDetails = await getSchemeDetails(schemeId);
+      const persistedScenarioSteps = remapScenarioStepsToPersistedTracks(
+        scenarioSteps,
+        schemeDetails?.tracks || []
+      );
 
       const payload = buildNormalizedScenarioPayload(
         scenarioName,
         schemeId,
-        normalizedState.scenarioSteps,
-        normalizedState.vehicles
+        persistedScenarioSteps,
+        vehicles
       );
 
       let response;
@@ -1110,6 +1207,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       }
 
       setSelectedScenarioId(String(response.scenario.scenario_id));
+      setScenarioSteps(persistedScenarioSteps);
       await refreshSavedScenarios();
       setMovementHint("Сценарий сохранен.");
     } catch (error) {
@@ -1132,6 +1230,11 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         const mappedState = buildEditorStateFromSchemeDetails(schemeDetails);
         sourceVehicles = mappedState.vehicles;
         initialSnapshot = cloneLayoutState(mappedState);
+        setSegments(mappedState.segments);
+        setVehicles((prev) =>
+          mergeVehicleColors(prev, mappedState.vehicles, vehicleColorMemoryRef.current)
+        );
+        setCouplings(mappedState.couplings);
       }
       stopMovement(true);
       scenarioStopRequestedRef.current = false;
@@ -1141,7 +1244,10 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
           ? ""
           : String(schemeId)
       );
-      const loadedSteps = buildScenarioStepsFromNormalizedScenario(scenario, sourceVehicles);
+      const loadedSteps = remapScenarioStepsToCurrentSegments(
+        buildScenarioStepsFromNormalizedScenario(scenario, sourceVehicles),
+        initialSnapshot?.segments || segments
+      );
       setScenarioSteps(loadedSteps);
       setCurrentScenarioStep(0);
       setScenarioStateHistory([]);
@@ -1456,6 +1562,8 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
     if (step.type === SCENARIO_STEP_MOVE) {
       const stepCode = normalizeUnitCode(step.payload.unitCode);
+      const expectedFromPathId = canonicalizeTrackIdForSegments(step.payload.fromPathId, segments);
+      const expectedToPathId = canonicalizeTrackIdForSegments(step.payload.toPathId, segments);
       if (!stepCode) {
         throw new Error(`Некорректный номер объекта в шаге: ${step.payload.unitCode}.`);
       }
@@ -1469,17 +1577,17 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         throw new Error(`Объект ${stepCode} не локомотив.`);
       }
       if (
-        target.pathId !== step.payload.fromPathId ||
+        target.pathId !== expectedFromPathId ||
         Number(target.pathIndex) !== step.payload.fromIndex
       ) {
         throw new Error(
-          `Локомотив ${codeMap.get(target.id) || target.id} сейчас в ${target.pathId}:${target.pathIndex}, а не в ${step.payload.fromPathId}:${step.payload.fromIndex}.`
+          `Локомотив ${codeMap.get(target.id) || target.id} сейчас в ${target.pathId}:${target.pathIndex}, а не в ${expectedFromPathId}:${step.payload.fromIndex}.`
         );
       }
 
       const timeline = await buildMovementTimeline(
         target.id,
-        step.payload.toPathId,
+        expectedToPathId,
         step.payload.toIndex,
         sourceVehicles,
         sourceCouplings
@@ -1517,7 +1625,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
           couplings: sourceCouplings,
           timeline: [],
           lastLocomotiveId: target.id,
-          lastTargetPathId: step.payload.toPathId,
+          lastTargetPathId: expectedToPathId,
           lastTargetIndex: step.payload.toIndex,
         };
       }
@@ -1537,7 +1645,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         couplings: sourceCouplings,
         timeline: cloneTimeline(timeline),
         lastLocomotiveId: target.id,
-        lastTargetPathId: step.payload.toPathId,
+        lastTargetPathId: expectedToPathId,
         lastTargetIndex: step.payload.toIndex,
       };
     }
@@ -1589,7 +1697,9 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       return;
     }
 
-    const steps = scenarioSteps.map((step) => normalizeScenarioStep(step)).filter(Boolean);
+    const steps = remapScenarioStepsToCurrentSegments(scenarioSteps, segments)
+      .map((step) => normalizeScenarioStep(step))
+      .filter(Boolean);
     if (!steps.length) {
       setMovementHint("Сценарий не содержит шагов.");
       return;
@@ -1755,7 +1865,10 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     }
 
     const fallbackStep = scenarioSteps.length ? null : buildDraftScenarioStep();
-    const steps = (scenarioSteps.length ? scenarioSteps : fallbackStep ? [fallbackStep] : [])
+    const steps = remapScenarioStepsToCurrentSegments(
+      scenarioSteps.length ? scenarioSteps : fallbackStep ? [fallbackStep] : [],
+      segments
+    )
       .map((step) => normalizeScenarioStep(step))
       .filter(Boolean);
 

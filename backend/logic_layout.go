@@ -448,7 +448,6 @@ func normalizeVehicleToPath(vehicle Vehicle, pathSlots []PathSlot) Vehicle {
 }
 
 func finalizeRuntimeState(state RuntimeState, gridSize float64) RuntimeState {
-	state = normalizeSegmentIDs(state)
 	pathSlots := collectPathSlots(state.Segments, gridSize)
 	normalized := make([]Vehicle, 0, len(state.Vehicles))
 	for _, v := range state.Vehicles {
