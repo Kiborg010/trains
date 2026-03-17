@@ -51,6 +51,10 @@ func main() {
 	mux.Handle("/api/scenarios", authMiddleware(http.HandlerFunc(scenariosHandler)))
 	mux.Handle("/api/scenarios/", authMiddleware(http.HandlerFunc(scenarioByIDHandler)))
 	mux.Handle("/api/executions/", authMiddleware(http.HandlerFunc(executionByIDHandler)))
+	mux.Handle("/api/normalized/schemes", authMiddleware(http.HandlerFunc(normalizedSchemesHandler)))
+	mux.Handle("/api/normalized/schemes/", authMiddleware(http.HandlerFunc(normalizedSchemeByIDHandler)))
+	mux.Handle("/api/normalized/scenarios", authMiddleware(http.HandlerFunc(normalizedScenariosHandler)))
+	mux.Handle("/api/normalized/scenarios/", authMiddleware(http.HandlerFunc(normalizedScenarioByIDHandler)))
 
 	// Original endpoints (will need updates for user binding)
 	mux.HandleFunc("/api/couplings/validate", validateCouplingHandler)
