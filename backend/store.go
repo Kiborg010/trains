@@ -19,14 +19,18 @@ type Store interface {
 	GetUserByEmail(email string) (*User, error)
 	GetUserByID(id int) (*User, error)
 
-	// Layout operations
+	// Legacy shadow layout operations.
+	// Temporary compatibility/rollback path only.
+	// Active backend reads/writes must use normalized model + adapters instead.
 	SaveLayout(userID int, name string, state LayoutState) (int, error)
 	GetLayout(id int, userID int) (*Layout, error)
 	ListLayouts(userID int) ([]Layout, error)
 	UpdateLayout(id int, userID int, name string, state LayoutState) error
 	DeleteLayout(id int, userID int) error
 
-	// Scenario operations
+	// Legacy shadow scenario operations.
+	// Temporary compatibility/rollback path only.
+	// Active backend reads/writes must use normalized model + adapters instead.
 	SaveScenario(userID int, layoutID int, name string, commands []CommandSpec) (string, error)
 	GetScenario(id string) (*Scenario, error)
 	ListScenarios(userID int) ([]Scenario, error)
@@ -149,6 +153,8 @@ func (s *InMemoryStore) GetUserByID(id int) (*User, error) {
 	return &user, nil
 }
 
+// SaveLayout writes the legacy shadow copy for layouts.
+// Temporary compatibility/rollback path only.
 func (s *InMemoryStore) SaveLayout(userID int, name string, state LayoutState) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -167,6 +173,8 @@ func (s *InMemoryStore) SaveLayout(userID int, name string, state LayoutState) (
 	return layout.ID, nil
 }
 
+// GetLayout reads the legacy shadow copy for layouts.
+// Temporary compatibility/debug path only.
 func (s *InMemoryStore) GetLayout(id int, userID int) (*Layout, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -178,6 +186,8 @@ func (s *InMemoryStore) GetLayout(id int, userID int) (*Layout, error) {
 	return &layout, nil
 }
 
+// ListLayouts reads the legacy shadow copy for layouts.
+// Temporary compatibility/debug path only.
 func (s *InMemoryStore) ListLayouts(userID int) ([]Layout, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -191,6 +201,8 @@ func (s *InMemoryStore) ListLayouts(userID int) ([]Layout, error) {
 	return result, nil
 }
 
+// UpdateLayout updates the legacy shadow copy for layouts.
+// Temporary compatibility/rollback path only.
 func (s *InMemoryStore) UpdateLayout(id int, userID int, name string, state LayoutState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -206,6 +218,8 @@ func (s *InMemoryStore) UpdateLayout(id int, userID int, name string, state Layo
 	return nil
 }
 
+// DeleteLayout deletes the legacy shadow copy for layouts.
+// Temporary compatibility/rollback path only.
 func (s *InMemoryStore) DeleteLayout(id int, userID int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -218,6 +232,8 @@ func (s *InMemoryStore) DeleteLayout(id int, userID int) error {
 	return nil
 }
 
+// SaveScenario writes the legacy shadow copy for scenarios.
+// Temporary compatibility/rollback path only.
 func (s *InMemoryStore) SaveScenario(userID int, layoutID int, name string, commands []CommandSpec) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -234,6 +250,8 @@ func (s *InMemoryStore) SaveScenario(userID int, layoutID int, name string, comm
 	return id, nil
 }
 
+// GetScenario reads the legacy shadow copy for scenarios.
+// Temporary compatibility/debug path only.
 func (s *InMemoryStore) GetScenario(id string) (*Scenario, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -245,6 +263,8 @@ func (s *InMemoryStore) GetScenario(id string) (*Scenario, error) {
 	return &scenario, nil
 }
 
+// ListScenarios reads the legacy shadow copy for scenarios.
+// Temporary compatibility/debug path only.
 func (s *InMemoryStore) ListScenarios(userID int) ([]Scenario, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -258,6 +278,8 @@ func (s *InMemoryStore) ListScenarios(userID int) ([]Scenario, error) {
 	return result, nil
 }
 
+// UpdateScenarioCommands updates the legacy shadow copy for scenario commands.
+// Temporary compatibility/rollback path only.
 func (s *InMemoryStore) UpdateScenarioCommands(id string, userID int, commands []CommandSpec) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -271,6 +293,8 @@ func (s *InMemoryStore) UpdateScenarioCommands(id string, userID int, commands [
 	return nil
 }
 
+// DeleteScenario deletes the legacy shadow copy for scenarios.
+// Temporary compatibility/rollback path only.
 func (s *InMemoryStore) DeleteScenario(id string, userID int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -424,7 +448,8 @@ func (s *PostgresStore) GetUserByID(id int) (*User, error) {
 	return &user, nil
 }
 
-// SaveLayout saves a layout for a user
+// SaveLayout writes the legacy shadow copy for layouts.
+// Temporary compatibility/rollback path only.
 func (s *PostgresStore) SaveLayout(userID int, name string, state LayoutState) (int, error) {
 	stateJSON, err := json.Marshal(state)
 	if err != nil {
@@ -440,7 +465,8 @@ func (s *PostgresStore) SaveLayout(userID int, name string, state LayoutState) (
 	return id, err
 }
 
-// GetLayout retrieves a layout by ID
+// GetLayout reads the legacy shadow copy for layouts.
+// Temporary compatibility/debug path only.
 func (s *PostgresStore) GetLayout(id int, userID int) (*Layout, error) {
 	var layout Layout
 	var stateJSON []byte
@@ -468,7 +494,8 @@ func (s *PostgresStore) GetLayout(id int, userID int) (*Layout, error) {
 	return &layout, nil
 }
 
-// ListLayouts lists all layouts for a user
+// ListLayouts reads the legacy shadow copy for layouts.
+// Temporary compatibility/debug path only.
 func (s *PostgresStore) ListLayouts(userID int) ([]Layout, error) {
 	rows, err := s.db.Query(
 		"SELECT id, user_id, name, state, created_at, updated_at FROM layouts WHERE user_id = $1 ORDER BY updated_at DESC",
@@ -503,7 +530,8 @@ func (s *PostgresStore) ListLayouts(userID int) ([]Layout, error) {
 	return layouts, rows.Err()
 }
 
-// UpdateLayout updates a layout
+// UpdateLayout updates the legacy shadow copy for layouts.
+// Temporary compatibility/rollback path only.
 func (s *PostgresStore) UpdateLayout(id int, userID int, name string, state LayoutState) error {
 	stateJSON, err := json.Marshal(state)
 	if err != nil {
@@ -530,7 +558,8 @@ func (s *PostgresStore) UpdateLayout(id int, userID int, name string, state Layo
 	return nil
 }
 
-// DeleteLayout deletes a layout
+// DeleteLayout deletes the legacy shadow copy for layouts.
+// Temporary compatibility/rollback path only.
 func (s *PostgresStore) DeleteLayout(id int, userID int) error {
 	result, err := s.db.Exec(
 		"DELETE FROM layouts WHERE id = $1 AND user_id = $2",
@@ -552,7 +581,8 @@ func (s *PostgresStore) DeleteLayout(id int, userID int) error {
 	return nil
 }
 
-// SaveScenario saves a scenario
+// SaveScenario writes the legacy shadow copy for scenarios.
+// Temporary compatibility/rollback path only.
 func (s *PostgresStore) SaveScenario(userID int, layoutID int, name string, commands []CommandSpec) (string, error) {
 	commandsJSON, err := json.Marshal(commands)
 	if err != nil {
@@ -578,7 +608,8 @@ func (s *PostgresStore) SaveScenario(userID int, layoutID int, name string, comm
 	return strconv.Itoa(scenarioID), nil
 }
 
-// GetScenario retrieves a scenario by ID.
+// GetScenario reads the legacy shadow copy for scenarios.
+// Temporary compatibility/debug path only.
 func (s *PostgresStore) GetScenario(id string) (*Scenario, error) {
 	scenarioID, err := strconv.Atoi(id)
 	if err != nil {
@@ -621,7 +652,8 @@ func (s *PostgresStore) GetScenario(id string) (*Scenario, error) {
 	return &scenario, nil
 }
 
-// ListScenarios lists scenarios for a user
+// ListScenarios reads the legacy shadow copy for scenarios.
+// Temporary compatibility/debug path only.
 func (s *PostgresStore) ListScenarios(userID int) ([]Scenario, error) {
 	rows, err := s.db.Query(
 		"SELECT id, user_id, layout_id, name, commands FROM scenarios WHERE user_id = $1 ORDER BY updated_at DESC",
@@ -660,7 +692,8 @@ func (s *PostgresStore) ListScenarios(userID int) ([]Scenario, error) {
 	return scenarios, rows.Err()
 }
 
-// UpdateScenarioCommands updates the commands of a scenario
+// UpdateScenarioCommands updates the legacy shadow copy for scenario commands.
+// Temporary compatibility/rollback path only.
 func (s *PostgresStore) UpdateScenarioCommands(id string, userID int, commands []CommandSpec) error {
 	commandsJSON, err := json.Marshal(commands)
 	if err != nil {
@@ -692,7 +725,8 @@ func (s *PostgresStore) UpdateScenarioCommands(id string, userID int, commands [
 	return nil
 }
 
-// DeleteScenario deletes a scenario
+// DeleteScenario deletes the legacy shadow copy for scenarios.
+// Temporary compatibility/rollback path only.
 func (s *PostgresStore) DeleteScenario(id string, userID int) error {
 	scenarioID, err := strconv.Atoi(id)
 	if err != nil {

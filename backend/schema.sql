@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS layouts (
     id SERIAL PRIMARY KEY,
     user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
+    -- Legacy compatibility shadow only. Normalized tables are the active source of truth.
     state JSONB NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -22,6 +23,7 @@ CREATE TABLE IF NOT EXISTS scenarios (
     user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     layout_id INT NOT NULL REFERENCES layouts(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
+    -- Legacy compatibility shadow only. Normalized tables are the active source of truth.
     commands JSONB NOT NULL DEFAULT '[]',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
