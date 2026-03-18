@@ -384,8 +384,8 @@ func TestBuildLowLevelScenarioStepsFromHeuristicOperationsForWholeScenario(t *te
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(steps) != 14 {
-		t.Fatalf("expected 14 low-level steps for three operations with explicit group couplings, got %d", len(steps))
+	if len(steps) != 13 {
+		t.Fatalf("expected 13 low-level steps for three operations with final transfer left coupled on main track, got %d", len(steps))
 	}
 	for _, step := range steps {
 		if step.StepType == "move_group" {
@@ -396,10 +396,10 @@ func TestBuildLowLevelScenarioStepsFromHeuristicOperationsForWholeScenario(t *te
 	// Проверяем финальную пятёрку шагов для transfer_formation_to_main:
 	// подход, сцепка локомотива, достройка цепочки состава, перенос, расцепка.
 	last := steps[9:]
-	if len(last) != 5 {
-		t.Fatalf("expected 5 steps in final operation, got %d", len(last))
+	if len(last) != 4 {
+		t.Fatalf("expected 4 steps in final operation without final decouple, got %d", len(last))
 	}
-	if last[0].StepType != "move_loco" || last[1].StepType != "couple" || last[2].StepType != "couple" || last[3].StepType != "move_loco" || last[4].StepType != "decouple" {
+	if last[0].StepType != "move_loco" || last[1].StepType != "couple" || last[2].StepType != "couple" || last[3].StepType != "move_loco" {
 		t.Fatalf("unexpected final operation shape: %+v", last)
 	}
 	if last[0].FromTrackID == nil || *last[0].FromTrackID != "lead-2" {
@@ -420,8 +420,8 @@ func TestBuildLowLevelScenarioStepsFromHeuristicOperationsForWholeScenario(t *te
 	if last[3].ToTrackID == nil || *last[3].ToTrackID != "main-1" {
 		t.Fatalf("expected final transfer to main track, got %+v", last[3].ToTrackID)
 	}
-	if last[3].ToIndex == nil || *last[3].ToIndex != 0 {
-		t.Fatalf("expected final transfer to keep locomotive on its own target index, not on a wagon index, got %+v", last[3].ToIndex)
+	if last[3].ToIndex == nil || *last[3].ToIndex != 1 {
+		t.Fatalf("expected final transfer to leave locomotive on first inner main-track node, got %+v", last[3].ToIndex)
 	}
 }
 

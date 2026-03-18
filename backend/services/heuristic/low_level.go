@@ -212,6 +212,14 @@ func BuildLowLevelScenarioStepsFromHeuristicOperations(
 		))
 		stepOrder++
 
+		// После генерации шагов обновляем локальное состояние,
+		// чтобы следующая operation начиналась с нового положения локомотива
+		// и уже переставленных вагонов.
+		applyOperationTransfer(state, operation, selection, destinationPlacement)
+		if operation.OperationType == HeuristicOperationTransferFormationToMain {
+			continue
+		}
+
 		// Четвёртый шаг: локомотив отцепляется от того же крайнего вагона,
 		// с которым он был связан в рамках этой операции.
 		steps = append(steps, buildCouplingScenarioStep(
@@ -225,10 +233,6 @@ func BuildLowLevelScenarioStepsFromHeuristicOperations(
 		stepOrder++
 		state.removeCoupling(state.Locomotive.LocoID, selection.BoundaryWagonID)
 
-		// После генерации шагов обновляем локальное состояние,
-		// чтобы следующая operation начиналась с нового положения локомотива
-		// и уже переставленных вагонов.
-		applyOperationTransfer(state, operation, selection, destinationPlacement)
 	}
 
 	return steps, nil
@@ -526,7 +530,15 @@ func reserveDestinationPlacement(
 	startIndex := nextFreeTrackIndex(existing) + reservedEntryOffset
 	boundaryIndex := startIndex
 	locomotiveIndex := startIndex + len(selection.Wagons)
-	if placeAtStart {
+	if operation.OperationType == HeuristicOperationTransferFormationToMain {
+		placeAtStart = true
+		startIndex = nextFreeTrackIndex(existing) + 2
+		if startIndex < 2 {
+			startIndex = 2
+		}
+		boundaryIndex = startIndex
+		locomotiveIndex = startIndex - 1
+	} else if placeAtStart {
 		startIndex = 1
 		boundaryIndex = 1
 		locomotiveIndex = 0

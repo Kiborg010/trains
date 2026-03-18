@@ -2114,10 +2114,9 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       throw new Error(response.message || "Не удалось выполнить шаг сцепки/расцепки.");
     }
 
-    const nextState = response.state || {};
     return {
-      vehicles: nextState.vehicles || [],
-      couplings: nextState.couplings || [],
+      vehicles: sourceVehicles,
+      couplings: (response.state || {}).couplings || [],
       timeline: [],
       lastLocomotiveId: null,
       lastTargetPathId: null,
@@ -2465,14 +2464,8 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         if (!response.ok) {
           throw new Error(response.message || "Не удалось выполнить шаг сцепки/расцепки.");
         }
-        const nextState = response.state || {};
         skipAutoResolvePassesRef.current = 2;
-        workingVehicles = mergeVehicleColors(
-          workingVehicles,
-          nextState.vehicles || [],
-          vehicleColorMemoryRef.current
-        );
-        workingCouplings = nextState.couplings || [];
+        workingCouplings = (response.state || {}).couplings || [];
         setVehicles((prev) =>
           mergeVehicleColors(prev, workingVehicles, vehicleColorMemoryRef.current)
         );
