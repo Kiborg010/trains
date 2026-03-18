@@ -6,6 +6,7 @@ import {
   createScheme,
   deleteNormalizedScenario,
   deleteScheme,
+  generateDraftHeuristicScenario,
   getNormalizedScenarioDetails,
   getSchemeDetails,
   listNormalizedScenarios,
@@ -760,6 +761,12 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [scenarioName, setScenarioName] = useState("Сценарий 1");
   const [savedScenarios, setSavedScenarios] = useState([]);
   const [selectedScenarioId, setSelectedScenarioId] = useState("");
+  const [heuristicTargetColor, setHeuristicTargetColor] = useState("");
+  const [heuristicRequiredTargetCount, setHeuristicRequiredTargetCount] = useState("1");
+  const [heuristicFormationTrackId, setHeuristicFormationTrackId] = useState("");
+  const [heuristicDraftResult, setHeuristicDraftResult] = useState(null);
+  const [heuristicDraftError, setHeuristicDraftError] = useState("");
+  const [isGeneratingHeuristicDraft, setIsGeneratingHeuristicDraft] = useState(false);
 
   const viewWidth = viewport.width / zoom;
   const viewHeight = viewport.height / zoom;
@@ -837,6 +844,16 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         value: segment.id,
         label: getSegmentDisplayName(segment, index),
       })),
+    [segments]
+  );
+  const leadPathOptions = useMemo(
+    () =>
+      segments
+        .filter((segment) => normalizePathType(segment.type) === PATH_TYPE_LEAD)
+        .map((segment, index) => ({
+          value: segment.id,
+          label: getSegmentDisplayName(segment, index),
+        })),
     [segments]
   );
 
@@ -1425,6 +1442,48 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       setMovementHint("Сценарий удален.");
     } catch (error) {
       setMovementHint(error.message || "Не удалось удалить сценарий.");
+    }
+  }
+
+  async function handleGenerateHeuristicDraft() {
+    try {
+      const schemeId = Number.parseInt(String(selectedLayoutId || scenarioLayoutId || "").trim(), 10);
+      const requiredTargetCount = Number.parseInt(String(heuristicRequiredTargetCount || "").trim(), 10);
+      const targetColor = String(heuristicTargetColor || "").trim();
+      const formationTrackId = String(heuristicFormationTrackId || "").trim();
+
+      if (Number.isNaN(schemeId) || schemeId <= 0) {
+        throw new Error("Для эвристики выбери сохраненную схему.");
+      }
+      if (!targetColor) {
+        throw new Error("Укажи целевой цвет вагонов.");
+      }
+      if (Number.isNaN(requiredTargetCount) || requiredTargetCount <= 0) {
+        throw new Error("Укажи корректное required_target_count.");
+      }
+
+      setIsGeneratingHeuristicDraft(true);
+      setHeuristicDraftError("");
+
+      const response = await generateDraftHeuristicScenario({
+        scheme_id: schemeId,
+        target_color: targetColor,
+        required_target_count: requiredTargetCount,
+        ...(formationTrackId ? { formation_track_id: formationTrackId } : {}),
+      });
+
+      setHeuristicDraftResult(response);
+      setMovementHint(
+        response?.feasible
+          ? "Heuristic draft успешно сгенерирован."
+          : "Heuristic draft получен, но задача помечена как infeasible."
+      );
+    } catch (error) {
+      setHeuristicDraftResult(null);
+      setHeuristicDraftError(error.message || "Не удалось сгенерировать heuristic draft.");
+      setMovementHint(error.message || "Не удалось сгенерировать heuristic draft.");
+    } finally {
+      setIsGeneratingHeuristicDraft(false);
     }
   }
 
@@ -2917,6 +2976,99 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
               <button type="button" className="toolButton" onClick={handleDeleteScenario}>
                 Удалить сценарий
               </button>
+              <div
+                className="scenarioSteps"
+                style={{
+                  marginTop: 8,
+                  border: "1px solid #cbd5e1",
+                  borderRadius: 10,
+                  padding: 10,
+                  background: "#f8fafc",
+                }}
+              >
+                <div className="scenarioStepRow">
+                  <span className="scenarioStepText">Heuristic Draft Debug</span>
+                </div>
+                <p className="counter">
+                  Схема: {selectedLayoutId || scenarioLayoutId || "-"}
+                </p>
+                <input
+                  className="toolInput"
+                  value={heuristicTargetColor}
+                  onChange={(event) => setHeuristicTargetColor(event.target.value)}
+                  placeholder="target_color"
+                />
+                <input
+                  className="toolInput"
+                  value={heuristicRequiredTargetCount}
+                  onChange={(event) => setHeuristicRequiredTargetCount(event.target.value)}
+                  placeholder="required_target_count"
+                />
+                <select
+                  className="toolInput"
+                  value={heuristicFormationTrackId}
+                  onChange={(event) => setHeuristicFormationTrackId(event.target.value)}
+                >
+                  <option value="">formation_track_id (auto)</option>
+                  {leadPathOptions.map((path) => (
+                    <option key={`heuristic-lead-${path.value}`} value={path.value}>
+                      Путь {path.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="toolButton"
+                  onClick={handleGenerateHeuristicDraft}
+                  disabled={isGeneratingHeuristicDraft}
+                >
+                  {isGeneratingHeuristicDraft ? "Генерация..." : "Generate Heuristic Draft"}
+                </button>
+                <p className="counter">
+                  feasible:{" "}
+                  {heuristicDraftResult == null
+                    ? "-"
+                    : heuristicDraftResult.feasible
+                      ? "true"
+                      : "false"}
+                </p>
+                {heuristicDraftError ? <p className="counter">{heuristicDraftError}</p> : null}
+                {heuristicDraftResult?.reasons?.length ? (
+                  <div className="scenarioSteps">
+                    {heuristicDraftResult.reasons.map((reason, index) => (
+                      <div key={`heuristic-reason-${index}`} className="scenarioStepRow">
+                        <span className="scenarioStepText">{reason}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {heuristicDraftResult ? (
+                  <pre
+                    style={{
+                      margin: 0,
+                      padding: 10,
+                      overflowX: "auto",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                      borderRadius: 8,
+                      background: "#e2e8f0",
+                      color: "#0f172a",
+                      fontSize: 12,
+                    }}
+                  >
+                    {JSON.stringify(
+                      {
+                        feasible: heuristicDraftResult.feasible,
+                        reasons: heuristicDraftResult.reasons || [],
+                        draft_scenario: heuristicDraftResult.draft_scenario || null,
+                        metrics: heuristicDraftResult.metrics || null,
+                      },
+                      null,
+                      2
+                    )}
+                  </pre>
+                ) : null}
+              </div>
               <select
                 className="toolInput"
                 value={scenarioStepType}

@@ -160,6 +160,10 @@ export async function runScenario(scenarioId) {
   return postJSON(`/normalized/scenarios/${scenarioId}/run`, {});
 }
 
+export async function generateDraftHeuristicScenario(payload) {
+  return postJSON("/normalized/heuristic/generate", payload);
+}
+
 export async function getExecution(executionId) {
   return getJSON(`/executions/${executionId}`);
 }
