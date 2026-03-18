@@ -256,7 +256,26 @@ function formatPathReference(pathId, pathIndex, pathNameById) {
   return `${getPathDisplayName(pathId, pathNameById)}:${pathIndex}`;
 }
 
-function formatHeuristicDraftStepText(step) {
+function formatHumanReadableTrackLabel(pathId, pathNameById) {
+  const normalizedId = String(pathId || "").trim();
+  if (!normalizedId) {
+    return "-";
+  }
+
+  const explicitName = pathNameById?.get?.(normalizedId);
+  if (explicitName) {
+    return `${explicitName} (${normalizedId})`;
+  }
+
+  const ordinalCandidate = extractTrackOrdinalCandidate(normalizedId);
+  if (ordinalCandidate) {
+    return `Путь ${ordinalCandidate} (${normalizedId})`;
+  }
+
+  return normalizedId;
+}
+
+function formatHeuristicDraftStepText(step, pathNameById) {
   const count = Number(step?.wagon_count || 0);
   const sourceTrackId = String(step?.source_track_id || step?.source_track_id || step?.sourceTrackID || "").trim();
   const destinationTrackId = String(
@@ -264,18 +283,20 @@ function formatHeuristicDraftStepText(step) {
   ).trim();
   const sourceSide = String(step?.source_side || step?.sourceSide || "").trim();
   const type = String(step?.step_type || step?.stepType || "").trim();
+  const sourceLabel = formatHumanReadableTrackLabel(sourceTrackId, pathNameById);
+  const destinationLabel = formatHumanReadableTrackLabel(destinationTrackId, pathNameById);
 
   if (type === "buffer_blockers") {
-    return `Перенести ${count} блокирующих вагонов с пути ${sourceTrackId} в буферный путь ${destinationTrackId}`;
+    return `Перенести ${count} блокирующих вагонов с пути ${sourceLabel} в буферный путь ${destinationLabel}`;
   }
   if (type === "transfer_targets_to_formation") {
     const sideText = sourceSide ? ` (со стороны ${sourceSide})` : "";
-    return `Перенести ${count} целевых вагонов с пути ${sourceTrackId}${sideText} на путь формирования ${destinationTrackId}`;
+    return `Перенести ${count} целевых вагонов с пути ${sourceLabel}${sideText} на путь формирования ${destinationLabel}`;
   }
   if (type === "transfer_formation_to_main") {
-    return `Перевести сформированный состав с пути ${sourceTrackId} на главный путь ${destinationTrackId}`;
+    return `Перевести сформированный состав с пути ${sourceLabel} на главный путь ${destinationLabel}`;
   }
-  return `${type}: ${sourceTrackId} -> ${destinationTrackId}`;
+  return `${type}: ${sourceLabel} -> ${destinationLabel}`;
 }
 
 function extractTrackOrdinalCandidate(pathId) {
@@ -3195,8 +3216,14 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                         <div className="counter">id: {item.heuristic_scenario_id}</div>
                         <div className="counter">target_color: {item.target_color}</div>
                         <div className="counter">required_target_count: {item.required_target_count}</div>
-                        <div className="counter">formation_track_id: {item.formation_track_id}</div>
-                        <div className="counter">buffer_track_id: {item.buffer_track_id}</div>
+                        <div className="counter">
+                          formation_track_id:{" "}
+                          {formatHumanReadableTrackLabel(item.formation_track_id, segmentDisplayNameById)}
+                        </div>
+                        <div className="counter">
+                          buffer_track_id:{" "}
+                          {formatHumanReadableTrackLabel(item.buffer_track_id, segmentDisplayNameById)}
+                        </div>
                         <div className="counter">feasible: {item.feasible ? "true" : "false"}</div>
                         <div className="counter">
                           metrics.total_cost: {item.metrics?.total_cost ?? "-"}
@@ -3255,13 +3282,25 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                       required_target_count: {heuristicDraftResult.draft_scenario.required_target_count}
                     </p>
                     <p className="counter">
-                      formation_track_id: {heuristicDraftResult.draft_scenario.formation_track_id}
+                      formation_track_id:{" "}
+                      {formatHumanReadableTrackLabel(
+                        heuristicDraftResult.draft_scenario.formation_track_id,
+                        segmentDisplayNameById
+                      )}
                     </p>
                     <p className="counter">
-                      buffer_track_id: {heuristicDraftResult.draft_scenario.buffer_track_id}
+                      buffer_track_id:{" "}
+                      {formatHumanReadableTrackLabel(
+                        heuristicDraftResult.draft_scenario.buffer_track_id,
+                        segmentDisplayNameById
+                      )}
                     </p>
                     <p className="counter">
-                      main_track_id: {heuristicDraftResult.draft_scenario.main_track_id}
+                      main_track_id:{" "}
+                      {formatHumanReadableTrackLabel(
+                        heuristicDraftResult.draft_scenario.main_track_id,
+                        segmentDisplayNameById
+                      )}
                     </p>
                     <p className="counter">
                       feasible: {heuristicDraftResult.feasible ? "true" : "false"}
@@ -3306,7 +3345,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                             className="scenarioStepRow"
                           >
                             <span className="scenarioStepText">
-                              {index + 1}. {formatHeuristicDraftStepText(step)}
+                              {index + 1}. {formatHeuristicDraftStepText(step, segmentDisplayNameById)}
                             </span>
                           </div>
                         ))}
