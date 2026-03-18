@@ -235,6 +235,41 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 		currentLocoToTail = append(currentLocoToTail, currentSlotByVehicleID[id])
 	}
 
+	if len(trainOrder) > 1 {
+		twoPhaseTimeline, reversalInfo, ok := tryBuildOuterPulloutTimeline(
+			req.Segments,
+			req.GridSize,
+			trackConnections,
+			normalizedVehicles,
+			vehicleByID,
+			trainOrder,
+			req.SelectedLocomotiveID,
+			req.TargetPathID,
+			targetIndex,
+			slotAdj,
+			slotByID,
+			staticOccupied,
+		)
+		if ok {
+			log.Printf(
+				"[movement] outer pull-out consist reversal: start=%s:%d target=%s:%d outer_track=%s reversal_slot=%s reason=%s",
+				locomotive.PathID,
+				locomotive.PathIndex,
+				req.TargetPathID,
+				targetIndex,
+				reversalInfo.OuterTrackID,
+				reversalInfo.ReversalSlotID,
+				reversalInfo.Reason,
+			)
+			return PlanMovementResponse{
+				OK:          true,
+				Message:     "Movement started.",
+				Timeline:    twoPhaseTimeline,
+				CellsPassed: len(twoPhaseTimeline),
+			}, nil
+		}
+	}
+
 	isBackwardPush := len(trainOrder) > 1 && len(path) > 1 && path[1] == currentLocoToTail[1]
 	drivingPath := path
 	if isBackwardPush && len(trainOrder) > 1 {
@@ -664,6 +699,354 @@ func keysOfMap(items map[string]struct{}) []string {
 	return result
 }
 
+type outerPulloutReversalInfo struct {
+	OuterTrackID   string
+	ReversalSlotID string
+	Reason         string
+}
+
+type stationOrientation struct {
+	LeftOuterTrackID  string
+	RightOuterTrackID string
+	ExternalSideByTrack map[string]string
+}
+
+func tryBuildOuterPulloutTimeline(
+	segments []Segment,
+	gridSize float64,
+	trackConnections []MovementTrackConnection,
+	vehicles []Vehicle,
+	vehicleByID map[string]Vehicle,
+	trainOrder []string,
+	locomotiveID string,
+	targetTrackID string,
+	targetIndex int,
+	slotAdj map[string]map[string]struct{},
+	slotByID map[string]Slot,
+	staticOccupied map[string]struct{},
+) ([][]Position, outerPulloutReversalInfo, bool) {
+	orientation, ok := detectStationOrientation(segments, trackConnections)
+	if !ok {
+		return nil, outerPulloutReversalInfo{}, false
+	}
+
+	locomotive := vehicleByID[locomotiveID]
+	if locomotive.PathID == targetTrackID {
+		return nil, outerPulloutReversalInfo{}, false
+	}
+	if locomotive.PathID == orientation.LeftOuterTrackID || locomotive.PathID == orientation.RightOuterTrackID {
+		return nil, outerPulloutReversalInfo{}, false
+	}
+	if targetTrackID == orientation.LeftOuterTrackID || targetTrackID == orientation.RightOuterTrackID {
+		return nil, outerPulloutReversalInfo{}, false
+	}
+
+	attachedSide, ok := locomotiveAttachedTrackSide(vehicles, vehicleByID, trainOrder, segments)
+	if !ok {
+		return nil, outerPulloutReversalInfo{}, false
+	}
+
+	outerTrackID := orientation.RightOuterTrackID
+	if attachedSide == "left" {
+		outerTrackID = orientation.LeftOuterTrackID
+	}
+	externalSide := orientation.ExternalSideByTrack[outerTrackID]
+	if externalSide == "" {
+		return nil, outerPulloutReversalInfo{}, false
+	}
+	outerTargetIndex, err := trackSideIndex(segments, gridSize, outerTrackID, externalSide)
+	if err != nil {
+		return nil, outerPulloutReversalInfo{}, false
+	}
+
+	currentLocoToTail := make([]string, 0, len(trainOrder))
+	for _, id := range trainOrder {
+		current := vehicleByID[id]
+		currentLocoToTail = append(currentLocoToTail, slotID(current.X, current.Y))
+	}
+
+	pullTrackPath, pullTrackRoute := dijkstraTrackPath(trackConnections, locomotive.PathID, outerTrackID)
+	if len(pullTrackPath) == 0 {
+		return nil, outerPulloutReversalInfo{}, false
+	}
+	pullPath, pullSlots, err := buildSlotPathFromTrackRoute(
+		segments,
+		locomotive.PathID,
+		locomotive.PathIndex,
+		outerTrackID,
+		outerTargetIndex,
+		pullTrackPath,
+		pullTrackRoute,
+		gridSize,
+	)
+	if err != nil || len(pullPath) < len(trainOrder)+1 {
+		return nil, outerPulloutReversalInfo{}, false
+	}
+	for id, slot := range pullSlots {
+		slotByID[id] = slot
+	}
+
+	phaseOneTimeline, phaseOneEndState, ok := simulatePullTimeline(pullPath, currentLocoToTail, trainOrder, slotByID, staticOccupied)
+	if !ok {
+		return nil, outerPulloutReversalInfo{}, false
+	}
+
+	pushTrackPath, pushTrackRoute := dijkstraTrackPath(trackConnections, outerTrackID, targetTrackID)
+	if len(pushTrackPath) == 0 {
+		return nil, outerPulloutReversalInfo{}, false
+	}
+	pushPath, pushSlots, err := buildSlotPathFromTrackRoute(
+		segments,
+		outerTrackID,
+		outerTargetIndex,
+		targetTrackID,
+		targetIndex,
+		pushTrackPath,
+		pushTrackRoute,
+		gridSize,
+	)
+	if err != nil || len(pushPath) < 2 {
+		return nil, outerPulloutReversalInfo{}, false
+	}
+	for id, slot := range pushSlots {
+		slotByID[id] = slot
+	}
+	pushDrivingPath, err := extendPathForBackwardPush(pushPath, slotAdj, slotByID, len(trainOrder)-1)
+	if err != nil {
+		return nil, outerPulloutReversalInfo{}, false
+	}
+	if !matchesPushPrefix(phaseOneEndState, pushDrivingPath) {
+		return nil, outerPulloutReversalInfo{}, false
+	}
+
+	phaseTwoTimeline, ok := simulatePushTimeline(pushPath, pushDrivingPath, trainOrder, slotByID, staticOccupied)
+	if !ok {
+		return nil, outerPulloutReversalInfo{}, false
+	}
+
+	return append(phaseOneTimeline, phaseTwoTimeline...), outerPulloutReversalInfo{
+		OuterTrackID:   outerTrackID,
+		ReversalSlotID: pullPath[len(pullPath)-1],
+		Reason:         "internal-to-internal consist transfer must fully pull out to the station outer track before pushing into the target branch",
+	}, true
+}
+
+func simulatePullTimeline(
+	path []string,
+	initialState []string,
+	trainOrder []string,
+	slotByID map[string]Slot,
+	staticOccupied map[string]struct{},
+) ([][]Position, []string, bool) {
+	state := append([]string{}, initialState...)
+	timeline := make([][]Position, 0, len(path)-1)
+	for step := 1; step < len(path); step++ {
+		next := make([]string, len(state))
+		next[0] = path[step]
+		for i := 1; i < len(state); i++ {
+			next[i] = state[i-1]
+		}
+		stepPositions, ok := buildStepPositionsFromState(next, trainOrder, slotByID, staticOccupied)
+		if !ok {
+			return nil, nil, false
+		}
+		timeline = append(timeline, stepPositions)
+		state = next
+	}
+	return timeline, state, true
+}
+
+func simulatePushTimeline(
+	path []string,
+	drivingPath []string,
+	trainOrder []string,
+	slotByID map[string]Slot,
+	staticOccupied map[string]struct{},
+) ([][]Position, bool) {
+	timeline := make([][]Position, 0, len(path)-1)
+	for step := 1; step < len(path); step++ {
+		state := make([]string, len(trainOrder))
+		for i := 0; i < len(trainOrder); i++ {
+			idx := step + i
+			if idx >= len(drivingPath) {
+				return nil, false
+			}
+			state[i] = drivingPath[idx]
+		}
+		stepPositions, ok := buildStepPositionsFromState(state, trainOrder, slotByID, staticOccupied)
+		if !ok {
+			return nil, false
+		}
+		timeline = append(timeline, stepPositions)
+	}
+	return timeline, true
+}
+
+func buildStepPositionsFromState(
+	state []string,
+	trainOrder []string,
+	slotByID map[string]Slot,
+	staticOccupied map[string]struct{},
+) ([]Position, bool) {
+	if len(state) != len(trainOrder) {
+		return nil, false
+	}
+	used := make(map[string]struct{}, len(state))
+	stepPositions := make([]Position, 0, len(state))
+	for i, slotKey := range state {
+		slot, ok := slotByID[slotKey]
+		if !ok {
+			return nil, false
+		}
+		if _, blocked := staticOccupied[slotKey]; blocked {
+			return nil, false
+		}
+		if _, duplicated := used[slotKey]; duplicated {
+			return nil, false
+		}
+		used[slotKey] = struct{}{}
+		stepPositions = append(stepPositions, Position{
+			ID: trainOrder[i],
+			X:  slot.X,
+			Y:  slot.Y,
+		})
+	}
+	return stepPositions, true
+}
+
+func matchesPushPrefix(state []string, drivingPath []string) bool {
+	if len(drivingPath) < len(state) {
+		return false
+	}
+	for i := range state {
+		if state[i] != drivingPath[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func detectStationOrientation(segments []Segment, trackConnections []MovementTrackConnection) (stationOrientation, bool) {
+	connectedSides := map[string]map[string]int{}
+	for _, connection := range trackConnections {
+		if connectedSides[connection.Track1ID] == nil {
+			connectedSides[connection.Track1ID] = map[string]int{}
+		}
+		if connectedSides[connection.Track2ID] == nil {
+			connectedSides[connection.Track2ID] = map[string]int{}
+		}
+		connectedSides[connection.Track1ID][connection.Track1Side]++
+		connectedSides[connection.Track2ID][connection.Track2Side]++
+	}
+
+	type outerCandidate struct {
+		TrackID string
+		CenterX float64
+		ExternalSide string
+	}
+	candidates := make([]outerCandidate, 0, 2)
+	for _, segment := range segments {
+		startConnected := connectedSides[segment.ID]["start"]
+		endConnected := connectedSides[segment.ID]["end"]
+		if (startConnected == 0 && endConnected == 0) || (startConnected > 0 && endConnected > 0) {
+			continue
+		}
+		externalSide := "start"
+		if startConnected > 0 {
+			externalSide = "end"
+		}
+		candidates = append(candidates, outerCandidate{
+			TrackID: segment.ID,
+			CenterX: (segment.From.X + segment.To.X) / 2,
+			ExternalSide: externalSide,
+		})
+	}
+	if len(candidates) < 2 {
+		return stationOrientation{}, false
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].CenterX < candidates[j].CenterX
+	})
+	left := candidates[0]
+	right := candidates[len(candidates)-1]
+	return stationOrientation{
+		LeftOuterTrackID:  left.TrackID,
+		RightOuterTrackID: right.TrackID,
+		ExternalSideByTrack: map[string]string{
+			left.TrackID:  left.ExternalSide,
+			right.TrackID: right.ExternalSide,
+		},
+	}, true
+}
+
+func locomotiveAttachedTrackSide(
+	vehicles []Vehicle,
+	vehicleByID map[string]Vehicle,
+	trainOrder []string,
+	segments []Segment,
+) (string, bool) {
+	if len(trainOrder) < 2 {
+		return "", false
+	}
+	locomotive := vehicleByID[trainOrder[0]]
+	firstWagon := vehicleByID[trainOrder[1]]
+	if locomotive.PathID != firstWagon.PathID {
+		return "", false
+	}
+
+	attachedTrack := locomotive.PathID
+	attachedSide := "start"
+	if locomotive.PathIndex > firstWagon.PathIndex {
+		attachedSide = "end"
+	}
+	for _, segment := range segments {
+		if segment.ID != attachedTrack {
+			continue
+		}
+		switch attachedSide {
+		case "start":
+			if segment.From.X <= segment.To.X {
+				return "left", true
+			}
+			return "right", true
+		case "end":
+			if segment.To.X >= segment.From.X {
+				return "right", true
+			}
+			return "left", true
+		}
+	}
+	return "", false
+}
+
+func trackSideIndex(segments []Segment, gridSize float64, trackID, side string) (int, error) {
+	for _, segment := range segments {
+		if segment.ID != trackID {
+			continue
+		}
+		points := getSegmentSlots(segment, gridSize)
+		if len(points) == 0 {
+			return 0, fmt.Errorf("track %s has no slots", trackID)
+		}
+		switch side {
+		case "start":
+			return 0, nil
+		case "end":
+			return len(points) - 1, nil
+		default:
+			return 0, fmt.Errorf("unsupported side %q for track %s", side, trackID)
+		}
+	}
+	return 0, fmt.Errorf("track %s not found", trackID)
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func buildTrainOrder(locomotiveID string, vehicles []Vehicle, couplings []Coupling) ([]string, error) {
 	graph := make(map[string]map[string]struct{}, len(vehicles))
 	for _, v := range vehicles {
@@ -776,6 +1159,7 @@ type trackEdge struct {
 	NextID      string
 	CurrentSide string
 	NextSide    string
+	ConnectionType string
 }
 
 type trackRouteEdge struct {
@@ -783,6 +1167,7 @@ type trackRouteEdge struct {
 	ToTrackID   string
 	FromSide    string
 	ToSide      string
+	ConnectionType string
 }
 
 func dijkstraTrackPath(connections []MovementTrackConnection, startTrackID, goalTrackID string) ([]string, []trackRouteEdge) {
@@ -844,6 +1229,7 @@ func dijkstraTrackLoopPathWithGoalSideAvoidingTracks(
 				ToTrackID:   edge.NextID,
 				FromSide:    edge.CurrentSide,
 				ToSide:      edge.NextSide,
+				ConnectionType: edge.ConnectionType,
 			}},
 		})
 	}
@@ -867,6 +1253,7 @@ func dijkstraTrackLoopPathWithGoalSideAvoidingTracks(
 						ToTrackID:   startTrackID,
 						FromSide:    edge.CurrentSide,
 						ToSide:      edge.NextSide,
+						ConnectionType: edge.ConnectionType,
 					},
 				)
 			}
@@ -886,6 +1273,7 @@ func dijkstraTrackLoopPathWithGoalSideAvoidingTracks(
 				ToTrackID:   edge.NextID,
 				FromSide:    edge.CurrentSide,
 				ToSide:      edge.NextSide,
+				ConnectionType: edge.ConnectionType,
 			})
 			queue = append(queue, loopState{
 				TrackPath: nextTrackPath,
@@ -943,6 +1331,7 @@ func dijkstraTrackPathWithGoalSideAvoidingTracks(
 				ToTrackID:   edge.NextID,
 				FromSide:    edge.CurrentSide,
 				ToSide:      edge.NextSide,
+				ConnectionType: edge.ConnectionType,
 			}
 			queue = append(queue, edge.NextID)
 		}
@@ -978,11 +1367,13 @@ func buildTrackAdjacency(connections []MovementTrackConnection) map[string][]tra
 			NextID:      connection.Track2ID,
 			CurrentSide: connection.Track1Side,
 			NextSide:    connection.Track2Side,
+			ConnectionType: connection.ConnectionType,
 		})
 		adjacency[connection.Track2ID] = append(adjacency[connection.Track2ID], trackEdge{
 			NextID:      connection.Track1ID,
 			CurrentSide: connection.Track2Side,
 			NextSide:    connection.Track1Side,
+			ConnectionType: connection.ConnectionType,
 		})
 	}
 	return adjacency

@@ -647,3 +647,223 @@ func TestDijkstraTrackLoopPathWithGoalSideAvoidingTracks(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildMovementPlanPullsConsistOutToLeftOuterBeforeInternalTransfer(t *testing.T) {
+	req := PlanMovementRequest{
+		GridSize: 40,
+		Segments: []Segment{
+			{ID: "left-outer", From: Point{X: -160, Y: 0}, To: Point{X: 0, Y: 0}},
+			{ID: "left-upper-throat", From: Point{X: 0, Y: 0}, To: Point{X: 80, Y: 40}},
+			{ID: "left-lower-throat", From: Point{X: 0, Y: 0}, To: Point{X: 80, Y: -40}},
+			{ID: "internal-a", From: Point{X: 80, Y: 40}, To: Point{X: 240, Y: 40}},
+			{ID: "internal-b", From: Point{X: 80, Y: -40}, To: Point{X: 240, Y: -40}},
+			{ID: "right-upper-throat", From: Point{X: 240, Y: 40}, To: Point{X: 320, Y: 0}},
+			{ID: "right-lower-throat", From: Point{X: 240, Y: -40}, To: Point{X: 320, Y: 0}},
+			{ID: "right-outer", From: Point{X: 320, Y: 0}, To: Point{X: 480, Y: 0}},
+		},
+		TrackConnections: []MovementTrackConnection{
+			{Track1ID: "left-outer", Track2ID: "left-upper-throat", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+			{Track1ID: "left-outer", Track2ID: "left-lower-throat", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+			{Track1ID: "left-upper-throat", Track2ID: "internal-a", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{Track1ID: "left-lower-throat", Track2ID: "internal-b", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{Track1ID: "internal-a", Track2ID: "right-upper-throat", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{Track1ID: "internal-b", Track2ID: "right-lower-throat", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{Track1ID: "right-upper-throat", Track2ID: "right-outer", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+			{Track1ID: "right-lower-throat", Track2ID: "right-outer", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+		},
+		Vehicles: []Vehicle{
+			{ID: "l1", Type: "locomotive", Code: "l1", PathID: "internal-a", PathIndex: 0, X: 80, Y: 40},
+			{ID: "w1", Type: "wagon", Code: "w1", Color: "#f59e0b", PathID: "internal-a", PathIndex: 1, X: 120, Y: 40},
+		},
+		Couplings:            []Coupling{{ID: "c1", A: "l1", B: "w1"}},
+		SelectedLocomotiveID: "l1",
+		TargetPathID:         "internal-b",
+		TargetIndex:          1,
+	}
+
+	resp, err := buildMovementPlan(req)
+	if err != nil {
+		t.Fatalf("expected left outer pull-out movement, got error: %v", err)
+	}
+	if !resp.OK {
+		t.Fatal("expected OK=true")
+	}
+
+	foundLeftOuterExtreme := false
+	for _, step := range resp.Timeline {
+		if step[0].X == -160 && step[0].Y == 0 {
+			foundLeftOuterExtreme = true
+			break
+		}
+	}
+	if !foundLeftOuterExtreme {
+		t.Fatal("expected consist to fully pull out to the left outer path before internal transfer")
+	}
+}
+
+func TestBuildMovementPlanPullsConsistOutToRightOuterBeforeInternalTransfer(t *testing.T) {
+	req := PlanMovementRequest{
+		GridSize: 40,
+		Segments: []Segment{
+			{ID: "left-outer", From: Point{X: -160, Y: 0}, To: Point{X: 0, Y: 0}},
+			{ID: "left-upper-throat", From: Point{X: 0, Y: 0}, To: Point{X: 80, Y: 40}},
+			{ID: "left-lower-throat", From: Point{X: 0, Y: 0}, To: Point{X: 80, Y: -40}},
+			{ID: "internal-a", From: Point{X: 80, Y: 40}, To: Point{X: 240, Y: 40}},
+			{ID: "internal-b", From: Point{X: 80, Y: -40}, To: Point{X: 240, Y: -40}},
+			{ID: "right-upper-throat", From: Point{X: 240, Y: 40}, To: Point{X: 320, Y: 0}},
+			{ID: "right-lower-throat", From: Point{X: 240, Y: -40}, To: Point{X: 320, Y: 0}},
+			{ID: "right-outer", From: Point{X: 320, Y: 0}, To: Point{X: 480, Y: 0}},
+		},
+		TrackConnections: []MovementTrackConnection{
+			{Track1ID: "left-outer", Track2ID: "left-upper-throat", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+			{Track1ID: "left-outer", Track2ID: "left-lower-throat", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+			{Track1ID: "left-upper-throat", Track2ID: "internal-a", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{Track1ID: "left-lower-throat", Track2ID: "internal-b", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{Track1ID: "internal-a", Track2ID: "right-upper-throat", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{Track1ID: "internal-b", Track2ID: "right-lower-throat", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{Track1ID: "right-upper-throat", Track2ID: "right-outer", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+			{Track1ID: "right-lower-throat", Track2ID: "right-outer", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+		},
+		Vehicles: []Vehicle{
+			{ID: "w1", Type: "wagon", Code: "w1", Color: "#f59e0b", PathID: "internal-a", PathIndex: 2, X: 160, Y: 40},
+			{ID: "l1", Type: "locomotive", Code: "l1", PathID: "internal-a", PathIndex: 3, X: 200, Y: 40},
+		},
+		Couplings:            []Coupling{{ID: "c1", A: "l1", B: "w1"}},
+		SelectedLocomotiveID: "l1",
+		TargetPathID:         "internal-b",
+		TargetIndex:          1,
+	}
+
+	resp, err := buildMovementPlan(req)
+	if err != nil {
+		t.Fatalf("expected right outer pull-out movement, got error: %v", err)
+	}
+	if !resp.OK {
+		t.Fatal("expected OK=true")
+	}
+
+	foundRightOuterExtreme := false
+	for _, step := range resp.Timeline {
+		if step[0].X == 480 && step[0].Y == 0 {
+			foundRightOuterExtreme = true
+			break
+		}
+	}
+	if !foundRightOuterExtreme {
+		t.Fatal("expected consist to fully pull out to the right outer path before internal transfer")
+	}
+}
+
+func TestBuildMovementPlanUsesOuterOrientationIndependentlyOfTrackIDs(t *testing.T) {
+	req := PlanMovementRequest{
+		GridSize: 40,
+		Segments: []Segment{
+			{ID: "entry-west", From: Point{X: -160, Y: 0}, To: Point{X: 0, Y: 0}},
+			{ID: "fan-up", From: Point{X: 0, Y: 0}, To: Point{X: 80, Y: 60}},
+			{ID: "fan-mid", From: Point{X: 0, Y: 0}, To: Point{X: 80, Y: 0}},
+			{ID: "fan-down", From: Point{X: 0, Y: 0}, To: Point{X: 80, Y: -60}},
+			{ID: "alpha", From: Point{X: 80, Y: 60}, To: Point{X: 240, Y: 60}},
+			{ID: "beta", From: Point{X: 80, Y: 0}, To: Point{X: 240, Y: 0}},
+			{ID: "gamma", From: Point{X: 80, Y: -60}, To: Point{X: 240, Y: -60}},
+			{ID: "join-up", From: Point{X: 240, Y: 60}, To: Point{X: 320, Y: 0}},
+			{ID: "join-mid", From: Point{X: 240, Y: 0}, To: Point{X: 320, Y: 0}},
+			{ID: "join-down", From: Point{X: 240, Y: -60}, To: Point{X: 320, Y: 0}},
+			{ID: "exit-east", From: Point{X: 320, Y: 0}, To: Point{X: 480, Y: 0}},
+		},
+		TrackConnections: []MovementTrackConnection{
+			{Track1ID: "entry-west", Track2ID: "fan-up", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+			{Track1ID: "entry-west", Track2ID: "fan-mid", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+			{Track1ID: "entry-west", Track2ID: "fan-down", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+			{Track1ID: "fan-up", Track2ID: "alpha", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{Track1ID: "fan-mid", Track2ID: "beta", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{Track1ID: "fan-down", Track2ID: "gamma", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{Track1ID: "alpha", Track2ID: "join-up", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{Track1ID: "beta", Track2ID: "join-mid", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{Track1ID: "gamma", Track2ID: "join-down", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{Track1ID: "join-up", Track2ID: "exit-east", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+			{Track1ID: "join-mid", Track2ID: "exit-east", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+			{Track1ID: "join-down", Track2ID: "exit-east", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+		},
+		Vehicles: []Vehicle{
+			{ID: "l1", Type: "locomotive", Code: "l1", PathID: "beta", PathIndex: 0, X: 80, Y: 0},
+			{ID: "w1", Type: "wagon", Code: "w1", Color: "#f59e0b", PathID: "beta", PathIndex: 1, X: 120, Y: 0},
+		},
+		Couplings:            []Coupling{{ID: "c1", A: "l1", B: "w1"}},
+		SelectedLocomotiveID: "l1",
+		TargetPathID:         "gamma",
+		TargetIndex:          1,
+	}
+
+	resp, err := buildMovementPlan(req)
+	if err != nil {
+		t.Fatalf("expected orientation-based pull-out independent of ids, got error: %v", err)
+	}
+	if !resp.OK {
+		t.Fatal("expected OK=true")
+	}
+
+	foundLeftOuterExtreme := false
+	for _, step := range resp.Timeline {
+		if step[0].X == -160 && step[0].Y == 0 {
+			foundLeftOuterExtreme = true
+			break
+		}
+	}
+	if !foundLeftOuterExtreme {
+		t.Fatal("expected orientation detection to use the left outer path even with arbitrary track ids")
+	}
+}
+
+func TestBuildMovementPlanDoesNotTurnDirectlyBetweenInternalTracksBeforeOuterPullout(t *testing.T) {
+	req := PlanMovementRequest{
+		GridSize: 40,
+		Segments: []Segment{
+			{ID: "left-outer", From: Point{X: -160, Y: 0}, To: Point{X: 0, Y: 0}},
+			{ID: "left-upper-throat", From: Point{X: 0, Y: 0}, To: Point{X: 80, Y: 40}},
+			{ID: "left-lower-throat", From: Point{X: 0, Y: 0}, To: Point{X: 80, Y: -40}},
+			{ID: "internal-a", From: Point{X: 80, Y: 40}, To: Point{X: 240, Y: 40}},
+			{ID: "internal-b", From: Point{X: 80, Y: -40}, To: Point{X: 240, Y: -40}},
+			{ID: "right-upper-throat", From: Point{X: 240, Y: 40}, To: Point{X: 320, Y: 0}},
+			{ID: "right-lower-throat", From: Point{X: 240, Y: -40}, To: Point{X: 320, Y: 0}},
+			{ID: "right-outer", From: Point{X: 320, Y: 0}, To: Point{X: 480, Y: 0}},
+		},
+		TrackConnections: []MovementTrackConnection{
+			{Track1ID: "left-outer", Track2ID: "left-upper-throat", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+			{Track1ID: "left-outer", Track2ID: "left-lower-throat", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+			{Track1ID: "left-upper-throat", Track2ID: "internal-a", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{Track1ID: "left-lower-throat", Track2ID: "internal-b", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{Track1ID: "internal-a", Track2ID: "right-upper-throat", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{Track1ID: "internal-b", Track2ID: "right-lower-throat", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{Track1ID: "right-upper-throat", Track2ID: "right-outer", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+			{Track1ID: "right-lower-throat", Track2ID: "right-outer", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+		},
+		Vehicles: []Vehicle{
+			{ID: "l1", Type: "locomotive", Code: "l1", PathID: "internal-a", PathIndex: 0, X: 80, Y: 40},
+			{ID: "w1", Type: "wagon", Code: "w1", Color: "#f59e0b", PathID: "internal-a", PathIndex: 1, X: 120, Y: 40},
+		},
+		Couplings:            []Coupling{{ID: "c1", A: "l1", B: "w1"}},
+		SelectedLocomotiveID: "l1",
+		TargetPathID:         "internal-b",
+		TargetIndex:          1,
+	}
+
+	resp, err := buildMovementPlan(req)
+	if err != nil {
+		t.Fatalf("expected valid pull-out movement, got error: %v", err)
+	}
+	if !resp.OK {
+		t.Fatal("expected OK=true")
+	}
+
+	reachedOuterExtreme := false
+	for _, step := range resp.Timeline {
+		loco := step[0]
+		wagon := step[1]
+		if loco.X == -160 && loco.Y == 0 {
+			reachedOuterExtreme = true
+		}
+		if !reachedOuterExtreme && wagon.Y < 0 {
+			t.Fatalf("wagon entered target internal branch before full pull-out to outer path: loco=(%.2f,%.2f) wagon=(%.2f,%.2f)", loco.X, loco.Y, wagon.X, wagon.Y)
+		}
+	}
+}
