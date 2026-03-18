@@ -71,17 +71,20 @@ import (
 //   - TargetWagons не пуст
 //   - в схеме используется не более двух цветов вагонов
 type FixedClassProblem struct {
-	SchemeID        int
-	TargetColor     string
-	MainTrack       normalized.Track
-	BypassTrack     normalized.Track
-	SortingTracks   []normalized.Track
-	LeadTracks      []normalized.Track
-	FormationTrack  normalized.Track
-	BufferTrack     normalized.Track
-	TargetWagons    []normalized.Wagon
-	NonTargetWagons []normalized.Wagon
-	WagonsByTrack   map[string][]normalized.Wagon
+	SchemeID         int
+	TargetColor      string
+	Tracks           []normalized.Track
+	TracksByID       map[string]normalized.Track
+	TrackConnections []normalized.TrackConnection
+	MainTrack        normalized.Track
+	BypassTrack      normalized.Track
+	SortingTracks    []normalized.Track
+	LeadTracks       []normalized.Track
+	FormationTrack   normalized.Track
+	BufferTrack      normalized.Track
+	TargetWagons     []normalized.Wagon
+	NonTargetWagons  []normalized.Wagon
+	WagonsByTrack    map[string][]normalized.Wagon
 }
 
 // FixedClassFeasibility — явный результат проверки реализуемости задачи
@@ -235,7 +238,11 @@ func BuildFixedClassProblem(scheme normalized.Scheme, targetColor string, format
 	targetWagons := make([]normalized.Wagon, 0)
 	nonTargetWagons := make([]normalized.Wagon, 0)
 	wagonsByTrack := make(map[string][]normalized.Wagon)
+	tracksByID := make(map[string]normalized.Track, len(scheme.Tracks))
 	colors := map[string]struct{}{}
+	for _, track := range scheme.Tracks {
+		tracksByID[track.TrackID] = track
+	}
 	for _, wagon := range scheme.Wagons {
 		// Пустой цвет запрещён явно, потому что эвристика опирается
 		// на бинарное разделение target/non-target и не умеет
@@ -275,17 +282,20 @@ func BuildFixedClassProblem(scheme normalized.Scheme, targetColor string, format
 	}
 
 	return FixedClassProblem{
-		SchemeID:        scheme.SchemeID,
-		TargetColor:     targetColor,
-		MainTrack:       mainTrack,
-		BypassTrack:     bypassTrack,
-		SortingTracks:   append([]normalized.Track{}, sortingTracks...),
-		LeadTracks:      append([]normalized.Track{}, leadTracks...),
-		FormationTrack:  formationTrack,
-		BufferTrack:     bufferTrack,
-		TargetWagons:    append([]normalized.Wagon{}, targetWagons...),
-		NonTargetWagons: append([]normalized.Wagon{}, nonTargetWagons...),
-		WagonsByTrack:   wagonsByTrack,
+		SchemeID:         scheme.SchemeID,
+		TargetColor:      targetColor,
+		Tracks:           append([]normalized.Track{}, scheme.Tracks...),
+		TracksByID:       tracksByID,
+		TrackConnections: append([]normalized.TrackConnection{}, scheme.TrackConnections...),
+		MainTrack:        mainTrack,
+		BypassTrack:      bypassTrack,
+		SortingTracks:    append([]normalized.Track{}, sortingTracks...),
+		LeadTracks:       append([]normalized.Track{}, leadTracks...),
+		FormationTrack:   formationTrack,
+		BufferTrack:      bufferTrack,
+		TargetWagons:     append([]normalized.Wagon{}, targetWagons...),
+		NonTargetWagons:  append([]normalized.Wagon{}, nonTargetWagons...),
+		WagonsByTrack:    wagonsByTrack,
 	}, nil
 }
 
