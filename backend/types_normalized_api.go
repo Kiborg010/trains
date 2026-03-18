@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"trains/backend/normalized"
+	heuristicservice "trains/backend/services/heuristic"
 )
 
 type SchemeDTO struct {
@@ -419,4 +420,143 @@ func dtoToScenarioSteps(items []ScenarioStepDTO) []normalized.ScenarioStep {
 		result = append(result, dtoToScenarioStep(item))
 	}
 	return result
+}
+
+type GenerateDraftHeuristicScenarioRequest struct {
+	SchemeID            int    `json:"scheme_id"`
+	TargetColor         string `json:"target_color"`
+	RequiredTargetCount int    `json:"required_target_count"`
+	FormationTrackID    string `json:"formation_track_id,omitempty"`
+}
+
+type DraftHeuristicFeasibilityDTO struct {
+	ChosenFormationTrackID  string   `json:"chosen_formation_track_id"`
+	ChosenBufferTrackID     string   `json:"chosen_buffer_track_id"`
+	TargetCount             int      `json:"target_count"`
+	RequiredTargetCount     int      `json:"required_target_count"`
+	AvailableBufferCapacity int      `json:"available_buffer_capacity"`
+	Reasons                 []string `json:"reasons,omitempty"`
+}
+
+type DraftScenarioStepDTO struct {
+	StepOrder          int    `json:"step_order"`
+	StepType           string `json:"step_type"`
+	SourceTrackID      string `json:"source_track_id"`
+	DestinationTrackID string `json:"destination_track_id"`
+	SourceSide         string `json:"source_side,omitempty"`
+	WagonCount         int    `json:"wagon_count"`
+	TargetColor        string `json:"target_color"`
+	FormationTrackID   string `json:"formation_track_id"`
+	BufferTrackID      string `json:"buffer_track_id"`
+	MainTrackID        string `json:"main_track_id"`
+}
+
+type DraftScenarioDTO struct {
+	SchemeID            int                    `json:"scheme_id"`
+	TargetColor         string                 `json:"target_color"`
+	RequiredTargetCount int                    `json:"required_target_count"`
+	FormationTrackID    string                 `json:"formation_track_id"`
+	BufferTrackID       string                 `json:"buffer_track_id"`
+	MainTrackID         string                 `json:"main_track_id"`
+	Steps               []DraftScenarioStepDTO `json:"steps,omitempty"`
+}
+
+type DraftStepCostDTO struct {
+	CoupleCount      int      `json:"couple_count"`
+	DecoupleCount    int      `json:"decouple_count"`
+	LocoDistance     float64  `json:"loco_distance"`
+	SwitchCrossCount int      `json:"switch_cross_count"`
+	TotalCost        float64  `json:"total_cost"`
+	Feasible         bool     `json:"feasible"`
+	Reasons          []string `json:"reasons,omitempty"`
+}
+
+type DraftScenarioMetricsDTO struct {
+	TotalStepCount        int     `json:"total_step_count"`
+	TotalCoupleCount      int     `json:"total_couple_count"`
+	TotalDecoupleCount    int     `json:"total_decouple_count"`
+	TotalLocoDistance     float64 `json:"total_loco_distance"`
+	TotalSwitchCrossCount int     `json:"total_switch_cross_count"`
+	TotalCost             float64 `json:"total_cost"`
+	Success               bool    `json:"success"`
+}
+
+type DraftHeuristicScenarioResponse struct {
+	OK            bool                          `json:"ok"`
+	Message       string                        `json:"message,omitempty"`
+	Feasible      bool                          `json:"feasible"`
+	Reasons       []string                      `json:"reasons,omitempty"`
+	Feasibility   *DraftHeuristicFeasibilityDTO `json:"feasibility,omitempty"`
+	DraftScenario *DraftScenarioDTO             `json:"draft_scenario,omitempty"`
+	Metrics       *DraftScenarioMetricsDTO      `json:"metrics,omitempty"`
+}
+
+func toDraftHeuristicFeasibilityDTO(item heuristicservice.FixedClassFeasibility) *DraftHeuristicFeasibilityDTO {
+	return &DraftHeuristicFeasibilityDTO{
+		ChosenFormationTrackID:  item.ChosenFormationTrackID,
+		ChosenBufferTrackID:     item.ChosenBufferTrackID,
+		TargetCount:             item.TargetCount,
+		RequiredTargetCount:     item.RequiredTargetCount,
+		AvailableBufferCapacity: item.AvailableBufferCapacity,
+		Reasons:                 append([]string{}, item.Reasons...),
+	}
+}
+
+func toDraftScenarioDTO(item heuristicservice.DraftScenario) DraftScenarioDTO {
+	return DraftScenarioDTO{
+		SchemeID:            item.SchemeID,
+		TargetColor:         item.TargetColor,
+		RequiredTargetCount: item.RequiredTargetCount,
+		FormationTrackID:    item.FormationTrackID,
+		BufferTrackID:       item.BufferTrackID,
+		MainTrackID:         item.MainTrackID,
+		Steps:               toDraftScenarioStepDTOs(item.Steps),
+	}
+}
+
+func toDraftScenarioStepDTO(item heuristicservice.DraftScenarioStep) DraftScenarioStepDTO {
+	return DraftScenarioStepDTO{
+		StepOrder:          item.StepOrder,
+		StepType:           string(item.StepType),
+		SourceTrackID:      item.SourceTrackID,
+		DestinationTrackID: item.DestinationTrackID,
+		SourceSide:         item.SourceSide,
+		WagonCount:         item.WagonCount,
+		TargetColor:        item.TargetColor,
+		FormationTrackID:   item.FormationTrackID,
+		BufferTrackID:      item.BufferTrackID,
+		MainTrackID:        item.MainTrackID,
+	}
+}
+
+func toDraftScenarioStepDTOs(items []heuristicservice.DraftScenarioStep) []DraftScenarioStepDTO {
+	result := make([]DraftScenarioStepDTO, 0, len(items))
+	for _, item := range items {
+		result = append(result, toDraftScenarioStepDTO(item))
+	}
+	return result
+}
+
+func toDraftStepCostDTO(item heuristicservice.DraftStepCost) DraftStepCostDTO {
+	return DraftStepCostDTO{
+		CoupleCount:      item.CoupleCount,
+		DecoupleCount:    item.DecoupleCount,
+		LocoDistance:     item.LocoDistance,
+		SwitchCrossCount: item.SwitchCrossCount,
+		TotalCost:        item.TotalCost,
+		Feasible:         item.Feasible,
+		Reasons:          append([]string{}, item.Reasons...),
+	}
+}
+
+func toDraftScenarioMetricsDTO(item heuristicservice.DraftScenarioMetrics) DraftScenarioMetricsDTO {
+	return DraftScenarioMetricsDTO{
+		TotalStepCount:        item.TotalStepCount,
+		TotalCoupleCount:      item.TotalCoupleCount,
+		TotalDecoupleCount:    item.TotalDecoupleCount,
+		TotalLocoDistance:     item.TotalLocoDistance,
+		TotalSwitchCrossCount: item.TotalSwitchCrossCount,
+		TotalCost:             item.TotalCost,
+		Success:               item.Success,
+	}
 }

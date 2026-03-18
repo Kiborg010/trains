@@ -49,6 +49,7 @@ func main() {
 	mux.Handle("/api/executions/", authMiddleware(http.HandlerFunc(executionByIDHandler)))
 	mux.Handle("/api/normalized/schemes", authMiddleware(http.HandlerFunc(normalizedSchemesHandler)))
 	mux.Handle("/api/normalized/schemes/", authMiddleware(http.HandlerFunc(normalizedSchemeByIDHandler)))
+	mux.Handle("/api/normalized/heuristic/generate", authMiddleware(http.HandlerFunc(normalizedHeuristicGenerateHandler)))
 	mux.Handle("/api/normalized/scenarios", authMiddleware(http.HandlerFunc(normalizedScenariosHandler)))
 	mux.Handle("/api/normalized/scenarios/", authMiddleware(http.HandlerFunc(normalizedScenarioByIDHandler)))
 
