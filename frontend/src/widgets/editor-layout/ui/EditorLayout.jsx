@@ -530,6 +530,119 @@ function buildTrackConnectionsFromSegments(segments) {
   return connections;
 }
 
+function endpointRefKey(segmentId, side) {
+  return `${segmentId}:${side}`;
+}
+
+function getSegmentSlotsWithEndpointOverrides(segment, endpointOverrides) {
+  const startOverride = endpointOverrides.get(endpointRefKey(segment.id, "start"));
+  const endOverride = endpointOverrides.get(endpointRefKey(segment.id, "end"));
+  if (!startOverride && !endOverride) {
+    return getSegmentSlots(segment, GRID_SIZE);
+  }
+  return getSegmentSlots(
+    {
+      ...segment,
+      from: startOverride || segment.from,
+      to: endOverride || segment.to,
+    },
+    GRID_SIZE
+  );
+}
+
+function buildSharedEndpointModel(segments) {
+  const connections = buildTrackConnectionsFromSegments(segments);
+  const parent = new Map();
+  const endpointPoints = new Map();
+
+  const addEndpoint = (segmentId, side, point) => {
+    const key = endpointRefKey(segmentId, side);
+    if (!parent.has(key)) {
+      parent.set(key, key);
+    }
+    if (point) {
+      endpointPoints.set(key, point);
+    }
+  };
+
+  for (const segment of segments) {
+    addEndpoint(segment.id, "start", segment.from);
+    addEndpoint(segment.id, "end", segment.to);
+  }
+
+  const find = (key) => {
+    const root = parent.get(key);
+    if (!root || root === key) {
+      return key;
+    }
+    const compressed = find(root);
+    parent.set(key, compressed);
+    return compressed;
+  };
+
+  const union = (a, b) => {
+    const rootA = find(a);
+    const rootB = find(b);
+    if (rootA !== rootB) {
+      parent.set(rootB, rootA);
+    }
+  };
+
+  for (const connection of connections) {
+    const a = endpointRefKey(connection.track1_id, connection.track1_side);
+    const b = endpointRefKey(connection.track2_id, connection.track2_side);
+    if (parent.has(a) && parent.has(b)) {
+      union(a, b);
+    }
+  }
+
+  const groupedRefs = new Map();
+  for (const key of parent.keys()) {
+    const root = find(key);
+    const list = groupedRefs.get(root) || [];
+    list.push(key);
+    groupedRefs.set(root, list);
+  }
+
+  const endpointOverrides = new Map();
+  const nodes = [];
+  for (const refs of groupedRefs.values()) {
+    let sumX = 0;
+    let sumY = 0;
+    let count = 0;
+    const endpoints = [];
+
+    for (const ref of refs) {
+      const point = endpointPoints.get(ref);
+      if (!point) {
+        continue;
+      }
+      const [segmentId, endpoint] = ref.split(":");
+      sumX += point.x;
+      sumY += point.y;
+      count += 1;
+      endpoints.push({ segmentId, endpoint });
+    }
+
+    if (!count) {
+      continue;
+    }
+
+    const sharedPoint = { x: sumX / count, y: sumY / count };
+    for (const ref of refs) {
+      endpointOverrides.set(ref, sharedPoint);
+    }
+
+    nodes.push({
+      x: sharedPoint.x,
+      y: sharedPoint.y,
+      endpoints,
+    });
+  }
+
+  return { endpointOverrides, nodes };
+}
+
 function normalizeEditorLayoutForSave(
   segments,
   vehicles,
@@ -934,26 +1047,20 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       : "";
   }, [segments, selectedSegmentIds, selectedSegmentSet]);
 
-  const nodes = useMemo(() => {
-    const map = new Map();
-    for (const segment of segments) {
-      map.set(keyOf(segment.from.x, segment.from.y), segment.from);
-      map.set(keyOf(segment.to.x, segment.to.y), segment.to);
-    }
-    return [...map.values()];
-  }, [segments]);
+  const sharedEndpointModel = useMemo(() => buildSharedEndpointModel(segments), [segments]);
+  const nodes = useMemo(() => sharedEndpointModel.nodes, [sharedEndpointModel]);
 
   const railSlots = useMemo(() => {
     const map = new Map();
     for (const segment of segments) {
-      const points = getSegmentSlots(segment, GRID_SIZE);
+      const points = getSegmentSlotsWithEndpointOverrides(segment, sharedEndpointModel.endpointOverrides);
       points.forEach((point, index) => {
         const id = `${segment.id}:${index}`;
         map.set(id, { id, pathId: segment.id, index, x: point.x, y: point.y });
       });
     }
     return [...map.values()];
-  }, [segments]);
+  }, [segments, sharedEndpointModel]);
 
   const occupiedSlots = useMemo(
     () =>
@@ -2749,24 +2856,41 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       return;
     }
     event.stopPropagation();
-    const nodeKey = keyOf(node.x, node.y);
-    const affectedEndpoints = [];
-    const affectedIds = [];
-
-    for (const segment of segments) {
-      if (keyOf(segment.from.x, segment.from.y) === nodeKey) {
-        affectedEndpoints.push({ segmentId: segment.id, endpoint: "from" });
-        affectedIds.push(segment.id);
-      }
-      if (keyOf(segment.to.x, segment.to.y) === nodeKey) {
-        affectedEndpoints.push({ segmentId: segment.id, endpoint: "to" });
-        affectedIds.push(segment.id);
-      }
-    }
+    const affectedEndpoints = (node.endpoints || []).map((item) => ({
+      segmentId: item.segmentId,
+      endpoint: item.endpoint === "start" ? "from" : "to",
+    }));
+    const affectedIds = affectedEndpoints.map((item) => item.segmentId);
 
     setSelectedSegmentIds([...new Set(affectedIds)]);
     setDragState({ type: "node", affectedEndpoints });
     setSelectionBox(null);
+  }
+
+  function handleNodeClick(event, node) {
+    if (isMoving) {
+      return;
+    }
+    if (!isMoveMode) {
+      return;
+    }
+    event.stopPropagation();
+    const preferred = (node.endpoints || [])[0];
+    if (!preferred) {
+      return;
+    }
+    const segment = segments.find((item) => item.id === preferred.segmentId);
+    if (!segment) {
+      return;
+    }
+    const points = getSegmentSlotsWithEndpointOverrides(segment, sharedEndpointModel.endpointOverrides);
+    if (!points.length) {
+      return;
+    }
+    const targetIndex = preferred.endpoint === "start" ? 0 : points.length - 1;
+    setTargetPathId(segment.id);
+    setTargetPathIndex(targetIndex);
+    setMovementHint(`Цель: ${formatPathReference(segment.id, targetIndex, segmentDisplayNameById)}`);
   }
 
   async function handleSlotClick(event, slot) {
@@ -3859,19 +3983,46 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
               );
             })}
 
-            {nodes.map((node) => (
-              <circle
-                key={keyOf(node.x, node.y)}
-                cx={node.x}
-                cy={node.y}
-                r={isEditMode ? 7 : 4}
-                fill={isEditMode ? "#60a5fa" : "#0f172a"}
-                stroke={isEditMode ? "#1e3a8a" : "none"}
-                strokeWidth={isEditMode ? "2" : "0"}
-                className={isEditMode ? "draggablePoint" : ""}
-                onMouseDown={(event) => startNodeDrag(event, node)}
-              />
-            ))}
+            {nodes.map((node) => {
+              const nodeKey = `${keyOf(node.x, node.y)}:${(node.endpoints || []).map((item) => `${item.segmentId}:${item.endpoint}`).join("|")}`;
+
+              if (isEditMode) {
+                return (
+                  <circle
+                    key={nodeKey}
+                    cx={node.x}
+                    cy={node.y}
+                    r="7"
+                    fill="#60a5fa"
+                    stroke="#1e3a8a"
+                    strokeWidth="2"
+                    className="draggablePoint"
+                    onMouseDown={(event) => startNodeDrag(event, node)}
+                    onClick={(event) => handleNodeClick(event, node)}
+                  />
+                );
+              }
+
+              return (
+                <g key={nodeKey}>
+                  <circle
+                    cx={node.x}
+                    cy={node.y}
+                    r="8"
+                    fill="transparent"
+                    className="slotPoint"
+                    onClick={(event) => handleNodeClick(event, node)}
+                  />
+                  <circle
+                    cx={node.x}
+                    cy={node.y}
+                    r="4.5"
+                    fill="#cbd5e1"
+                    pointerEvents="none"
+                  />
+                </g>
+              );
+            })}
 
             {mode === "drawTrack" && startPoint && (
               <line

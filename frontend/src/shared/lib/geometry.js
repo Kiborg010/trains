@@ -18,25 +18,20 @@ export function getSegmentSlots(segment, step = GRID_SIZE) {
     return [{ x: from.x, y: from.y }];
   }
 
-  const count = Math.floor(length / step);
+  const count = Math.max(1, Math.round(length / step));
   const ux = dx / length;
   const uy = dy / length;
+  const actualStep = length / count;
   const slots = [];
 
   for (let i = 0; i <= count; i += 1) {
+    const distance = actualStep * i;
     slots.push({
-      x: from.x + ux * step * i,
-      y: from.y + uy * step * i,
+      x: from.x + ux * distance,
+      y: from.y + uy * distance,
     });
   }
-
-  const last = slots[slots.length - 1];
-  const isLastNearEnd =
-    last && Math.hypot(last.x - to.x, last.y - to.y) < step * 0.25;
-
-  if (!isLastNearEnd) {
-    slots.push({ x: to.x, y: to.y });
-  }
+  slots[slots.length - 1] = { x: to.x, y: to.y };
 
   return slots;
 }

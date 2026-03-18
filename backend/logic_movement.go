@@ -21,7 +21,12 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 		return fail("Select target path.")
 	}
 
-	pathSlots := collectPathSlots(req.Segments, req.GridSize)
+	trackConnections := req.TrackConnections
+	if len(trackConnections) == 0 {
+		trackConnections = buildTrackConnectionsFromSegments(req.Segments)
+	}
+
+	pathSlots := collectPathSlotsWithConnections(req.Segments, req.GridSize, trackConnections)
 	if len(pathSlots) == 0 {
 		return fail("No rail slots available.")
 	}
@@ -69,17 +74,13 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 		return fail("Selected unit is not a locomotive.")
 	}
 
-	slots := collectRailSlots(req.Segments, req.GridSize)
+	slots := collectRailSlotsWithConnections(req.Segments, req.GridSize, trackConnections)
 	slotByID := make(map[string]Slot, len(slots))
 	for _, s := range slots {
 		slotByID[s.ID] = s
 	}
 
-	slotAdj := buildSlotAdjacency(req.Segments, req.GridSize)
-	trackConnections := req.TrackConnections
-	if len(trackConnections) == 0 {
-		trackConnections = buildTrackConnectionsFromSegments(req.Segments)
-	}
+	slotAdj := buildSlotAdjacencyWithConnections(req.Segments, req.GridSize, trackConnections)
 	trainOrder, err := buildTrainOrder(req.SelectedLocomotiveID, normalizedVehicles, req.Couplings)
 	if err != nil {
 		return fail(err.Error())
@@ -205,6 +206,7 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 
 	path, routeSlotByID, pathErr := buildSlotPathFromTrackRoute(
 		req.Segments,
+		trackConnections,
 		locomotive.PathID,
 		locomotive.PathIndex,
 		req.TargetPathID,
@@ -423,6 +425,7 @@ func chooseSingleLocomotiveRouteAndTarget(
 		tryAppendCandidate := func(candidateTrackPath []string, candidateTrackRoute []trackRouteEdge, candidateIndex int, candidateReason string) bool {
 			path, _, err := buildSlotPathFromTrackRoute(
 				segments,
+				trackConnections,
 				locomotive.PathID,
 				locomotive.PathIndex,
 				targetTrackID,
@@ -702,8 +705,8 @@ type outerPulloutReversalInfo struct {
 }
 
 type stationOrientation struct {
-	LeftOuterTrackID  string
-	RightOuterTrackID string
+	LeftOuterTrackID    string
+	RightOuterTrackID   string
 	ExternalSideByTrack map[string]string
 }
 
@@ -767,6 +770,7 @@ func tryBuildOuterPulloutTimeline(
 	}
 	pullPath, pullSlots, err := buildSlotPathFromTrackRoute(
 		segments,
+		trackConnections,
 		locomotive.PathID,
 		locomotive.PathIndex,
 		outerTrackID,
@@ -793,6 +797,7 @@ func tryBuildOuterPulloutTimeline(
 	}
 	pushPath, pushSlots, err := buildSlotPathFromTrackRoute(
 		segments,
+		trackConnections,
 		outerTrackID,
 		outerTargetIndex,
 		targetTrackID,
@@ -936,8 +941,8 @@ func detectStationOrientation(segments []Segment, trackConnections []MovementTra
 	}
 
 	type outerCandidate struct {
-		TrackID string
-		CenterX float64
+		TrackID      string
+		CenterX      float64
 		ExternalSide string
 	}
 	candidates := make([]outerCandidate, 0, 2)
@@ -952,8 +957,8 @@ func detectStationOrientation(segments []Segment, trackConnections []MovementTra
 			externalSide = "end"
 		}
 		candidates = append(candidates, outerCandidate{
-			TrackID: segment.ID,
-			CenterX: (segment.From.X + segment.To.X) / 2,
+			TrackID:      segment.ID,
+			CenterX:      (segment.From.X + segment.To.X) / 2,
 			ExternalSide: externalSide,
 		})
 	}
@@ -1152,17 +1157,17 @@ func buildTrainOrder(locomotiveID string, vehicles []Vehicle, couplings []Coupli
 }
 
 type trackEdge struct {
-	NextID      string
-	CurrentSide string
-	NextSide    string
+	NextID         string
+	CurrentSide    string
+	NextSide       string
 	ConnectionType string
 }
 
 type trackRouteEdge struct {
-	FromTrackID string
-	ToTrackID   string
-	FromSide    string
-	ToSide      string
+	FromTrackID    string
+	ToTrackID      string
+	FromSide       string
+	ToSide         string
 	ConnectionType string
 }
 
@@ -1221,10 +1226,10 @@ func dijkstraTrackLoopPathWithGoalSideAvoidingTracks(
 		queue = append(queue, loopState{
 			TrackPath: []string{startTrackID, edge.NextID},
 			Route: []trackRouteEdge{{
-				FromTrackID: startTrackID,
-				ToTrackID:   edge.NextID,
-				FromSide:    edge.CurrentSide,
-				ToSide:      edge.NextSide,
+				FromTrackID:    startTrackID,
+				ToTrackID:      edge.NextID,
+				FromSide:       edge.CurrentSide,
+				ToSide:         edge.NextSide,
 				ConnectionType: edge.ConnectionType,
 			}},
 		})
@@ -1245,10 +1250,10 @@ func dijkstraTrackLoopPathWithGoalSideAvoidingTracks(
 				return append(append([]string{}, state.TrackPath...), startTrackID), append(
 					append([]trackRouteEdge{}, state.Route...),
 					trackRouteEdge{
-						FromTrackID: cur,
-						ToTrackID:   startTrackID,
-						FromSide:    edge.CurrentSide,
-						ToSide:      edge.NextSide,
+						FromTrackID:    cur,
+						ToTrackID:      startTrackID,
+						FromSide:       edge.CurrentSide,
+						ToSide:         edge.NextSide,
 						ConnectionType: edge.ConnectionType,
 					},
 				)
@@ -1265,10 +1270,10 @@ func dijkstraTrackLoopPathWithGoalSideAvoidingTracks(
 			nextTrackPath = append(nextTrackPath, edge.NextID)
 			nextRoute := append([]trackRouteEdge{}, state.Route...)
 			nextRoute = append(nextRoute, trackRouteEdge{
-				FromTrackID: cur,
-				ToTrackID:   edge.NextID,
-				FromSide:    edge.CurrentSide,
-				ToSide:      edge.NextSide,
+				FromTrackID:    cur,
+				ToTrackID:      edge.NextID,
+				FromSide:       edge.CurrentSide,
+				ToSide:         edge.NextSide,
 				ConnectionType: edge.ConnectionType,
 			})
 			queue = append(queue, loopState{
@@ -1323,10 +1328,10 @@ func dijkstraTrackPathWithGoalSideAvoidingTracks(
 			visited[edge.NextID] = struct{}{}
 			prevTrack[edge.NextID] = cur
 			prevEdge[edge.NextID] = trackRouteEdge{
-				FromTrackID: cur,
-				ToTrackID:   edge.NextID,
-				FromSide:    edge.CurrentSide,
-				ToSide:      edge.NextSide,
+				FromTrackID:    cur,
+				ToTrackID:      edge.NextID,
+				FromSide:       edge.CurrentSide,
+				ToSide:         edge.NextSide,
 				ConnectionType: edge.ConnectionType,
 			}
 			queue = append(queue, edge.NextID)
@@ -1360,15 +1365,15 @@ func buildTrackAdjacency(connections []MovementTrackConnection) map[string][]tra
 	adjacency := map[string][]trackEdge{}
 	for _, connection := range connections {
 		adjacency[connection.Track1ID] = append(adjacency[connection.Track1ID], trackEdge{
-			NextID:      connection.Track2ID,
-			CurrentSide: connection.Track1Side,
-			NextSide:    connection.Track2Side,
+			NextID:         connection.Track2ID,
+			CurrentSide:    connection.Track1Side,
+			NextSide:       connection.Track2Side,
 			ConnectionType: connection.ConnectionType,
 		})
 		adjacency[connection.Track2ID] = append(adjacency[connection.Track2ID], trackEdge{
-			NextID:      connection.Track1ID,
-			CurrentSide: connection.Track2Side,
-			NextSide:    connection.Track1Side,
+			NextID:         connection.Track1ID,
+			CurrentSide:    connection.Track2Side,
+			NextSide:       connection.Track1Side,
 			ConnectionType: connection.ConnectionType,
 		})
 	}
@@ -1377,6 +1382,7 @@ func buildTrackAdjacency(connections []MovementTrackConnection) map[string][]tra
 
 func buildSlotPathFromTrackRoute(
 	segments []Segment,
+	trackConnections []MovementTrackConnection,
 	startTrackID string,
 	startIndex int,
 	targetTrackID string,
@@ -1390,8 +1396,9 @@ func buildSlotPathFromTrackRoute(
 	}
 
 	slotsByTrack := map[string][]Point{}
+	endpointOverrides := buildSharedEndpointOverrideMap(segments, trackConnections)
 	for _, segment := range segments {
-		slotsByTrack[segment.ID] = getSegmentSlots(segment, gridSize)
+		slotsByTrack[segment.ID] = getSegmentSlotsWithEndpointOverrides(segment, gridSize, endpointOverrides)
 	}
 
 	slotByID := map[string]Slot{}

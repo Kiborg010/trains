@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"strings"
 	"testing"
 )
@@ -346,8 +347,8 @@ func TestBuildMovementPlanAvoidsOccupiedParallelBranchToFreeBranchTarget(t *test
 	if len(lastStep) != 1 {
 		t.Fatalf("expected one locomotive position, got %d", len(lastStep))
 	}
-	if lastStep[0].X != 108.2842712474619 || lastStep[0].Y != 51.7157287525381 {
-		t.Fatalf("expected target slot on track 5 at (108.28,51.72), got (%.2f,%.2f)", lastStep[0].X, lastStep[0].Y)
+	if math.Abs(lastStep[0].X-106.66666666666667) > 1e-9 || math.Abs(lastStep[0].Y-53.333333333333336) > 1e-9 {
+		t.Fatalf("expected target slot on track 5 at (106.67,53.33), got (%.2f,%.2f)", lastStep[0].X, lastStep[0].Y)
 	}
 }
 
