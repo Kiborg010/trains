@@ -256,6 +256,28 @@ function formatPathReference(pathId, pathIndex, pathNameById) {
   return `${getPathDisplayName(pathId, pathNameById)}:${pathIndex}`;
 }
 
+function formatHeuristicDraftStepText(step) {
+  const count = Number(step?.wagon_count || 0);
+  const sourceTrackId = String(step?.source_track_id || step?.source_track_id || step?.sourceTrackID || "").trim();
+  const destinationTrackId = String(
+    step?.destination_track_id || step?.destinationTrackID || ""
+  ).trim();
+  const sourceSide = String(step?.source_side || step?.sourceSide || "").trim();
+  const type = String(step?.step_type || step?.stepType || "").trim();
+
+  if (type === "buffer_blockers") {
+    return `Перенести ${count} блокирующих вагонов с пути ${sourceTrackId} в буферный путь ${destinationTrackId}`;
+  }
+  if (type === "transfer_targets_to_formation") {
+    const sideText = sourceSide ? ` (со стороны ${sourceSide})` : "";
+    return `Перенести ${count} целевых вагонов с пути ${sourceTrackId}${sideText} на путь формирования ${destinationTrackId}`;
+  }
+  if (type === "transfer_formation_to_main") {
+    return `Перевести сформированный состав с пути ${sourceTrackId} на главный путь ${destinationTrackId}`;
+  }
+  return `${type}: ${sourceTrackId} -> ${destinationTrackId}`;
+}
+
 function extractTrackOrdinalCandidate(pathId) {
   const raw = String(pathId || "").trim();
   if (!raw) {
@@ -3150,6 +3172,42 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                   Open Saved Heuristic Draft
                 </button>
                 <p className="counter">saved id: {lastSavedHeuristicScenarioId || "-"}</p>
+                {savedHeuristicScenarios.length > 0 ? (
+                  <div className="scenarioSteps">
+                    {savedHeuristicScenarios.map((item) => (
+                      <div
+                        key={`heuristic-card-${item.heuristic_scenario_id}`}
+                        className="scenarioStepRow"
+                        style={{
+                          display: "block",
+                          border: "1px solid #cbd5e1",
+                          borderRadius: 8,
+                          padding: 8,
+                          background:
+                            selectedHeuristicScenarioId === String(item.heuristic_scenario_id)
+                              ? "#dbeafe"
+                              : "#ffffff",
+                        }}
+                      >
+                        <div className="scenarioStepText">
+                          <strong>{item.name || `Heuristic Draft ${item.heuristic_scenario_id}`}</strong>
+                        </div>
+                        <div className="counter">id: {item.heuristic_scenario_id}</div>
+                        <div className="counter">target_color: {item.target_color}</div>
+                        <div className="counter">required_target_count: {item.required_target_count}</div>
+                        <div className="counter">formation_track_id: {item.formation_track_id}</div>
+                        <div className="counter">buffer_track_id: {item.buffer_track_id}</div>
+                        <div className="counter">feasible: {item.feasible ? "true" : "false"}</div>
+                        <div className="counter">
+                          metrics.total_cost: {item.metrics?.total_cost ?? "-"}
+                        </div>
+                        <div className="counter">
+                          metrics.success: {item.metrics == null ? "-" : item.metrics.success ? "true" : "false"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
                 <p className="counter">
                   feasible:{" "}
                   {heuristicDraftResult == null
@@ -3168,31 +3226,126 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                     ))}
                   </div>
                 ) : null}
-                {heuristicDraftResult ? (
-                  <pre
+                {heuristicDraftResult?.draft_scenario ? (
+                  <div
+                    className="scenarioSteps"
                     style={{
-                      margin: 0,
-                      padding: 10,
-                      overflowX: "auto",
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-word",
+                      border: "1px solid #cbd5e1",
                       borderRadius: 8,
-                      background: "#e2e8f0",
-                      color: "#0f172a",
-                      fontSize: 12,
+                      padding: 8,
+                      background: "#ffffff",
                     }}
                   >
-                    {JSON.stringify(
-                      {
-                        feasible: heuristicDraftResult.feasible,
-                        reasons: heuristicDraftResult.reasons || [],
-                        draft_scenario: heuristicDraftResult.draft_scenario || null,
-                        metrics: heuristicDraftResult.metrics || null,
-                      },
-                      null,
-                      2
+                    <div className="scenarioStepRow">
+                      <span className="scenarioStepText">Сводка heuristic draft</span>
+                    </div>
+                    <p className="counter">
+                      name: {heuristicDraftResult.draft_scenario.name || "-"}
+                    </p>
+                    <p className="counter">
+                      id: {heuristicDraftResult.draft_scenario.heuristic_scenario_id || "-"}
+                    </p>
+                    <p className="counter">
+                      scheme_id: {heuristicDraftResult.draft_scenario.scheme_id}
+                    </p>
+                    <p className="counter">
+                      target_color: {heuristicDraftResult.draft_scenario.target_color}
+                    </p>
+                    <p className="counter">
+                      required_target_count: {heuristicDraftResult.draft_scenario.required_target_count}
+                    </p>
+                    <p className="counter">
+                      formation_track_id: {heuristicDraftResult.draft_scenario.formation_track_id}
+                    </p>
+                    <p className="counter">
+                      buffer_track_id: {heuristicDraftResult.draft_scenario.buffer_track_id}
+                    </p>
+                    <p className="counter">
+                      main_track_id: {heuristicDraftResult.draft_scenario.main_track_id}
+                    </p>
+                    <p className="counter">
+                      feasible: {heuristicDraftResult.feasible ? "true" : "false"}
+                    </p>
+                    {heuristicDraftResult.metrics ? (
+                      <>
+                        <div className="scenarioStepRow">
+                          <span className="scenarioStepText">Метрики</span>
+                        </div>
+                        <p className="counter">
+                          total_step_count: {heuristicDraftResult.metrics.total_step_count}
+                        </p>
+                        <p className="counter">
+                          total_couple_count: {heuristicDraftResult.metrics.total_couple_count}
+                        </p>
+                        <p className="counter">
+                          total_decouple_count: {heuristicDraftResult.metrics.total_decouple_count}
+                        </p>
+                        <p className="counter">
+                          total_loco_distance: {heuristicDraftResult.metrics.total_loco_distance}
+                        </p>
+                        <p className="counter">
+                          total_switch_cross_count: {heuristicDraftResult.metrics.total_switch_cross_count}
+                        </p>
+                        <p className="counter">
+                          total_cost: {heuristicDraftResult.metrics.total_cost}
+                        </p>
+                        <p className="counter">
+                          success: {heuristicDraftResult.metrics.success ? "true" : "false"}
+                        </p>
+                      </>
+                    ) : null}
+                    <div className="scenarioStepRow">
+                      <span className="scenarioStepText">Шаги</span>
+                    </div>
+                    {Array.isArray(heuristicDraftResult.draft_scenario.steps) &&
+                    heuristicDraftResult.draft_scenario.steps.length > 0 ? (
+                      <div className="scenarioSteps">
+                        {heuristicDraftResult.draft_scenario.steps.map((step, index) => (
+                          <div
+                            key={`heuristic-step-${step.step_order ?? index}`}
+                            className="scenarioStepRow"
+                          >
+                            <span className="scenarioStepText">
+                              {index + 1}. {formatHeuristicDraftStepText(step)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="counter">Шагов нет.</p>
                     )}
-                  </pre>
+                  </div>
+                ) : null}
+                {heuristicDraftResult ? (
+                  <div className="scenarioSteps">
+                    <div className="scenarioStepRow">
+                      <span className="scenarioStepText">Raw JSON Debug</span>
+                    </div>
+                    <pre
+                      style={{
+                        margin: 0,
+                        padding: 10,
+                        overflowX: "auto",
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                        borderRadius: 8,
+                        background: "#e2e8f0",
+                        color: "#0f172a",
+                        fontSize: 12,
+                      }}
+                    >
+                      {JSON.stringify(
+                        {
+                          feasible: heuristicDraftResult.feasible,
+                          reasons: heuristicDraftResult.reasons || [],
+                          draft_scenario: heuristicDraftResult.draft_scenario || null,
+                          metrics: heuristicDraftResult.metrics || null,
+                        },
+                        null,
+                        2
+                      )}
+                    </pre>
+                  </div>
                 ) : null}
               </div>
               <select
