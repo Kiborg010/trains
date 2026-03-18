@@ -3,8 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
-	"time"
 
 	"trains/backend/normalized"
 	heuristicservice "trains/backend/services/heuristic"
@@ -227,35 +227,27 @@ func GetStoredHeuristicScenario(userID int, id string) (GetHeuristicScenarioResp
 	}, nil
 }
 
-func BuildScenarioStepsFromDraftScenario(scenarioID string, draft normalized.HeuristicScenario) ([]normalized.ScenarioStep, error) {
-	steps := make([]normalized.ScenarioStep, 0, len(draft.Steps))
-	for _, draftStep := range draft.Steps {
-		payload, err := json.Marshal(map[string]any{
-			"heuristic_step_type": draftStep.StepType,
-			"source_side":         draftStep.SourceSide,
-			"wagon_count":         draftStep.WagonCount,
-			"target_color":        draftStep.TargetColor,
-			"formation_track_id":  draftStep.FormationTrackID,
-			"buffer_track_id":     draftStep.BufferTrackID,
-			"main_track_id":       draftStep.MainTrackID,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to encode heuristic step payload: %w", err)
-		}
-
-		fromTrackID := draftStep.SourceTrackID
-		toTrackID := draftStep.DestinationTrackID
-		steps = append(steps, normalized.ScenarioStep{
-			StepID:      fmt.Sprintf("nst-%d-%d", time.Now().UnixNano(), draftStep.StepOrder),
-			ScenarioID:  scenarioID,
-			StepOrder:   draftStep.StepOrder,
-			StepType:    "move_group",
-			FromTrackID: &fromTrackID,
-			ToTrackID:   &toTrackID,
-			PayloadJSON: payload,
-		})
+func BuildScenarioStepsFromDraftScenario(scenarioID string, scheme normalized.Scheme, draft normalized.HeuristicScenario) ([]normalized.ScenarioStep, error) {
+	operations, err := storedHeuristicStepsToOperations(draft.Steps)
+	if err != nil {
+		return nil, err
 	}
-	return steps, nil
+	if len(operations) == 0 {
+		return []normalized.ScenarioStep{}, nil
+	}
+
+	locomotive, err := selectInitialHeuristicLocomotive(scheme.Locomotives)
+	if err != nil {
+		return nil, err
+	}
+
+	return heuristicservice.BuildLowLevelScenarioStepsFromHeuristicOperations(
+		scenarioID,
+		scheme,
+		operations,
+		locomotive,
+		scheme.Wagons,
+	)
 }
 
 func SaveHeuristicDraftAsScenario(userID int, req SaveHeuristicAsScenarioRequest) (SaveHeuristicAsScenarioResponse, error) {
@@ -267,6 +259,10 @@ func SaveHeuristicDraftAsScenario(userID int, req SaveHeuristicAsScenarioRequest
 	draft, err := appStore.GetHeuristicScenario(heuristicScenarioID, userID)
 	if err != nil {
 		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("failed to load heuristic draft: %w", err)
+	}
+	scheme, err := loadNormalizedSchemeForHeuristic(userID, draft.SchemeID)
+	if err != nil {
+		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("failed to load normalized scheme for low-level conversion: %w", err)
 	}
 
 	name := strings.TrimSpace(req.Name)
@@ -287,7 +283,7 @@ func SaveHeuristicDraftAsScenario(userID int, req SaveHeuristicAsScenarioRequest
 		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("failed to create standard scenario: %w", err)
 	}
 
-	steps, err := BuildScenarioStepsFromDraftScenario(scenarioID, *draft)
+	steps, err := BuildScenarioStepsFromDraftScenario(scenarioID, scheme, *draft)
 	if err != nil {
 		return SaveHeuristicAsScenarioResponse{}, err
 	}
@@ -326,6 +322,54 @@ func draftScenarioToStoredSteps(item heuristicservice.DraftScenario) []normalize
 		})
 	}
 	return result
+}
+
+func storedHeuristicStepsToOperations(steps []normalized.HeuristicScenarioStep) ([]heuristicservice.HeuristicOperation, error) {
+	result := make([]heuristicservice.HeuristicOperation, 0, len(steps))
+	for _, step := range steps {
+		var operationType heuristicservice.HeuristicOperationType
+		switch strings.TrimSpace(step.StepType) {
+		case string(heuristicservice.HeuristicOperationBufferBlockers):
+			operationType = heuristicservice.HeuristicOperationBufferBlockers
+		case string(heuristicservice.HeuristicOperationTransferTargetsToFormation):
+			operationType = heuristicservice.HeuristicOperationTransferTargetsToFormation
+		case string(heuristicservice.HeuristicOperationTransferFormationToMain):
+			operationType = heuristicservice.HeuristicOperationTransferFormationToMain
+		default:
+			return nil, fmt.Errorf("unsupported heuristic step type %q", step.StepType)
+		}
+
+		result = append(result, heuristicservice.HeuristicOperation{
+			OperationType:      operationType,
+			SourceTrackID:      step.SourceTrackID,
+			DestinationTrackID: step.DestinationTrackID,
+			SourceSide:         step.SourceSide,
+			WagonCount:         step.WagonCount,
+			TargetColor:        step.TargetColor,
+			FormationTrackID:   step.FormationTrackID,
+			BufferTrackID:      step.BufferTrackID,
+			MainTrackID:        step.MainTrackID,
+		})
+	}
+	return result, nil
+}
+
+func selectInitialHeuristicLocomotive(items []normalized.Locomotive) (normalized.Locomotive, error) {
+	if len(items) == 0 {
+		return normalized.Locomotive{}, fmt.Errorf("at least one locomotive is required to build low-level scenario steps")
+	}
+
+	locomotives := append([]normalized.Locomotive{}, items...)
+	sort.Slice(locomotives, func(i, j int) bool {
+		if locomotives[i].TrackID != locomotives[j].TrackID {
+			return locomotives[i].TrackID < locomotives[j].TrackID
+		}
+		if locomotives[i].TrackIndex != locomotives[j].TrackIndex {
+			return locomotives[i].TrackIndex < locomotives[j].TrackIndex
+		}
+		return locomotives[i].LocoID < locomotives[j].LocoID
+	})
+	return locomotives[0], nil
 }
 
 func ptrScenarioDTO(item ScenarioDTO) *ScenarioDTO {
