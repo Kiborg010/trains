@@ -450,7 +450,7 @@ func splitTrackForExtraction(
 		// Переиспользуем ту же самую логику извлечения,
 		// предварительно развернув порядок вагонов.
 		// Это позволяет использовать одинаковые правила для обоих концов пути.
-		reversed := cloneAndSortWagons(wagons)
+		reversed := append([]normalized.Wagon{}, wagons...)
 		for i, j := 0, len(reversed)-1; i < j; i, j = i+1, j-1 {
 			reversed[i], reversed[j] = reversed[j], reversed[i]
 		}
@@ -459,7 +459,7 @@ func splitTrackForExtraction(
 	}
 
 	// Работаем с отсортированной копией, чтобы не изменять входной срез caller-а.
-	ordered := cloneAndSortWagons(wagons)
+	ordered := append([]normalized.Wagon{}, wagons...)
 	head := 0
 	blocking := make([]normalized.Wagon, 0, blockingCount)
 	// Сначала забираем ровно столько блокирующих вагонов,
