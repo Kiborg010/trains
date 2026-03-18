@@ -2466,6 +2466,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
           throw new Error(response.message || "Не удалось выполнить шаг сцепки/расцепки.");
         }
         const nextState = response.state || {};
+        skipAutoResolvePassesRef.current = 2;
         workingVehicles = mergeVehicleColors(
           workingVehicles,
           nextState.vehicles || [],
@@ -2503,6 +2504,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       setVehicles((prev) =>
         mergeVehicleColors(prev, workingVehicles, vehicleColorMemoryRef.current)
       );
+      skipAutoResolvePassesRef.current = Math.max(skipAutoResolvePassesRef.current, 1);
       setCouplings(workingCouplings);
       setScenarioExecutingStep(null);
       setCurrentScenarioStep(steps.length);

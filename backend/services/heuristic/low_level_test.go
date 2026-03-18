@@ -52,8 +52,8 @@ func TestBuildLowLevelScenarioStepsFromHeuristicOperationsForTargetTransfer(t *t
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(steps) != 4 {
-		t.Fatalf("expected 4 low-level steps, got %d", len(steps))
+	if len(steps) != 5 {
+		t.Fatalf("expected 5 low-level steps for two-wagon transfer, got %d", len(steps))
 	}
 	if steps[0].StepType != "move_loco" {
 		t.Fatalf("expected first step to be move_loco, got %s", steps[0].StepType)
@@ -61,11 +61,14 @@ func TestBuildLowLevelScenarioStepsFromHeuristicOperationsForTargetTransfer(t *t
 	if steps[1].StepType != "couple" {
 		t.Fatalf("expected second step to be couple, got %s", steps[1].StepType)
 	}
-	if steps[2].StepType != "move_loco" {
-		t.Fatalf("expected third step to be move_loco, got %s", steps[2].StepType)
+	if steps[2].StepType != "couple" {
+		t.Fatalf("expected third step to be couple for internal wagon chain, got %s", steps[2].StepType)
 	}
-	if steps[3].StepType != "decouple" {
-		t.Fatalf("expected fourth step to be decouple, got %s", steps[3].StepType)
+	if steps[3].StepType != "move_loco" {
+		t.Fatalf("expected fourth step to be move_loco, got %s", steps[3].StepType)
+	}
+	if steps[4].StepType != "decouple" {
+		t.Fatalf("expected fifth step to be decouple, got %s", steps[4].StepType)
 	}
 
 	if steps[0].FromTrackID == nil || *steps[0].FromTrackID != "lead-1" {
@@ -80,11 +83,14 @@ func TestBuildLowLevelScenarioStepsFromHeuristicOperationsForTargetTransfer(t *t
 	if steps[1].Object2ID == nil || *steps[1].Object2ID != "w3" {
 		t.Fatalf("expected couple with end-side wagon w3, got %+v", steps[1].Object2ID)
 	}
-	if steps[2].ToTrackID == nil || *steps[2].ToTrackID != "lead-2" {
-		t.Fatalf("unexpected transfer destination: %+v", steps[2].ToTrackID)
+	if steps[2].Object1ID == nil || *steps[2].Object1ID != "w3" || steps[2].Object2ID == nil || *steps[2].Object2ID != "w2" {
+		t.Fatalf("expected internal group coupling w3-w2 before transfer, got %+v %+v", steps[2].Object1ID, steps[2].Object2ID)
 	}
-	if steps[2].ToIndex == nil || *steps[2].ToIndex != 1 {
-		t.Fatalf("expected transfer boundary index 1 on destination, got %+v", steps[2].ToIndex)
+	if steps[3].ToTrackID == nil || *steps[3].ToTrackID != "lead-2" {
+		t.Fatalf("unexpected transfer destination: %+v", steps[3].ToTrackID)
+	}
+	if steps[3].ToIndex == nil || *steps[3].ToIndex != 3 {
+		t.Fatalf("expected locomotive to remain after the transferred group and the junction clearance slot, got %+v", steps[2].ToIndex)
 	}
 }
 
@@ -235,8 +241,8 @@ func TestBuildLowLevelScenarioStepsFromHeuristicOperationsForBufferBlockers(t *t
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(steps) != 4 {
-		t.Fatalf("expected 4 low-level steps, got %d", len(steps))
+	if len(steps) != 5 {
+		t.Fatalf("expected 5 low-level steps, got %d", len(steps))
 	}
 	if steps[0].ToIndex == nil || *steps[0].ToIndex != 1 {
 		t.Fatalf("expected approach index 1 before start-side blockers, got %+v", steps[0].ToIndex)
@@ -244,11 +250,11 @@ func TestBuildLowLevelScenarioStepsFromHeuristicOperationsForBufferBlockers(t *t
 	if steps[1].Object2ID == nil || *steps[1].Object2ID != "w1" {
 		t.Fatalf("expected couple with start-side blocking wagon w1, got %+v", steps[1].Object2ID)
 	}
-	if steps[2].ToTrackID == nil || *steps[2].ToTrackID != "lead-1" {
-		t.Fatalf("expected blockers to be transferred to buffer track, got %+v", steps[2].ToTrackID)
+	if steps[3].ToTrackID == nil || *steps[3].ToTrackID != "lead-1" {
+		t.Fatalf("expected blockers to be transferred to buffer track, got %+v", steps[3].ToTrackID)
 	}
-	if steps[2].ToIndex == nil || *steps[2].ToIndex != 0 {
-		t.Fatalf("expected blockers to be placed from buffer start, got %+v", steps[2].ToIndex)
+	if steps[3].ToIndex == nil || *steps[3].ToIndex != 0 {
+		t.Fatalf("expected blockers to be placed from buffer start, got %+v", steps[3].ToIndex)
 	}
 }
 
@@ -378,8 +384,8 @@ func TestBuildLowLevelScenarioStepsFromHeuristicOperationsForWholeScenario(t *te
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(steps) != 12 {
-		t.Fatalf("expected 12 low-level steps for three operations, got %d", len(steps))
+	if len(steps) != 14 {
+		t.Fatalf("expected 14 low-level steps for three operations with explicit group couplings, got %d", len(steps))
 	}
 	for _, step := range steps {
 		if step.StepType == "move_group" {
@@ -387,24 +393,155 @@ func TestBuildLowLevelScenarioStepsFromHeuristicOperationsForWholeScenario(t *te
 		}
 	}
 
-	// Проверяем финальную четвёрку шагов для transfer_formation_to_main.
-	last := steps[8:]
-	if last[0].StepType != "move_loco" || last[1].StepType != "couple" || last[2].StepType != "move_loco" || last[3].StepType != "decouple" {
+	// Проверяем финальную пятёрку шагов для transfer_formation_to_main:
+	// подход, сцепка локомотива, достройка цепочки состава, перенос, расцепка.
+	last := steps[9:]
+	if len(last) != 5 {
+		t.Fatalf("expected 5 steps in final operation, got %d", len(last))
+	}
+	if last[0].StepType != "move_loco" || last[1].StepType != "couple" || last[2].StepType != "couple" || last[3].StepType != "move_loco" || last[4].StepType != "decouple" {
 		t.Fatalf("unexpected final operation shape: %+v", last)
 	}
 	if last[0].FromTrackID == nil || *last[0].FromTrackID != "lead-2" {
 		t.Fatalf("expected final approach to start from formation track, got %+v", last[0].FromTrackID)
 	}
-	if last[0].ToIndex == nil || *last[0].ToIndex != 3 {
-		t.Fatalf("expected final approach to free index after whole formation, got %+v", last[0].ToIndex)
+	if last[0].ToIndex == nil || *last[0].ToIndex != 0 {
+		t.Fatalf("expected final approach to start from the locomotive-side edge of the formation, got %+v", last[0].ToIndex)
 	}
-	if last[1].Object2ID == nil || *last[1].Object2ID != "w3" {
+	if last[1].Object2ID == nil || *last[1].Object2ID != "w4" {
 		t.Fatalf("expected final couple to use the boundary wagon of the whole formation, got %+v", last[1].Object2ID)
 	}
-	if last[2].ToTrackID == nil || *last[2].ToTrackID != "main-1" {
-		t.Fatalf("expected final transfer to main track, got %+v", last[2].ToTrackID)
+	if last[2].Object1ID == nil || last[2].Object2ID == nil {
+		t.Fatalf("expected final operation to add an internal coupling before transfer, got %+v %+v", last[2].Object1ID, last[2].Object2ID)
 	}
-	if last[2].ToIndex == nil || *last[2].ToIndex != 2 {
-		t.Fatalf("expected final transfer to keep locomotive on the end-side boundary of the formation, got %+v", last[2].ToIndex)
+	if *last[2].Object1ID == "l1" || *last[2].Object2ID == "l1" {
+		t.Fatalf("expected internal wagon coupling before final transfer, got locomotive coupling %+v %+v", last[2].Object1ID, last[2].Object2ID)
+	}
+	if last[3].ToTrackID == nil || *last[3].ToTrackID != "main-1" {
+		t.Fatalf("expected final transfer to main track, got %+v", last[3].ToTrackID)
+	}
+	if last[3].ToIndex == nil || *last[3].ToIndex != 0 {
+		t.Fatalf("expected final transfer to keep locomotive on its own target index, not on a wagon index, got %+v", last[3].ToIndex)
+	}
+}
+
+func TestBuildLowLevelScenarioStepsAddsInternalCouplingsForMultiWagonGroup(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 21,
+		Tracks: []normalized.Track{
+			{TrackID: "sorting-1", Type: "sorting", Capacity: 8, StorageAllowed: true},
+			{TrackID: "lead-1", Type: "lead", Capacity: 8, StorageAllowed: true},
+			{TrackID: "lead-2", Type: "lead", Capacity: 8, StorageAllowed: true},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "w1", Color: "red", TrackID: "sorting-1", TrackIndex: 1},
+			{WagonID: "w2", Color: "red", TrackID: "sorting-1", TrackIndex: 2},
+			{WagonID: "w3", Color: "red", TrackID: "sorting-1", TrackIndex: 3},
+		},
+		Locomotives: []normalized.Locomotive{
+			{LocoID: "l1", TrackID: "lead-1", TrackIndex: 0},
+		},
+	}
+
+	steps, err := BuildLowLevelScenarioStepsFromHeuristicOperations(
+		"nsc-group-couplings",
+		scheme,
+		[]HeuristicOperation{
+			{
+				OperationType:      HeuristicOperationTransferTargetsToFormation,
+				SourceTrackID:      "sorting-1",
+				DestinationTrackID: "lead-2",
+				SourceSide:         "end",
+				WagonCount:         3,
+				TargetColor:        "red",
+				FormationTrackID:   "lead-2",
+				BufferTrackID:      "lead-1",
+			},
+		},
+		scheme.Locomotives[0],
+		scheme.Wagons,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(steps) != 6 {
+		t.Fatalf("expected 6 steps for three-wagon transfer, got %d", len(steps))
+	}
+	if steps[1].StepType != "couple" || steps[2].StepType != "couple" || steps[3].StepType != "couple" {
+		t.Fatalf("expected loco couple plus two internal wagon couplings, got step types %s, %s, %s", steps[1].StepType, steps[2].StepType, steps[3].StepType)
+	}
+	if steps[2].Object1ID == nil || *steps[2].Object1ID != "w3" || steps[2].Object2ID == nil || *steps[2].Object2ID != "w2" {
+		t.Fatalf("expected first internal coupling w3-w2, got %+v %+v", steps[2].Object1ID, steps[2].Object2ID)
+	}
+	if steps[3].Object1ID == nil || *steps[3].Object1ID != "w2" || steps[3].Object2ID == nil || *steps[3].Object2ID != "w1" {
+		t.Fatalf("expected second internal coupling w2-w1, got %+v %+v", steps[3].Object1ID, steps[3].Object2ID)
+	}
+}
+
+func TestBuildLowLevelScenarioStepsPreservesRealSourceIndicesBetweenOperations(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 20,
+		Tracks: []normalized.Track{
+			{TrackID: "sorting-a", Type: "sorting", Capacity: 8, StorageAllowed: true},
+			{TrackID: "sorting-b", Type: "sorting", Capacity: 8, StorageAllowed: true},
+			{TrackID: "lead-1", Type: "lead", Capacity: 8, StorageAllowed: true},
+			{TrackID: "lead-2", Type: "lead", Capacity: 8, StorageAllowed: true},
+			{TrackID: "main-1", Type: "main", Capacity: 8, StorageAllowed: false},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "w1", Color: "blue", TrackID: "sorting-a", TrackIndex: 0},
+			{WagonID: "w3", Color: "blue", TrackID: "sorting-a", TrackIndex: 2},
+			{WagonID: "w4", Color: "blue", TrackID: "sorting-a", TrackIndex: 5},
+		},
+		Locomotives: []normalized.Locomotive{
+			{LocoID: "l1", TrackID: "lead-1", TrackIndex: 0},
+		},
+	}
+
+	steps, err := BuildLowLevelScenarioStepsFromHeuristicOperations(
+		"nsc-gap-state",
+		scheme,
+		[]HeuristicOperation{
+			{
+				OperationType:      HeuristicOperationTransferTargetsToFormation,
+				SourceTrackID:      "sorting-a",
+				DestinationTrackID: "sorting-b",
+				SourceSide:         "end",
+				WagonCount:         1,
+				TargetColor:        "blue",
+				FormationTrackID:   "lead-2",
+				BufferTrackID:      "lead-1",
+				MainTrackID:        "main-1",
+			},
+			{
+				OperationType:      HeuristicOperationTransferTargetsToFormation,
+				SourceTrackID:      "sorting-a",
+				DestinationTrackID: "lead-2",
+				SourceSide:         "end",
+				WagonCount:         1,
+				TargetColor:        "blue",
+				FormationTrackID:   "lead-2",
+				BufferTrackID:      "lead-1",
+				MainTrackID:        "main-1",
+			},
+		},
+		scheme.Locomotives[0],
+		scheme.Wagons,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(steps) != 8 {
+		t.Fatalf("expected 8 low-level steps, got %d", len(steps))
+	}
+
+	secondApproach := steps[4]
+	if secondApproach.StepType != "move_loco" {
+		t.Fatalf("expected second operation to start with move_loco, got %s", secondApproach.StepType)
+	}
+	if secondApproach.ToIndex == nil || *secondApproach.ToIndex != 3 {
+		t.Fatalf("expected second approach to use real free slot next to remaining wagon at index 2, got %+v", secondApproach.ToIndex)
 	}
 }
