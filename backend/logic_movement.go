@@ -458,6 +458,17 @@ func chooseSingleLocomotiveRouteAndTarget(
 			return true
 		}
 
+		for _, candidateIndex := range sortedFreeTargetIndices(requestedIndex, targetCapacity, occupiedIndices) {
+			finalReason := reason
+			if candidateIndex != requestedIndex {
+				if finalReason != "" {
+					finalReason += "; "
+				}
+				finalReason += "requested slot is occupied or blocked on approach, using nearest reachable free slot"
+			}
+			tryAppendCandidate(trackPath, trackRoute, candidateIndex, finalReason)
+		}
+
 		if locomotive.PathID != targetTrackID {
 			for _, goalSide := range []string{"start", "end"} {
 				loopTrackPath, loopTrackRoute := dijkstraTrackLoopPathWithGoalSideAvoidingTracks(
@@ -476,22 +487,7 @@ func chooseSingleLocomotiveRouteAndTarget(
 					combinedReason += "; "
 				}
 				combinedReason += fmt.Sprintf("extended with non-trivial loop on target track via %s", goalSide)
-				if tryAppendCandidate(combinedTrackPath, combinedTrackRoute, requestedIndex, combinedReason) {
-					return
-				}
-			}
-		}
-
-		for _, candidateIndex := range sortedFreeTargetIndices(requestedIndex, targetCapacity, occupiedIndices) {
-			finalReason := reason
-			if candidateIndex != requestedIndex {
-				if finalReason != "" {
-					finalReason += "; "
-				}
-				finalReason += "requested slot is occupied or blocked on approach, using nearest reachable free slot"
-			}
-			if tryAppendCandidate(trackPath, trackRoute, candidateIndex, finalReason) {
-				return
+				tryAppendCandidate(combinedTrackPath, combinedTrackRoute, requestedIndex, combinedReason)
 			}
 		}
 	}

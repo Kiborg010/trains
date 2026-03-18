@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestBuildMovementPlanSingleLocomotive(t *testing.T) {
 	req := PlanMovementRequest{
@@ -617,6 +620,68 @@ func TestBuildMovementPlanFindsLoopRouteOnSameTrackBeyondBlockingWagons(t *testi
 	}
 	if lastStep[0].X != 200 || lastStep[0].Y != 0 {
 		t.Fatalf("expected arrival to track 7 index 5 at (200,0), got (%.2f,%.2f)", lastStep[0].X, lastStep[0].Y)
+	}
+}
+
+func TestChooseSingleLocomotiveRouteAndTargetPrefersDirectRouteOverUnnecessaryLoop(t *testing.T) {
+	segments := []Segment{
+		{ID: "1", From: Point{X: -80, Y: 0}, To: Point{X: 0, Y: 0}},
+		{ID: "17", From: Point{X: 0, Y: 0}, To: Point{X: 80, Y: 0}},
+		{ID: "20", From: Point{X: 80, Y: 0}, To: Point{X: 160, Y: 0}},
+		{ID: "6", From: Point{X: 160, Y: 0}, To: Point{X: 240, Y: 0}},
+		{ID: "11", From: Point{X: 240, Y: 0}, To: Point{X: 320, Y: 40}},
+		{ID: "13", From: Point{X: 320, Y: 40}, To: Point{X: 160, Y: 0}},
+	}
+	connections := []MovementTrackConnection{
+		{Track1ID: "1", Track2ID: "17", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+		{Track1ID: "17", Track2ID: "20", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+		{Track1ID: "20", Track2ID: "6", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+		{Track1ID: "6", Track2ID: "11", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+		{Track1ID: "11", Track2ID: "13", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+		{Track1ID: "13", Track2ID: "6", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+	}
+	locomotive := Vehicle{
+		ID:        "l1",
+		Type:      "locomotive",
+		Code:      "l1",
+		PathID:    "1",
+		PathIndex: 1,
+		X:         -40,
+		Y:         0,
+	}
+
+	defaultTrackPath, defaultTrackRoute := dijkstraTrackPath(connections, locomotive.PathID, "6")
+	trackPath, _, targetIndex, reason, err := chooseSingleLocomotiveRouteAndTarget(
+		locomotive,
+		segments,
+		connections,
+		map[string]struct{}{},
+		"6",
+		1,
+		3,
+		nil,
+		defaultTrackPath,
+		defaultTrackRoute,
+		40,
+		map[string]struct{}{},
+	)
+	if err != nil {
+		t.Fatalf("expected direct route to remain valid, got error: %v", err)
+	}
+	expected := []string{"1", "17", "20", "6"}
+	if len(trackPath) != len(expected) {
+		t.Fatalf("expected direct path %v, got %v", expected, trackPath)
+	}
+	for i := range expected {
+		if trackPath[i] != expected[i] {
+			t.Fatalf("expected direct path %v, got %v", expected, trackPath)
+		}
+	}
+	if targetIndex != 1 {
+		t.Fatalf("expected target index 1, got %d", targetIndex)
+	}
+	if strings.Contains(reason, "loop") {
+		t.Fatalf("expected no loop reason for directly reachable target, got %q", reason)
 	}
 }
 
