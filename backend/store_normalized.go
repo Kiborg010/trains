@@ -263,6 +263,64 @@ func (s *InMemoryStore) ListScenarioStepsByScenario(userID int, scenarioID strin
 	return cloneScenarioSteps(scenario.Steps), nil
 }
 
+func (s *InMemoryStore) CreateHeuristicScenario(userID int, scenario normalized.HeuristicScenario) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if scenario.HeuristicScenarioID == "" {
+		scenario.HeuristicScenarioID = fmt.Sprintf("nhs-%d", time.Now().UnixNano())
+	}
+	scenario.Steps = withHeuristicScenarioIDForSteps(scenario.HeuristicScenarioID, scenario.Steps)
+	s.heuristicScenariosByID[scenario.HeuristicScenarioID] = cloneHeuristicScenario(scenario)
+	return scenario.HeuristicScenarioID, nil
+}
+
+func (s *InMemoryStore) GetHeuristicScenario(id string, userID int) (*normalized.HeuristicScenario, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	scenario, ok := s.heuristicScenariosByID[id]
+	if !ok {
+		return nil, fmt.Errorf("heuristic scenario not found")
+	}
+	copyScenario := cloneHeuristicScenario(scenario)
+	return &copyScenario, nil
+}
+
+func (s *InMemoryStore) ListHeuristicScenarios(userID int) ([]normalized.HeuristicScenario, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result := make([]normalized.HeuristicScenario, 0, len(s.heuristicScenariosByID))
+	for _, scenario := range s.heuristicScenariosByID {
+		copyScenario := cloneHeuristicScenario(scenario)
+		copyScenario.Steps = nil
+		result = append(result, copyScenario)
+	}
+	return result, nil
+}
+
+func (s *InMemoryStore) CreateHeuristicScenarioSteps(userID int, heuristicScenarioID string, steps []normalized.HeuristicScenarioStep) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	scenario, ok := s.heuristicScenariosByID[heuristicScenarioID]
+	if !ok {
+		return fmt.Errorf("heuristic scenario not found")
+	}
+	scenario.Steps = cloneHeuristicScenarioSteps(withHeuristicScenarioIDForSteps(heuristicScenarioID, steps))
+	s.heuristicScenariosByID[heuristicScenarioID] = cloneHeuristicScenario(scenario)
+	return nil
+}
+
+func (s *InMemoryStore) ListHeuristicScenarioStepsByScenario(userID int, heuristicScenarioID string) ([]normalized.HeuristicScenarioStep, error) {
+	scenario, err := s.GetHeuristicScenario(heuristicScenarioID, userID)
+	if err != nil {
+		return nil, err
+	}
+	return cloneHeuristicScenarioSteps(scenario.Steps), nil
+}
+
 func (s *InMemoryStore) updateSchemePart(schemeID int, updater func(*normalized.Scheme)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -849,6 +907,17 @@ func withScenarioIDForSteps(scenarioID string, steps []normalized.ScenarioStep) 
 	return result
 }
 
+func withHeuristicScenarioIDForSteps(heuristicScenarioID string, steps []normalized.HeuristicScenarioStep) []normalized.HeuristicScenarioStep {
+	result := cloneHeuristicScenarioSteps(steps)
+	for i := range result {
+		if result[i].StepID == "" {
+			result[i].StepID = fmt.Sprintf("nhss-%d-%d", time.Now().UnixNano(), i)
+		}
+		result[i].HeuristicScenarioID = heuristicScenarioID
+	}
+	return result
+}
+
 func cloneNormalizedScheme(scheme normalized.Scheme) normalized.Scheme {
 	return normalized.Scheme{
 		SchemeID:         scheme.SchemeID,
@@ -893,6 +962,29 @@ func cloneNormalizedCouplings(items []normalized.Coupling) []normalized.Coupling
 
 func cloneScenarioSteps(items []normalized.ScenarioStep) []normalized.ScenarioStep {
 	result := make([]normalized.ScenarioStep, len(items))
+	copy(result, items)
+	return result
+}
+
+func cloneHeuristicScenario(scenario normalized.HeuristicScenario) normalized.HeuristicScenario {
+	return normalized.HeuristicScenario{
+		HeuristicScenarioID: scenario.HeuristicScenarioID,
+		SchemeID:            scenario.SchemeID,
+		Name:                scenario.Name,
+		TargetColor:         scenario.TargetColor,
+		RequiredTargetCount: scenario.RequiredTargetCount,
+		FormationTrackID:    scenario.FormationTrackID,
+		BufferTrackID:       scenario.BufferTrackID,
+		MainTrackID:         scenario.MainTrackID,
+		Feasible:            scenario.Feasible,
+		Reasons:             append([]string{}, scenario.Reasons...),
+		MetricsJSON:         append(json.RawMessage{}, scenario.MetricsJSON...),
+		Steps:               cloneHeuristicScenarioSteps(scenario.Steps),
+	}
+}
+
+func cloneHeuristicScenarioSteps(items []normalized.HeuristicScenarioStep) []normalized.HeuristicScenarioStep {
+	result := make([]normalized.HeuristicScenarioStep, len(items))
 	copy(result, items)
 	return result
 }

@@ -6,9 +6,12 @@ import {
   createScheme,
   deleteNormalizedScenario,
   deleteScheme,
+  generateAndSaveDraftHeuristicScenario,
   generateDraftHeuristicScenario,
+  getHeuristicScenarioDetails,
   getNormalizedScenarioDetails,
   getSchemeDetails,
+  listHeuristicScenarios,
   listNormalizedScenarios,
   listSchemes,
   planMovement,
@@ -764,9 +767,13 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [heuristicTargetColor, setHeuristicTargetColor] = useState("");
   const [heuristicRequiredTargetCount, setHeuristicRequiredTargetCount] = useState("1");
   const [heuristicFormationTrackId, setHeuristicFormationTrackId] = useState("");
+  const [heuristicDraftName, setHeuristicDraftName] = useState("");
   const [heuristicDraftResult, setHeuristicDraftResult] = useState(null);
   const [heuristicDraftError, setHeuristicDraftError] = useState("");
   const [isGeneratingHeuristicDraft, setIsGeneratingHeuristicDraft] = useState(false);
+  const [savedHeuristicScenarios, setSavedHeuristicScenarios] = useState([]);
+  const [selectedHeuristicScenarioId, setSelectedHeuristicScenarioId] = useState("");
+  const [lastSavedHeuristicScenarioId, setLastSavedHeuristicScenarioId] = useState("");
 
   const viewWidth = viewport.width / zoom;
   const viewHeight = viewport.height / zoom;
@@ -999,13 +1006,15 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
     async function loadSavedData() {
       try {
-        const [layoutsResp, scenariosResp] = await Promise.all([
+        const [layoutsResp, scenariosResp, heuristicResp] = await Promise.all([
           listSchemes(),
           listNormalizedScenarios(),
+          listHeuristicScenarios(),
         ]);
         if (!cancelled) {
           setSavedLayouts(layoutsResp.schemes || []);
           setSavedScenarios(scenariosResp.scenarios || []);
+          setSavedHeuristicScenarios(heuristicResp.heuristic_scenarios || []);
         }
       } catch (error) {
         if (!cancelled) {
@@ -1085,6 +1094,11 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   async function refreshSavedScenarios() {
     const response = await listNormalizedScenarios();
     setSavedScenarios(response.scenarios || []);
+  }
+
+  async function refreshSavedHeuristicScenarios() {
+    const response = await listHeuristicScenarios();
+    setSavedHeuristicScenarios(response.heuristic_scenarios || []);
   }
 
   async function handleSaveLayout() {
@@ -1484,6 +1498,85 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       setMovementHint(error.message || "Не удалось сгенерировать heuristic draft.");
     } finally {
       setIsGeneratingHeuristicDraft(false);
+    }
+  }
+
+  async function handleGenerateAndSaveHeuristicDraft() {
+    try {
+      const schemeId = Number.parseInt(String(selectedLayoutId || scenarioLayoutId || "").trim(), 10);
+      const requiredTargetCount = Number.parseInt(String(heuristicRequiredTargetCount || "").trim(), 10);
+      const targetColor = String(heuristicTargetColor || "").trim();
+      const formationTrackId = String(heuristicFormationTrackId || "").trim();
+      const draftName = String(heuristicDraftName || "").trim();
+
+      if (Number.isNaN(schemeId) || schemeId <= 0) {
+        throw new Error("Для эвристики выбери сохраненную схему.");
+      }
+      if (!targetColor) {
+        throw new Error("Укажи целевой цвет вагонов.");
+      }
+      if (Number.isNaN(requiredTargetCount) || requiredTargetCount <= 0) {
+        throw new Error("Укажи корректное required_target_count.");
+      }
+
+      setIsGeneratingHeuristicDraft(true);
+      setHeuristicDraftError("");
+
+      const response = await generateAndSaveDraftHeuristicScenario({
+        scheme_id: schemeId,
+        target_color: targetColor,
+        required_target_count: requiredTargetCount,
+        ...(formationTrackId ? { formation_track_id: formationTrackId } : {}),
+        ...(draftName ? { name: draftName } : {}),
+      });
+
+      if (!response?.feasible) {
+        setHeuristicDraftResult(response);
+        setLastSavedHeuristicScenarioId("");
+        setMovementHint("Heuristic draft не сохранён: задача infeasible.");
+        return;
+      }
+
+      setHeuristicDraftResult({
+        feasible: response.feasible,
+        reasons: response.reasons || [],
+        draft_scenario: response.heuristic_scenario || null,
+        metrics: response.heuristic_scenario?.metrics || null,
+      });
+      setLastSavedHeuristicScenarioId(response.saved_heuristic_scenario_id || "");
+      if (response.saved_heuristic_scenario_id) {
+        setSelectedHeuristicScenarioId(response.saved_heuristic_scenario_id);
+      }
+      await refreshSavedHeuristicScenarios();
+      setMovementHint("Heuristic draft сохранён.");
+    } catch (error) {
+      setHeuristicDraftError(error.message || "Не удалось сохранить heuristic draft.");
+      setMovementHint(error.message || "Не удалось сохранить heuristic draft.");
+    } finally {
+      setIsGeneratingHeuristicDraft(false);
+    }
+  }
+
+  async function handleLoadSavedHeuristicDraft() {
+    if (!selectedHeuristicScenarioId) {
+      setMovementHint("Выбери сохранённый heuristic draft.");
+      return;
+    }
+
+    try {
+      const response = await getHeuristicScenarioDetails(selectedHeuristicScenarioId);
+      const draft = response?.heuristic_scenario || null;
+      setHeuristicDraftResult({
+        feasible: draft?.feasible ?? false,
+        reasons: draft?.reasons || [],
+        draft_scenario: draft || null,
+        metrics: draft?.metrics || null,
+      });
+      setLastSavedHeuristicScenarioId(draft?.heuristic_scenario_id || selectedHeuristicScenarioId);
+      setMovementHint("Сохранённый heuristic draft загружен.");
+    } catch (error) {
+      setHeuristicDraftError(error.message || "Не удалось загрузить heuristic draft.");
+      setMovementHint(error.message || "Не удалось загрузить heuristic draft.");
     }
   }
 
@@ -3000,6 +3093,12 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                 />
                 <input
                   className="toolInput"
+                  value={heuristicDraftName}
+                  onChange={(event) => setHeuristicDraftName(event.target.value)}
+                  placeholder="name (optional)"
+                />
+                <input
+                  className="toolInput"
                   value={heuristicRequiredTargetCount}
                   onChange={(event) => setHeuristicRequiredTargetCount(event.target.value)}
                   placeholder="required_target_count"
@@ -3024,6 +3123,33 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                 >
                   {isGeneratingHeuristicDraft ? "Генерация..." : "Generate Heuristic Draft"}
                 </button>
+                <button
+                  type="button"
+                  className="toolButton"
+                  onClick={handleGenerateAndSaveHeuristicDraft}
+                  disabled={isGeneratingHeuristicDraft}
+                >
+                  {isGeneratingHeuristicDraft ? "Сохранение..." : "Generate and Save Heuristic Draft"}
+                </button>
+                <select
+                  className="toolInput"
+                  value={selectedHeuristicScenarioId}
+                  onChange={(event) => setSelectedHeuristicScenarioId(event.target.value)}
+                >
+                  <option value="">Открыть сохранённый heuristic draft</option>
+                  {savedHeuristicScenarios.map((item) => (
+                    <option
+                      key={item.heuristic_scenario_id}
+                      value={String(item.heuristic_scenario_id)}
+                    >
+                      {item.name || `Heuristic Draft ${item.heuristic_scenario_id}`}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" className="toolButton" onClick={handleLoadSavedHeuristicDraft}>
+                  Open Saved Heuristic Draft
+                </button>
+                <p className="counter">saved id: {lastSavedHeuristicScenarioId || "-"}</p>
                 <p className="counter">
                   feasible:{" "}
                   {heuristicDraftResult == null

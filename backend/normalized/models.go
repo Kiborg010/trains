@@ -80,3 +80,33 @@ type ScenarioStep struct {
 	Object2ID   *string         `json:"object2_id,omitempty"`
 	PayloadJSON json.RawMessage `json:"payload_json,omitempty"`
 }
+
+type HeuristicScenario struct {
+	HeuristicScenarioID string                  `json:"heuristic_scenario_id"`
+	SchemeID            int                     `json:"scheme_id"`
+	Name                string                  `json:"name"`
+	TargetColor         string                  `json:"target_color"`
+	RequiredTargetCount int                     `json:"required_target_count"`
+	FormationTrackID    string                  `json:"formation_track_id"`
+	BufferTrackID       string                  `json:"buffer_track_id"`
+	MainTrackID         string                  `json:"main_track_id"`
+	Feasible            bool                    `json:"feasible"`
+	Reasons             []string                `json:"reasons,omitempty"`
+	MetricsJSON         json.RawMessage         `json:"metrics_json,omitempty"`
+	Steps               []HeuristicScenarioStep `json:"steps,omitempty"`
+}
+
+type HeuristicScenarioStep struct {
+	StepID              string `json:"step_id"`
+	HeuristicScenarioID string `json:"heuristic_scenario_id"`
+	StepOrder           int    `json:"step_order"`
+	StepType            string `json:"step_type"`
+	SourceTrackID       string `json:"source_track_id"`
+	DestinationTrackID  string `json:"destination_track_id"`
+	SourceSide          string `json:"source_side,omitempty"`
+	WagonCount          int    `json:"wagon_count"`
+	TargetColor         string `json:"target_color"`
+	FormationTrackID    string `json:"formation_track_id"`
+	BufferTrackID       string `json:"buffer_track_id"`
+	MainTrackID         string `json:"main_track_id"`
+}

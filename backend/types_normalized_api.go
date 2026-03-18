@@ -429,6 +429,14 @@ type GenerateDraftHeuristicScenarioRequest struct {
 	FormationTrackID    string `json:"formation_track_id,omitempty"`
 }
 
+type GenerateAndSaveDraftHeuristicScenarioRequest struct {
+	SchemeID            int    `json:"scheme_id"`
+	TargetColor         string `json:"target_color"`
+	RequiredTargetCount int    `json:"required_target_count"`
+	FormationTrackID    string `json:"formation_track_id,omitempty"`
+	Name                string `json:"name,omitempty"`
+}
+
 type DraftHeuristicFeasibilityDTO struct {
 	ChosenFormationTrackID  string   `json:"chosen_formation_track_id"`
 	ChosenBufferTrackID     string   `json:"chosen_buffer_track_id"`
@@ -489,6 +497,43 @@ type DraftHeuristicScenarioResponse struct {
 	Feasibility   *DraftHeuristicFeasibilityDTO `json:"feasibility,omitempty"`
 	DraftScenario *DraftScenarioDTO             `json:"draft_scenario,omitempty"`
 	Metrics       *DraftScenarioMetricsDTO      `json:"metrics,omitempty"`
+}
+
+type HeuristicScenarioDTO struct {
+	HeuristicScenarioID string                   `json:"heuristic_scenario_id"`
+	SchemeID            int                      `json:"scheme_id"`
+	Name                string                   `json:"name"`
+	TargetColor         string                   `json:"target_color"`
+	RequiredTargetCount int                      `json:"required_target_count"`
+	FormationTrackID    string                   `json:"formation_track_id"`
+	BufferTrackID       string                   `json:"buffer_track_id"`
+	MainTrackID         string                   `json:"main_track_id"`
+	Feasible            bool                     `json:"feasible"`
+	Reasons             []string                 `json:"reasons,omitempty"`
+	Steps               []DraftScenarioStepDTO   `json:"steps,omitempty"`
+	Metrics             *DraftScenarioMetricsDTO `json:"metrics,omitempty"`
+}
+
+type SaveDraftHeuristicScenarioResponse struct {
+	OK                       bool                          `json:"ok"`
+	Message                  string                        `json:"message,omitempty"`
+	Feasible                 bool                          `json:"feasible"`
+	Reasons                  []string                      `json:"reasons,omitempty"`
+	Feasibility              *DraftHeuristicFeasibilityDTO `json:"feasibility,omitempty"`
+	SavedHeuristicScenarioID string                        `json:"saved_heuristic_scenario_id,omitempty"`
+	HeuristicScenario        *HeuristicScenarioDTO         `json:"heuristic_scenario,omitempty"`
+}
+
+type ListHeuristicScenariosResponse struct {
+	OK                 bool                   `json:"ok"`
+	Message            string                 `json:"message,omitempty"`
+	HeuristicScenarios []HeuristicScenarioDTO `json:"heuristic_scenarios,omitempty"`
+}
+
+type GetHeuristicScenarioResponse struct {
+	OK                bool                  `json:"ok"`
+	Message           string                `json:"message,omitempty"`
+	HeuristicScenario *HeuristicScenarioDTO `json:"heuristic_scenario,omitempty"`
 }
 
 func toDraftHeuristicFeasibilityDTO(item heuristicservice.FixedClassFeasibility) *DraftHeuristicFeasibilityDTO {
@@ -559,4 +604,60 @@ func toDraftScenarioMetricsDTO(item heuristicservice.DraftScenarioMetrics) Draft
 		TotalCost:             item.TotalCost,
 		Success:               item.Success,
 	}
+}
+
+func toHeuristicScenarioDTO(item normalized.HeuristicScenario) HeuristicScenarioDTO {
+	var metrics *DraftScenarioMetricsDTO
+	if len(item.MetricsJSON) > 0 {
+		var parsed DraftScenarioMetricsDTO
+		if err := json.Unmarshal(item.MetricsJSON, &parsed); err == nil {
+			metrics = &parsed
+		}
+	}
+
+	return HeuristicScenarioDTO{
+		HeuristicScenarioID: item.HeuristicScenarioID,
+		SchemeID:            item.SchemeID,
+		Name:                item.Name,
+		TargetColor:         item.TargetColor,
+		RequiredTargetCount: item.RequiredTargetCount,
+		FormationTrackID:    item.FormationTrackID,
+		BufferTrackID:       item.BufferTrackID,
+		MainTrackID:         item.MainTrackID,
+		Feasible:            item.Feasible,
+		Reasons:             append([]string{}, item.Reasons...),
+		Steps:               toStoredHeuristicStepDTOs(item.Steps),
+		Metrics:             metrics,
+	}
+}
+
+func toStoredHeuristicStepDTO(item normalized.HeuristicScenarioStep) DraftScenarioStepDTO {
+	return DraftScenarioStepDTO{
+		StepOrder:          item.StepOrder,
+		StepType:           item.StepType,
+		SourceTrackID:      item.SourceTrackID,
+		DestinationTrackID: item.DestinationTrackID,
+		SourceSide:         item.SourceSide,
+		WagonCount:         item.WagonCount,
+		TargetColor:        item.TargetColor,
+		FormationTrackID:   item.FormationTrackID,
+		BufferTrackID:      item.BufferTrackID,
+		MainTrackID:        item.MainTrackID,
+	}
+}
+
+func toStoredHeuristicStepDTOs(items []normalized.HeuristicScenarioStep) []DraftScenarioStepDTO {
+	result := make([]DraftScenarioStepDTO, 0, len(items))
+	for _, item := range items {
+		result = append(result, toStoredHeuristicStepDTO(item))
+	}
+	return result
+}
+
+func toHeuristicScenarioDTOs(items []normalized.HeuristicScenario) []HeuristicScenarioDTO {
+	result := make([]HeuristicScenarioDTO, 0, len(items))
+	for _, item := range items {
+		result = append(result, toHeuristicScenarioDTO(item))
+	}
+	return result
 }

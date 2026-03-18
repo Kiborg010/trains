@@ -56,6 +56,12 @@ type Store interface {
 	CreateScenarioSteps(userID int, scenarioID string, steps []normalized.ScenarioStep) error
 	GetScenarioStepsByScenario(userID int, scenarioID string) ([]normalized.ScenarioStep, error)
 	ListScenarioStepsByScenario(userID int, scenarioID string) ([]normalized.ScenarioStep, error)
+
+	CreateHeuristicScenario(userID int, scenario normalized.HeuristicScenario) (string, error)
+	GetHeuristicScenario(id string, userID int) (*normalized.HeuristicScenario, error)
+	ListHeuristicScenarios(userID int) ([]normalized.HeuristicScenario, error)
+	CreateHeuristicScenarioSteps(userID int, heuristicScenarioID string, steps []normalized.HeuristicScenarioStep) error
+	ListHeuristicScenarioStepsByScenario(userID int, heuristicScenarioID string) ([]normalized.HeuristicScenarioStep, error)
 }
 
 type InMemoryStore struct {
@@ -67,6 +73,7 @@ type InMemoryStore struct {
 	executionsByID          map[string]Execution
 	schemesByID             map[int]normalized.Scheme
 	normalizedScenariosByID map[string]normalized.Scenario
+	heuristicScenariosByID  map[string]normalized.HeuristicScenario
 }
 
 func NewInMemoryStore() *InMemoryStore {
@@ -78,6 +85,7 @@ func NewInMemoryStore() *InMemoryStore {
 		executionsByID:          map[string]Execution{},
 		schemesByID:             map[int]normalized.Scheme{},
 		normalizedScenariosByID: map[string]normalized.Scenario{},
+		heuristicScenariosByID:  map[string]normalized.HeuristicScenario{},
 	}
 }
 

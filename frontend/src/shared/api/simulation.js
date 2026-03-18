@@ -164,6 +164,18 @@ export async function generateDraftHeuristicScenario(payload) {
   return postJSON("/normalized/heuristic/generate", payload);
 }
 
+export async function generateAndSaveDraftHeuristicScenario(payload) {
+  return postJSON("/normalized/heuristic/generate-and-save", payload);
+}
+
+export async function listHeuristicScenarios() {
+  return getJSON("/normalized/heuristic/scenarios");
+}
+
+export async function getHeuristicScenarioDetails(heuristicScenarioId) {
+  return getJSON(`/normalized/heuristic/scenarios/${heuristicScenarioId}`);
+}
+
 export async function getExecution(executionId) {
   return getJSON(`/executions/${executionId}`);
 }
