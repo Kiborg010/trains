@@ -8,6 +8,68 @@ import (
 	"trains/backend/normalized"
 )
 
+// Этот файл реализует первые два этапа эвристики для фиксированного минимального класса схем.
+//
+// Область ответственности файла:
+//   - ШАГ 1: построение нормализованного и проверенного "описания задачи" для
+//     ограниченного класса станции, который поддерживает первая версия эвристики.
+//   - ШАГ 2: явная проверка реализуемости задачи до начала какого-либо планирования.
+//
+// Фиксированный минимальный класс схемы здесь намеренно узкий:
+//   - ровно 1 главный путь
+//   - ровно 1 объездной путь
+//   - ровно 2 сортировочных пути
+//   - ровно 2 вытяжных пути
+//   - хранение на главном и объездном путях запрещено
+//   - хранение на сортировочных и вытяжных путях разрешено
+//   - цвета вагонов ограничены целевым цветом и ровно одним нецелевым цветом
+//
+// Основные задачи этого файла:
+//   - классифицировать нормализованные пути по функциональным ролям
+//   - проверить, что схема соответствует форме, поддерживаемой эвристикой
+//   - разделить вагоны на целевые и нецелевые
+//   - выбрать вытяжной путь формирования и буферный вытяжной путь
+//   - сообщить, является ли задача реализуемой для заданного размера состава K
+//
+// Что здесь уже реализовано:
+//   - строгая проверка фиксированного класса схемы
+//   - проверка цветов вагонов и индексация вагонов по путям
+//   - явный результат проверки реализуемости с объяснением причин
+//   - прозрачные правила выбора formation/buffer путей
+//
+// Что здесь специально пока не реализовано:
+//   - порядок извлечения вагонов
+//   - планирование маневров
+//   - генерация scenario_steps
+//   - интеграция с низкоуровневым движением/выполнением
+
+// FixedClassProblem — это нормализованная входная модель задачи для первой эвристики.
+//
+// Эта структура описывает состояние станции только после того, как схема уже
+// прошла базовые проверки фиксированного класса, выполняемые в BuildFixedClassProblem.
+// Следующие этапы планирования работают с этими полями, а не с исходной схемой.
+//
+// Значение полей:
+//   - SchemeID: идентификатор схемы, сохраняется для трассировки
+//   - TargetColor: цвет, который эвристика должна собрать в итоговый состав
+//   - MainTrack: единственный главный путь в поддерживаемом классе схем
+//   - BypassTrack: единственный объездной путь в поддерживаемом классе схем
+//   - SortingTracks: ровно два сортировочных пути, отсортированные по TrackID
+//   - LeadTracks: ровно два вытяжных пути, отсортированные по TrackID
+//   - FormationTrack: вытяжной путь, выбранный для накопления целевого состава
+//   - BufferTrack: второй вытяжной путь, используемый как временный буфер
+//   - TargetWagons: все вагоны, у которых Color совпадает с TargetColor
+//   - NonTargetWagons: все вагоны, у которых Color отличается от TargetColor
+//   - WagonsByTrack: вагоны, сгруппированные по TrackID и отсортированные по TrackIndex
+//
+// Ожидаемые инварианты после успешного построения:
+//   - MainTrack и BypassTrack уникальны
+//   - len(SortingTracks) == 2
+//   - len(LeadTracks) == 2
+//   - FormationTrack и BufferTrack — это два вытяжных пути в некотором порядке
+//   - все срезы вагонов в WagonsByTrack отсортированы по TrackIndex
+//   - TargetWagons не пуст
+//   - в схеме используется не более двух цветов вагонов
 type FixedClassProblem struct {
 	SchemeID        int
 	TargetColor     string
@@ -22,6 +84,28 @@ type FixedClassProblem struct {
 	WagonsByTrack   map[string][]normalized.Wagon
 }
 
+// FixedClassFeasibility — явный результат проверки реализуемости задачи
+// для эвристики фиксированного минимального класса.
+//
+// Идея в том, чтобы можно было ответить на вопрос
+// "можно ли вообще применять эту эвристику?"
+// ещё до запуска какого-либо планирования. Результат намеренно подробный,
+// чтобы его можно было использовать в UI, тестах или будущей orchestration-логике.
+//
+// Значение полей:
+//   - Feasible: true только если все проверки пройдены
+//   - Reasons: накопленные объяснения, почему задача нереализуема
+//   - ChosenFormationTrackID: выбранный вытяжной путь для накопления целевого состава
+//   - ChosenBufferTrackID: второй вытяжной путь, зарезервированный под буфер
+//   - TargetCount: число вагонов требуемого цвета
+//   - RequiredTargetCount: требуемое значение K для целевого состава
+//   - AvailableBufferCapacity: свободная вместимость выбранного буферного пути
+//
+// Ожидаемые инварианты:
+//   - если Feasible == true, Reasons пуст
+//   - если ChosenFormationTrackID не пуст, он относится к вытяжному пути
+//   - если ChosenBufferTrackID не пуст, он относится ко второму вытяжному пути
+//   - AvailableBufferCapacity всегда неотрицателен
 type FixedClassFeasibility struct {
 	Feasible                bool
 	Reasons                 []string
@@ -32,18 +116,51 @@ type FixedClassFeasibility struct {
 	AvailableBufferCapacity int
 }
 
+// BuildFixedClassProblem проверяет, что нормализованная схема соответствует
+// классу схем, поддерживаемых первой эвристикой, а затем строит удобное
+// внутреннее представление задачи для следующих этапов.
+//
+// Ожидаемый вход:
+//   - scheme: нормализованная схема, содержащая пути и вагоны
+//   - targetColor: цвет, который нужно собрать
+//   - formationTrackID: может быть пустым; тогда первый отсортированный lead-путь
+//     выбирается через chooseLeadTracks; более строгий выбор делается позже
+//
+// Основные предположения:
+//   - поддерживается только ограниченный фиксированный минимальный класс схем
+//   - цвета вагонов ограничены целевым цветом и максимум одним другим цветом
+//   - позиции вагонов уже нормализованы через TrackID/TrackIndex
+//
+// Ошибки могут возникать в случаях:
+//   - не задан целевой цвет
+//   - неправильное число путей по типам
+//   - неверные флаги хранения у путей
+//   - неверный formationTrackID
+//   - пустой цвет у вагона
+//   - слишком много цветов вагонов или отсутствие target-вагонов
+//
+// Эта функция находится в самом начале pipeline эвристики:
+// она подготавливает стабильный и проверенный входной объект
+// до этапов проверки реализуемости и планирования.
 func BuildFixedClassProblem(scheme normalized.Scheme, targetColor string, formationTrackID string) (FixedClassProblem, error) {
+	// Целевой цвет — обязательный параметр верхнего уровня.
+	// Обрезка пробелов здесь нужна, чтобы избежать ложных успехов
+	// из-за строк, отличающихся только пробелами.
 	targetColor = strings.TrimSpace(targetColor)
 	if targetColor == "" {
 		return FixedClassProblem{}, fmt.Errorf("target color is required")
 	}
 
+	// Разделяем пути по смысловым ролям. Эвристика работает не с произвольными
+	// TrackID, а именно с ролями путей, поэтому классификация — первый шаг.
 	mainTracks := make([]normalized.Track, 0)
 	bypassTracks := make([]normalized.Track, 0)
 	sortingTracks := make([]normalized.Track, 0)
 	leadTracks := make([]normalized.Track, 0)
 
 	for _, track := range scheme.Tracks {
+		// На всякий случай обрезаем пробелы вокруг типа пути,
+		// чтобы случайные артефакты данных не ломали классификацию.
 		switch strings.TrimSpace(track.Type) {
 		case "main":
 			mainTracks = append(mainTracks, track)
@@ -56,11 +173,17 @@ func BuildFixedClassProblem(scheme normalized.Scheme, targetColor string, format
 		}
 	}
 
+	// Сортируем все группы путей, чтобы дальнейшие решения были детерминированными.
+	// Это особенно полезно в тестах и в ситуациях, когда путь formation
+	// явно не указан.
 	sortTracks(mainTracks)
 	sortTracks(bypassTracks)
 	sortTracks(sortingTracks)
 	sortTracks(leadTracks)
 
+	// Первая эвристика поддерживает ровно одну форму схемы.
+	// Любое отклонение лучше отклонять сразу, чем получать неочевидное
+	// поведение позже на этапе планирования.
 	if len(mainTracks) != 1 {
 		return FixedClassProblem{}, fmt.Errorf("expected exactly 1 main track, got %d", len(mainTracks))
 	}
@@ -76,6 +199,9 @@ func BuildFixedClassProblem(scheme normalized.Scheme, targetColor string, format
 
 	mainTrack := mainTracks[0]
 	bypassTrack := bypassTracks[0]
+	// Семантика хранения — часть контракта эвристики.
+	// Если эти флаги неверные, дальнейшие предположения о планировании
+	// становятся невалидными, поэтому завершаемся сразу.
 	if mainTrack.StorageAllowed {
 		return FixedClassProblem{}, fmt.Errorf("main track %s must not allow storage", mainTrack.TrackID)
 	}
@@ -93,16 +219,27 @@ func BuildFixedClassProblem(scheme normalized.Scheme, targetColor string, format
 		}
 	}
 
+	// Назначение formation/buffer — единственное решение на уровне lead-путей
+	// на этом этапе. Вспомогательная функция либо валидирует явный выбор,
+	// либо применяет детерминированный выбор по умолчанию.
 	formationTrack, bufferTrack, err := chooseLeadTracks(leadTracks, formationTrackID)
 	if err != nil {
 		return FixedClassProblem{}, err
 	}
 
+	// За один проход строим:
+	//   - разбиение вагонов на target/non-target
+	//   - индекс вагонов по путям
+	// Последующие этапы работают в основном с WagonsByTrack
+	// и уже готовыми срезами target/non-target.
 	targetWagons := make([]normalized.Wagon, 0)
 	nonTargetWagons := make([]normalized.Wagon, 0)
 	wagonsByTrack := make(map[string][]normalized.Wagon)
 	colors := map[string]struct{}{}
 	for _, wagon := range scheme.Wagons {
+		// Пустой цвет запрещён явно, потому что эвристика опирается
+		// на бинарное разделение target/non-target и не умеет
+		// обрабатывать "бесцветные" вагоны.
 		color := strings.TrimSpace(wagon.Color)
 		if color == "" {
 			return FixedClassProblem{}, fmt.Errorf("wagon %s has empty color", wagon.WagonID)
@@ -116,6 +253,9 @@ func BuildFixedClassProblem(scheme normalized.Scheme, targetColor string, format
 		}
 	}
 
+	// Первая эвристика намеренно узкая:
+	// допускается максимум два цвета и при этом хотя бы один target-вагон.
+	// Иначе планировать просто нечего.
 	if len(colors) > 2 {
 		return FixedClassProblem{}, fmt.Errorf("expected at most 2 wagon colors, got %d", len(colors))
 	}
@@ -126,6 +266,8 @@ func BuildFixedClassProblem(scheme normalized.Scheme, targetColor string, format
 		return FixedClassProblem{}, fmt.Errorf("no wagons of target color %q found", targetColor)
 	}
 
+	// Сортируем вагоны на каждом пути по TrackIndex, чтобы в следующих этапах
+	// порядок элементов в срезе соответствовал физическому порядку вагонов.
 	for trackID := range wagonsByTrack {
 		sort.Slice(wagonsByTrack[trackID], func(i, j int) bool {
 			return wagonsByTrack[trackID][i].TrackIndex < wagonsByTrack[trackID][j].TrackIndex
@@ -147,6 +289,25 @@ func BuildFixedClassProblem(scheme normalized.Scheme, targetColor string, format
 	}, nil
 }
 
+// CheckFixedClassFeasibility выполняет "непорождающую" проверку:
+// можно ли вообще применять эту эвристику к данной схеме.
+//
+// В отличие от BuildFixedClassProblem, эта функция не падает на первой ошибке,
+// а накапливает причины нереализуемости. Благодаря этому её удобно использовать
+// как объясняющий слой валидации перед запуском planner-а.
+//
+// Вход:
+//   - scheme: нормализованное состояние станции
+//   - targetColor: цвет, который нужно собрать
+//   - requiredTargetCount: желаемая длина состава K
+//   - formationTrackID: необязательный явно заданный lead-путь для формирования
+//
+// Возвращает:
+//   - объект FixedClassFeasibility, содержащий и итоговый verdict,
+//     и конкретные причины/выбранные пути
+//
+// Положение в pipeline:
+//   - это gate между чтением схемы и этапом планирования
 func CheckFixedClassFeasibility(scheme normalized.Scheme, targetColor string, requiredTargetCount int, formationTrackID string) FixedClassFeasibility {
 	result := FixedClassFeasibility{
 		Feasible:            false,
@@ -154,17 +315,25 @@ func CheckFixedClassFeasibility(scheme normalized.Scheme, targetColor string, re
 		RequiredTargetCount: requiredTargetCount,
 	}
 
+	// K должен быть осмысленной целью планирования.
+	// Ноль или отрицательное значение превращают задачу в вырожденный случай
+	// и скрывают ошибки выше по стеку.
 	if requiredTargetCount <= 0 {
 		result.Reasons = append(result.Reasons, "required target count K must be positive")
 		return result
 	}
 
+	// Целевой цвет обязателен по той же причине, что и в BuildFixedClassProblem:
+	// все рассуждения о target/non-target опираются на него.
 	targetColor = strings.TrimSpace(targetColor)
 	if targetColor == "" {
 		result.Reasons = append(result.Reasons, "target color is required")
 		return result
 	}
 
+	// Повторно классифицируем пути прямо из raw normalized tracks.
+	// Проверка реализуемости специально сделана независимой от уже построенного
+	// FixedClassProblem, поэтому не использует его как вход.
 	mainTracks := make([]normalized.Track, 0)
 	bypassTracks := make([]normalized.Track, 0)
 	sortingTracks := make([]normalized.Track, 0)
@@ -186,6 +355,9 @@ func CheckFixedClassFeasibility(scheme normalized.Scheme, targetColor string, re
 	sortTracks(sortingTracks)
 	sortTracks(leadTracks)
 
+	// Сначала проверяется сама форма схемы.
+	// Если схема не соответствует фиксированному классу,
+	// дальше проверять более частные условия нет смысла.
 	if len(mainTracks) != 1 {
 		result.Reasons = append(result.Reasons, fmt.Sprintf("expected exactly 1 main track, got %d", len(mainTracks)))
 	}
@@ -202,6 +374,9 @@ func CheckFixedClassFeasibility(scheme normalized.Scheme, targetColor string, re
 		return result
 	}
 
+	// Правила хранения являются базовой частью постановки:
+	// main и bypass используются для движения/вывода, а sorting и lead —
+	// для хранения и промежуточных перестановок.
 	if mainTracks[0].StorageAllowed {
 		result.Reasons = append(result.Reasons, fmt.Sprintf("main track %s must not allow storage", mainTracks[0].TrackID))
 	}
@@ -219,6 +394,11 @@ func CheckFixedClassFeasibility(scheme normalized.Scheme, targetColor string, re
 		}
 	}
 
+	// За один проход:
+	//   - считаем число target-вагонов
+	//   - собираем множество цветов
+	//   - оцениваем текущую занятость путей
+	// Занятость потом используется при выборе formation/buffer.
 	targetCount := 0
 	colors := map[string]struct{}{}
 	occupiedByTrack := map[string]int{}
@@ -236,6 +416,10 @@ func CheckFixedClassFeasibility(scheme normalized.Scheme, targetColor string, re
 	}
 	result.TargetCount = targetCount
 
+	// Первая эвристика определена только для мира из двух цветов:
+	// целевой цвет + один "все остальные".
+	// Меньше двух цветов на непустой станции тоже считается недопустимым,
+	// потому что текущий контракт ожидает явное разделение на два класса.
 	if len(colors) > 2 {
 		result.Reasons = append(result.Reasons, fmt.Sprintf("expected at most 2 wagon colors, got %d", len(colors)))
 	}
@@ -246,6 +430,9 @@ func CheckFixedClassFeasibility(scheme normalized.Scheme, targetColor string, re
 		result.Reasons = append(result.Reasons, fmt.Sprintf("not enough target wagons: have %d, need %d", targetCount, requiredTargetCount))
 	}
 
+	// Выбираем или валидируем пару formation/buffer.
+	// Вспомогательная функция возвращает не только пути,
+	// но и причины отказа, чтобы caller мог показать их прозрачно.
 	formationTrack, bufferTrack, chooseReasons := selectFormationAndBufferTracks(leadTracks, occupiedByTrack, requiredTargetCount, formationTrackID)
 	result.Reasons = append(result.Reasons, chooseReasons...)
 	if formationTrack.TrackID != "" {
@@ -253,6 +440,10 @@ func CheckFixedClassFeasibility(scheme normalized.Scheme, targetColor string, re
 	}
 	if bufferTrack.TrackID != "" {
 		result.ChosenBufferTrackID = bufferTrack.TrackID
+		// Вместимость буфера измеряется как число свободных ячеек,
+		// а не полная capacity.
+		// Если входные данные уже переполнены, отрицательные значения
+		// обрезаются до нуля.
 		bufferCapacity := bufferTrack.Capacity - occupiedByTrack[bufferTrack.TrackID]
 		if bufferCapacity < 0 {
 			bufferCapacity = 0
@@ -263,6 +454,8 @@ func CheckFixedClassFeasibility(scheme normalized.Scheme, targetColor string, re
 		}
 	}
 
+	// Если накопились какие-либо причины отказа, задача считается нереализуемой.
+	// Иначе явно помечаем её как feasible.
 	if len(result.Reasons) > 0 {
 		return result
 	}
@@ -270,10 +463,20 @@ func CheckFixedClassFeasibility(scheme normalized.Scheme, targetColor string, re
 	return result
 }
 
+// chooseLeadTracks валидирует явно выбранный formation-путь
+// или применяет детерминированный порядок по умолчанию,
+// если caller не указал его явно.
+//
+// Эта функция специально остаётся минимальной:
+//   - она рассуждает только об идентичности двух lead-путей
+//   - она не проверяет вместимость и занятость
+//   - такие policy-решения принадлежат selectFormationAndBufferTracks
 func chooseLeadTracks(leadTracks []normalized.Track, formationTrackID string) (normalized.Track, normalized.Track, error) {
 	if len(leadTracks) != 2 {
 		return normalized.Track{}, normalized.Track{}, fmt.Errorf("exactly 2 lead tracks are required")
 	}
+	// Пустой выбор означает:
+	// "использовать детерминированный порядок по умолчанию".
 	formationTrackID = strings.TrimSpace(formationTrackID)
 	if formationTrackID == "" {
 		return leadTracks[0], leadTracks[1], nil
@@ -287,12 +490,29 @@ func chooseLeadTracks(leadTracks []normalized.Track, formationTrackID string) (n
 	return normalized.Track{}, normalized.Track{}, fmt.Errorf("formation track %s is not one of the lead tracks", formationTrackID)
 }
 
+// sortTracks сортирует пути по TrackID, чтобы все последующие решения были
+// стабильными и детерминированными. Это низкоуровневая вспомогательная функция,
+// используемая до применения более высокоуровневых правил выбора и tie-break.
 func sortTracks(tracks []normalized.Track) {
 	sort.Slice(tracks, func(i, j int) bool {
 		return tracks[i].TrackID < tracks[j].TrackID
 	})
 }
 
+// selectFormationAndBufferTracks выбирает lead-путь для формирования состава
+// и второй lead-путь, который будет использоваться как буфер.
+//
+// Правила выбора:
+//   - если formationTrackID задан, он должен указывать на один из двух lead-путей
+//   - выбранный formation-путь должен иметь capacity >= requiredTargetCount
+//   - если путь явно не задан, кандидаты на formation — только те lead-пути,
+//     у которых capacity >= K
+//   - среди кандидатов приоритеты такие:
+//     1. меньшая текущая занятость
+//     2. большая общая вместимость
+//     3. лексикографически меньший TrackID
+//
+// Возвращаемые причины объясняют, почему не удалось выбрать безопасную пару путей.
 func selectFormationAndBufferTracks(
 	leadTracks []normalized.Track,
 	occupiedByTrack map[string]int,
@@ -304,6 +524,8 @@ func selectFormationAndBufferTracks(
 		return normalized.Track{}, normalized.Track{}, []string{"exactly 2 lead tracks are required"}
 	}
 
+	// Если caller явно указал formation-путь, мы валидируем этот выбор,
+	// а второй lead автоматически становится буфером.
 	formationTrackID = strings.TrimSpace(formationTrackID)
 	if formationTrackID != "" {
 		formationTrack, bufferTrack, err := chooseLeadTracks(leadTracks, formationTrackID)
@@ -321,6 +543,8 @@ func selectFormationAndBufferTracks(
 		return formationTrack, bufferTrack, reasons
 	}
 
+	// Если явного выбора нет, то кандидатом на formation может быть только тот lead,
+	// который физически способен вместить весь целевой состав длины K.
 	candidates := make([]normalized.Track, 0, len(leadTracks))
 	for _, track := range leadTracks {
 		if track.Capacity >= requiredTargetCount {
@@ -333,6 +557,10 @@ func selectFormationAndBufferTracks(
 		}
 	}
 
+	// Предпочитаем путь с меньшей текущей занятостью,
+	// потому что он требует меньше предварительных маневров.
+	// Если занятость одинакова — выбираем путь с большей вместимостью,
+	// затем — с меньшим TrackID для детерминированности.
 	sort.Slice(candidates, func(i, j int) bool {
 		leftOccupied := occupiedByTrack[candidates[i].TrackID]
 		rightOccupied := occupiedByTrack[candidates[j].TrackID]
@@ -347,6 +575,8 @@ func selectFormationAndBufferTracks(
 
 	formationTrack := candidates[0]
 	var bufferTrack normalized.Track
+	// Фиксированный класс гарантирует ровно два lead-пути,
+	// поэтому буфер — это просто тот путь, который не был выбран formation.
 	for _, track := range leadTracks {
 		if track.TrackID != formationTrack.TrackID {
 			bufferTrack = track
