@@ -16,6 +16,7 @@ import {
   listSchemes,
   planMovement,
   resolveVehicles,
+  saveHeuristicDraftAsScenario,
   updateNormalizedScenario,
   updateScheme,
 } from "../../../shared/api/simulation.js";
@@ -26,6 +27,7 @@ const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2.5;
 const ZOOM_STEP = 0.1;
 const SCENARIO_STEP_MOVE = "MOVE_LOCO";
+const SCENARIO_STEP_MOVE_GROUP = "MOVE_GROUP";
 const SCENARIO_STEP_COUPLE = "COUPLE";
 const SCENARIO_STEP_DECOUPLE = "DECOUPLE";
 const PATH_TYPE_MAIN = "main";
@@ -179,6 +181,9 @@ function buildVehicleCodeMap(vehicles) {
 
 function normalizeScenarioStepType(type) {
   const normalized = String(type || "").trim().toUpperCase();
+  if (normalized === SCENARIO_STEP_MOVE_GROUP) {
+    return normalized;
+  }
   if (normalized === SCENARIO_STEP_COUPLE || normalized === SCENARIO_STEP_DECOUPLE) {
     return normalized;
   }
@@ -210,6 +215,24 @@ function normalizeScenarioStep(step) {
   const type = normalizeScenarioStepType(step?.type);
   const payload = step?.payload && typeof step.payload === "object" ? step.payload : {};
   const id = step?.id || crypto.randomUUID();
+
+  if (type === SCENARIO_STEP_MOVE_GROUP) {
+    return {
+      id,
+      type,
+      payload: {
+        fromPathId: String(payload.fromPathId ?? step?.fromPathId ?? "").trim(),
+        toPathId: String(payload.toPathId ?? step?.toPathId ?? "").trim(),
+        heuristicStepType: String(payload.heuristicStepType ?? step?.heuristicStepType ?? "").trim(),
+        sourceSide: String(payload.sourceSide ?? step?.sourceSide ?? "").trim(),
+        wagonCount: Number(payload.wagonCount ?? step?.wagonCount ?? 0),
+        targetColor: String(payload.targetColor ?? step?.targetColor ?? "").trim(),
+        formationTrackId: String(payload.formationTrackId ?? step?.formationTrackId ?? "").trim(),
+        bufferTrackId: String(payload.bufferTrackId ?? step?.bufferTrackId ?? "").trim(),
+        mainTrackId: String(payload.mainTrackId ?? step?.mainTrackId ?? "").trim(),
+      },
+    };
+  }
 
   if (type === SCENARIO_STEP_MOVE) {
     return {
@@ -399,6 +422,18 @@ function remapScenarioStepsToPersistedTracks(rawSteps, tracks) {
 }
 
 function formatScenarioStepText(step, index, pathNameById) {
+  if (step.type === SCENARIO_STEP_MOVE_GROUP) {
+    return `${index + 1}. ГРУППА: ${formatHeuristicDraftStepText(
+      {
+        step_type: step.payload.heuristicStepType,
+        source_track_id: step.payload.fromPathId,
+        destination_track_id: step.payload.toPathId,
+        source_side: step.payload.sourceSide,
+        wagon_count: step.payload.wagonCount,
+      },
+      pathNameById
+    )}`;
+  }
   if (step.type === SCENARIO_STEP_MOVE) {
     return `${index + 1}. ${step.payload.unitCode}: ${formatPathReference(
       step.payload.fromPathId,
@@ -662,6 +697,24 @@ function buildNormalizedScenarioPayload(name, schemeId, scenarioSteps, sourceVeh
     scheme_id: schemeId,
     scenario_steps: scenarioSteps.map((rawStep, index) => {
       const step = normalizeScenarioStep(rawStep);
+      if (step.type === SCENARIO_STEP_MOVE_GROUP) {
+        return {
+          step_id: step.id || crypto.randomUUID(),
+          step_order: index,
+          step_type: "move_group",
+          from_track_id: step.payload.fromPathId,
+          to_track_id: step.payload.toPathId,
+          payload_json: {
+            heuristic_step_type: step.payload.heuristicStepType,
+            source_side: step.payload.sourceSide,
+            wagon_count: step.payload.wagonCount,
+            target_color: step.payload.targetColor,
+            formation_track_id: step.payload.formationTrackId,
+            buffer_track_id: step.payload.bufferTrackId,
+            main_track_id: step.payload.mainTrackId,
+          },
+        };
+      }
       if (step.type === SCENARIO_STEP_MOVE) {
         const locoId = idByCode.get(normalizeUnitCode(step.payload.unitCode));
         if (!locoId) {
@@ -706,11 +759,33 @@ function buildScenarioStepsFromNormalizedScenario(details, sourceVehicles = []) 
 
   for (const step of details.scenario_steps) {
     const type =
-      step.step_type === "couple"
-        ? SCENARIO_STEP_COUPLE
-        : step.step_type === "decouple"
-          ? SCENARIO_STEP_DECOUPLE
-          : SCENARIO_STEP_MOVE;
+      step.step_type === "move_group"
+        ? SCENARIO_STEP_MOVE_GROUP
+        : step.step_type === "couple"
+          ? SCENARIO_STEP_COUPLE
+          : step.step_type === "decouple"
+            ? SCENARIO_STEP_DECOUPLE
+            : SCENARIO_STEP_MOVE;
+
+    if (type === SCENARIO_STEP_MOVE_GROUP) {
+      const payload = step.payload_json && typeof step.payload_json === "object" ? step.payload_json : {};
+      steps.push({
+        id: step.step_id || crypto.randomUUID(),
+        type,
+        payload: {
+          fromPathId: String(step.from_track_id || "").trim(),
+          toPathId: String(step.to_track_id || "").trim(),
+          heuristicStepType: String(payload.heuristic_step_type || "").trim(),
+          sourceSide: String(payload.source_side || "").trim(),
+          wagonCount: Number(payload.wagon_count || 0),
+          targetColor: String(payload.target_color || "").trim(),
+          formationTrackId: String(payload.formation_track_id || "").trim(),
+          bufferTrackId: String(payload.buffer_track_id || "").trim(),
+          mainTrackId: String(payload.main_track_id || "").trim(),
+        },
+      });
+      continue;
+    }
 
     if (type === SCENARIO_STEP_MOVE) {
       const locoId = step.object1_id;
@@ -817,6 +892,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [savedHeuristicScenarios, setSavedHeuristicScenarios] = useState([]);
   const [selectedHeuristicScenarioId, setSelectedHeuristicScenarioId] = useState("");
   const [lastSavedHeuristicScenarioId, setLastSavedHeuristicScenarioId] = useState("");
+  const [lastSavedStandardScenarioId, setLastSavedStandardScenarioId] = useState("");
 
   const viewWidth = viewport.width / zoom;
   const viewHeight = viewport.height / zoom;
@@ -1294,13 +1370,9 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     }
   }
 
-  async function handleLoadScenario() {
-    if (!selectedScenarioId) {
-      setMovementHint("Выбери сценарий для загрузки.");
-      return;
-    }
+  async function loadScenarioById(scenarioId) {
     try {
-      const scenario = await getNormalizedScenarioDetails(selectedScenarioId);
+      const scenario = await getNormalizedScenarioDetails(scenarioId);
       const schemeId = scenario.scenario?.scheme_id;
       let sourceVehicles = vehicles;
       let initialSnapshot = null;
@@ -1338,6 +1410,14 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     } catch (error) {
       setMovementHint(error.message || "Не удалось загрузить сценарий.");
     }
+  }
+
+  async function handleLoadScenario() {
+    if (!selectedScenarioId) {
+      setMovementHint("Выбери сценарий для загрузки.");
+      return;
+    }
+    await loadScenarioById(selectedScenarioId);
   }
 
   useEffect(() => {
@@ -1621,6 +1701,49 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       setHeuristicDraftError(error.message || "Не удалось загрузить heuristic draft.");
       setMovementHint(error.message || "Не удалось загрузить heuristic draft.");
     }
+  }
+
+  async function handleSaveHeuristicDraftAsScenario() {
+    const heuristicScenarioId =
+      String(
+        heuristicDraftResult?.draft_scenario?.heuristic_scenario_id ||
+        selectedHeuristicScenarioId ||
+        lastSavedHeuristicScenarioId ||
+        ""
+      ).trim();
+
+    if (!heuristicScenarioId) {
+      setMovementHint("Сначала открой или сохрани heuristic draft.");
+      return;
+    }
+
+    try {
+      const response = await saveHeuristicDraftAsScenario({
+        heuristic_scenario_id: heuristicScenarioId,
+      });
+
+      if (!response?.ok || !response?.created_scenario_id) {
+        throw new Error(response?.message || "Не удалось сохранить heuristic draft как сценарий.");
+      }
+
+      setLastSavedStandardScenarioId(response.created_scenario_id);
+      setSelectedScenarioId(String(response.created_scenario_id));
+      await refreshSavedScenarios();
+      setMovementHint("Heuristic draft сохранён как обычный сценарий.");
+    } catch (error) {
+      setMovementHint(error.message || "Не удалось сохранить heuristic draft как сценарий.");
+    }
+  }
+
+  async function handleOpenSavedStandardScenario() {
+    const scenarioId = String(lastSavedStandardScenarioId || "").trim();
+    if (!scenarioId) {
+      setMovementHint("Сначала сохрани heuristic draft как сценарий.");
+      return;
+    }
+
+    setSelectedScenarioId(scenarioId);
+    await loadScenarioById(scenarioId);
   }
 
   async function executeMovement(locoId) {
@@ -3193,6 +3316,21 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                   Open Saved Heuristic Draft
                 </button>
                 <p className="counter">saved id: {lastSavedHeuristicScenarioId || "-"}</p>
+                <button
+                  type="button"
+                  className="toolButton"
+                  onClick={handleSaveHeuristicDraftAsScenario}
+                >
+                  Save as Scenario
+                </button>
+                <button
+                  type="button"
+                  className="toolButton"
+                  onClick={handleOpenSavedStandardScenario}
+                >
+                  Open Saved Scenario
+                </button>
+                <p className="counter">created scenario id: {lastSavedStandardScenarioId || "-"}</p>
                 {savedHeuristicScenarios.length > 0 ? (
                   <div className="scenarioSteps">
                     {savedHeuristicScenarios.map((item) => (

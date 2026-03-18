@@ -437,6 +437,11 @@ type GenerateAndSaveDraftHeuristicScenarioRequest struct {
 	Name                string `json:"name,omitempty"`
 }
 
+type SaveHeuristicAsScenarioRequest struct {
+	HeuristicScenarioID string `json:"heuristic_scenario_id"`
+	Name                string `json:"name,omitempty"`
+}
+
 type DraftHeuristicFeasibilityDTO struct {
 	ChosenFormationTrackID  string   `json:"chosen_formation_track_id"`
 	ChosenBufferTrackID     string   `json:"chosen_buffer_track_id"`
@@ -534,6 +539,14 @@ type GetHeuristicScenarioResponse struct {
 	OK                bool                  `json:"ok"`
 	Message           string                `json:"message,omitempty"`
 	HeuristicScenario *HeuristicScenarioDTO `json:"heuristic_scenario,omitempty"`
+}
+
+type SaveHeuristicAsScenarioResponse struct {
+	OK                bool              `json:"ok"`
+	Message           string            `json:"message,omitempty"`
+	CreatedScenarioID string            `json:"created_scenario_id,omitempty"`
+	Scenario          *ScenarioDTO      `json:"scenario,omitempty"`
+	ScenarioSteps     []ScenarioStepDTO `json:"scenario_steps,omitempty"`
 }
 
 func toDraftHeuristicFeasibilityDTO(item heuristicservice.FixedClassFeasibility) *DraftHeuristicFeasibilityDTO {

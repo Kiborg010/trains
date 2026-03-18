@@ -176,6 +176,10 @@ export async function getHeuristicScenarioDetails(heuristicScenarioId) {
   return getJSON(`/normalized/heuristic/scenarios/${heuristicScenarioId}`);
 }
 
+export async function saveHeuristicDraftAsScenario(payload) {
+  return postJSON("/normalized/heuristic/save-as-scenario", payload);
+}
+
 export async function getExecution(executionId) {
   return getJSON(`/executions/${executionId}`);
 }

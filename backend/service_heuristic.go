@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"trains/backend/normalized"
 	heuristicservice "trains/backend/services/heuristic"
@@ -226,6 +227,88 @@ func GetStoredHeuristicScenario(userID int, id string) (GetHeuristicScenarioResp
 	}, nil
 }
 
+func BuildScenarioStepsFromDraftScenario(scenarioID string, draft normalized.HeuristicScenario) ([]normalized.ScenarioStep, error) {
+	steps := make([]normalized.ScenarioStep, 0, len(draft.Steps))
+	for _, draftStep := range draft.Steps {
+		payload, err := json.Marshal(map[string]any{
+			"heuristic_step_type": draftStep.StepType,
+			"source_side":         draftStep.SourceSide,
+			"wagon_count":         draftStep.WagonCount,
+			"target_color":        draftStep.TargetColor,
+			"formation_track_id":  draftStep.FormationTrackID,
+			"buffer_track_id":     draftStep.BufferTrackID,
+			"main_track_id":       draftStep.MainTrackID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode heuristic step payload: %w", err)
+		}
+
+		fromTrackID := draftStep.SourceTrackID
+		toTrackID := draftStep.DestinationTrackID
+		steps = append(steps, normalized.ScenarioStep{
+			StepID:      fmt.Sprintf("nst-%d-%d", time.Now().UnixNano(), draftStep.StepOrder),
+			ScenarioID:  scenarioID,
+			StepOrder:   draftStep.StepOrder,
+			StepType:    "move_group",
+			FromTrackID: &fromTrackID,
+			ToTrackID:   &toTrackID,
+			PayloadJSON: payload,
+		})
+	}
+	return steps, nil
+}
+
+func SaveHeuristicDraftAsScenario(userID int, req SaveHeuristicAsScenarioRequest) (SaveHeuristicAsScenarioResponse, error) {
+	heuristicScenarioID := strings.TrimSpace(req.HeuristicScenarioID)
+	if heuristicScenarioID == "" {
+		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("heuristic_scenario_id is required")
+	}
+
+	draft, err := appStore.GetHeuristicScenario(heuristicScenarioID, userID)
+	if err != nil {
+		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("failed to load heuristic draft: %w", err)
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = draft.Name
+	}
+	if name == "" {
+		name = fmt.Sprintf("Scenario from %s", heuristicScenarioID)
+	}
+
+	scenario := normalized.Scenario{
+		SchemeID: draft.SchemeID,
+		Name:     name,
+	}
+
+	scenarioID, err := appStore.CreateNormalizedScenario(userID, scenario)
+	if err != nil {
+		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("failed to create standard scenario: %w", err)
+	}
+
+	steps, err := BuildScenarioStepsFromDraftScenario(scenarioID, *draft)
+	if err != nil {
+		return SaveHeuristicAsScenarioResponse{}, err
+	}
+
+	if err := appStore.CreateScenarioSteps(userID, scenarioID, steps); err != nil {
+		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("failed to save standard scenario steps: %w", err)
+	}
+
+	saved, err := appStore.GetNormalizedScenario(scenarioID, userID)
+	if err != nil {
+		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("failed to load created standard scenario: %w", err)
+	}
+
+	return SaveHeuristicAsScenarioResponse{
+		OK:                true,
+		CreatedScenarioID: scenarioID,
+		Scenario:          ptrScenarioDTO(toScenarioDTO(*saved)),
+		ScenarioSteps:     toScenarioStepDTOs(saved.Steps),
+	}, nil
+}
+
 func draftScenarioToStoredSteps(item heuristicservice.DraftScenario) []normalized.HeuristicScenarioStep {
 	result := make([]normalized.HeuristicScenarioStep, 0, len(item.Steps))
 	for _, step := range item.Steps {
@@ -243,4 +326,8 @@ func draftScenarioToStoredSteps(item heuristicservice.DraftScenario) []normalize
 		})
 	}
 	return result
+}
+
+func ptrScenarioDTO(item ScenarioDTO) *ScenarioDTO {
+	return &item
 }
