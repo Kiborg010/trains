@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"trains/backend/normalized"
 )
@@ -65,9 +66,31 @@ type lowLevelBuilderState struct {
 //   - BoundaryWagonID — это вагон, с которым локомотив сцепляется на выбранной стороне
 //   - SourceBoundaryIndex — индекс этого крайнего вагона на исходном пути
 type lowLevelGroupSelection struct {
-	Wagons              []normalized.Wagon
-	BoundaryWagonID     string
-	SourceBoundaryIndex int
+	Wagons               []normalized.Wagon
+	BoundaryWagonID      string
+	SourceBoundaryIndex  int
+	ApproachIndex        int
+	NormalizedSourceSide string
+}
+
+// lowLevelDestinationPlacement описывает, как именно builder собирается
+// положить переносимую группу на путь назначения.
+//
+// Почему это выделено в отдельную структуру:
+//   - одного только "первого свободного индекса" недостаточно, чтобы сохранять
+//     смысл состава при prepend/append операциях
+//   - builder должен отдельно знать:
+//   - с какого индекса начинается новая группа
+//   - рядом с каким индексом после переноса окажется локомотив
+//   - кладётся ли группа в голову или в хвост текущего состава
+//
+// Инварианты:
+//   - StartIndex и BoundaryIndex относятся уже к новому состоянию пути назначения
+//   - PlaceAtStart == true означает prepend новой группы перед существующими вагонами пути
+type lowLevelDestinationPlacement struct {
+	StartIndex    int
+	BoundaryIndex int
+	PlaceAtStart  bool
 }
 
 // BuildLowLevelScenarioStepsFromHeuristicOperations строит первый низкоуровневый
@@ -126,7 +149,7 @@ func BuildLowLevelScenarioStepsFromHeuristicOperations(
 			return nil, err
 		}
 
-		destinationStartIndex, destinationBoundaryIndex, err := reserveDestinationPlacement(state, operation, selection)
+		destinationPlacement, err := reserveDestinationPlacement(state, operation, selection)
 		if err != nil {
 			return nil, err
 		}
@@ -140,7 +163,7 @@ func BuildLowLevelScenarioStepsFromHeuristicOperations(
 			state.Locomotive.TrackID,
 			state.Locomotive.TrackIndex,
 			operation.SourceTrackID,
-			selection.SourceBoundaryIndex,
+			selection.ApproachIndex,
 			buildLowLevelStepPayload("approach", operation, selection.Wagons),
 		))
 		stepOrder++
@@ -168,7 +191,7 @@ func BuildLowLevelScenarioStepsFromHeuristicOperations(
 			operation.SourceTrackID,
 			selection.SourceBoundaryIndex,
 			operation.DestinationTrackID,
-			destinationBoundaryIndex,
+			destinationPlacement.BoundaryIndex,
 			buildLowLevelStepPayload("transfer", operation, selection.Wagons),
 		))
 		stepOrder++
@@ -188,7 +211,7 @@ func BuildLowLevelScenarioStepsFromHeuristicOperations(
 		// После генерации шагов обновляем локальное состояние,
 		// чтобы следующая operation начиналась с нового положения локомотива
 		// и уже переставленных вагонов.
-		applyOperationTransfer(state, operation, selection, destinationStartIndex, destinationBoundaryIndex)
+		applyOperationTransfer(state, operation, selection, destinationPlacement)
 	}
 
 	return steps, nil
@@ -260,9 +283,22 @@ func selectOperationGroup(state *lowLevelBuilderState, operation HeuristicOperat
 		)
 	}
 
-	side := operation.SourceSide
+	side := strings.TrimSpace(operation.SourceSide)
 	if side == "" {
-		side = "start"
+		resolvedSide, err := resolveImplicitSourceSide(sourceTrack, wagons)
+		if err != nil {
+			return lowLevelGroupSelection{}, err
+		}
+		side = resolvedSide
+	}
+
+	if operation.OperationType == HeuristicOperationTransferFormationToMain && operation.WagonCount != len(wagons) {
+		return lowLevelGroupSelection{}, fmt.Errorf(
+			"formation-to-main must move the whole formation: requested %d wagons from %s, but formation currently has %d wagons",
+			operation.WagonCount,
+			operation.SourceTrackID,
+			len(wagons),
+		)
 	}
 
 	var group []normalized.Wagon
@@ -293,11 +329,91 @@ func selectOperationGroup(state *lowLevelBuilderState, operation HeuristicOperat
 		boundaryWagon = group[len(group)-1]
 	}
 
+	approachIndex, err := computeApproachIndex(sourceTrack, wagons, side, boundaryWagon.TrackIndex)
+	if err != nil {
+		return lowLevelGroupSelection{}, err
+	}
+
 	return lowLevelGroupSelection{
-		Wagons:              group,
-		BoundaryWagonID:     boundaryWagon.WagonID,
-		SourceBoundaryIndex: boundaryWagon.TrackIndex,
+		Wagons:               group,
+		BoundaryWagonID:      boundaryWagon.WagonID,
+		SourceBoundaryIndex:  boundaryWagon.TrackIndex,
+		ApproachIndex:        approachIndex,
+		NormalizedSourceSide: side,
 	}, nil
+}
+
+// resolveImplicitSourceSide выбирает сторону подхода для операций,
+// у которых source_side явно не задан.
+//
+// На этом этапе builder использует максимально простое правило:
+//   - если перед первым вагоном есть свободный индекс, используем start
+//   - иначе, если после последнего вагона есть свободный индекс, используем end
+//   - иначе возвращаем ошибку
+func resolveImplicitSourceSide(sourceTrack normalized.Track, sourceWagons []normalized.Wagon) (string, error) {
+	if len(sourceWagons) == 0 {
+		return "", fmt.Errorf("cannot resolve source side on empty track %s", sourceTrack.TrackID)
+	}
+
+	firstIndex := sourceWagons[0].TrackIndex
+	lastIndex := sourceWagons[len(sourceWagons)-1].TrackIndex
+	if firstIndex-1 >= 0 && !isTrackIndexOccupied(sourceWagons, firstIndex-1) {
+		return "start", nil
+	}
+	if lastIndex+1 < sourceTrack.Capacity && !isTrackIndexOccupied(sourceWagons, lastIndex+1) {
+		return "end", nil
+	}
+	return "", fmt.Errorf("cannot resolve a free adjacent source side on track %s", sourceTrack.TrackID)
+}
+
+// computeApproachIndex рассчитывает индекс, на который должен приехать локомотив
+// перед сцепкой с выбранной группой.
+//
+// Правило этой правки простое:
+//   - для start локомотив встаёт перед первым вагоном группы
+//   - для end локомотив встаёт после последнего вагона группы
+//
+// Важное ограничение:
+// локомотив не должен вставать в индекс, уже занятый вагоном, и не должен
+// выходить за допустимые границы пути.
+func computeApproachIndex(
+	sourceTrack normalized.Track,
+	sourceWagons []normalized.Wagon,
+	side string,
+	boundaryIndex int,
+) (int, error) {
+	approachIndex := boundaryIndex - 1
+	if side == "end" {
+		approachIndex = boundaryIndex + 1
+	}
+
+	if approachIndex < 0 || approachIndex >= sourceTrack.Capacity {
+		return 0, fmt.Errorf(
+			"cannot place locomotive adjacent to group on track %s: approach index %d is outside capacity %d",
+			sourceTrack.TrackID,
+			approachIndex,
+			sourceTrack.Capacity,
+		)
+	}
+
+	if isTrackIndexOccupied(sourceWagons, approachIndex) {
+		return 0, fmt.Errorf(
+			"cannot place locomotive adjacent to group on track %s: approach index %d is already occupied",
+			sourceTrack.TrackID,
+			approachIndex,
+		)
+	}
+
+	return approachIndex, nil
+}
+
+func isTrackIndexOccupied(wagons []normalized.Wagon, targetIndex int) bool {
+	for _, wagon := range wagons {
+		if wagon.TrackIndex == targetIndex {
+			return true
+		}
+	}
+	return false
 }
 
 // reserveDestinationPlacement рассчитывает, куда на пути назначения будет
@@ -316,27 +432,37 @@ func reserveDestinationPlacement(
 	state *lowLevelBuilderState,
 	operation HeuristicOperation,
 	selection lowLevelGroupSelection,
-) (int, int, error) {
+) (lowLevelDestinationPlacement, error) {
 	destinationTrack, ok := state.TracksByID[operation.DestinationTrackID]
 	if !ok {
-		return 0, 0, fmt.Errorf("destination track %s was not found in scheme", operation.DestinationTrackID)
+		return lowLevelDestinationPlacement{}, fmt.Errorf("destination track %s was not found in scheme", operation.DestinationTrackID)
 	}
 
 	existing := cloneAndSortWagons(state.WagonsByTrack[destinationTrack.TrackID])
-	destinationStartIndex := nextFreeTrackIndex(existing)
-	if destinationStartIndex+len(selection.Wagons) > destinationTrack.Capacity {
-		return 0, 0, fmt.Errorf(
+	existingCount := len(existing)
+	if existingCount+len(selection.Wagons) > destinationTrack.Capacity {
+		return lowLevelDestinationPlacement{}, fmt.Errorf(
 			"destination track %s does not have enough capacity for %d wagons",
 			operation.DestinationTrackID,
 			len(selection.Wagons),
 		)
 	}
 
-	destinationBoundaryIndex := destinationStartIndex
-	if operation.SourceSide == "end" {
-		destinationBoundaryIndex = destinationStartIndex + len(selection.Wagons) - 1
+	placeAtStart := selection.NormalizedSourceSide == "start"
+	startIndex := existingCount
+	boundaryIndex := existingCount
+	if placeAtStart {
+		startIndex = 0
+		boundaryIndex = 0
+	} else {
+		boundaryIndex = existingCount + len(selection.Wagons) - 1
 	}
-	return destinationStartIndex, destinationBoundaryIndex, nil
+
+	return lowLevelDestinationPlacement{
+		StartIndex:    startIndex,
+		BoundaryIndex: boundaryIndex,
+		PlaceAtStart:  placeAtStart,
+	}, nil
 }
 
 // applyOperationTransfer обновляет локальное builder state после того,
@@ -349,8 +475,7 @@ func applyOperationTransfer(
 	state *lowLevelBuilderState,
 	operation HeuristicOperation,
 	selection lowLevelGroupSelection,
-	destinationStartIndex int,
-	destinationBoundaryIndex int,
+	destinationPlacement lowLevelDestinationPlacement,
 ) {
 	selectedByID := make(map[string]struct{}, len(selection.Wagons))
 	for _, wagon := range selection.Wagons {
@@ -364,22 +489,29 @@ func applyOperationTransfer(
 		}
 		sourceRemainder = append(sourceRemainder, wagon)
 	}
-	state.WagonsByTrack[operation.SourceTrackID] = cloneAndSortWagons(sourceRemainder)
+	state.WagonsByTrack[operation.SourceTrackID] = compactTrackWagons(operation.SourceTrackID, sourceRemainder)
 
 	movedGroup := make([]normalized.Wagon, 0, len(selection.Wagons))
-	for index, wagon := range selection.Wagons {
+	for index, wagon := range cloneAndSortWagons(selection.Wagons) {
 		next := wagon
 		next.TrackID = operation.DestinationTrackID
-		next.TrackIndex = destinationStartIndex + index
+		next.TrackIndex = destinationPlacement.StartIndex + index
 		movedGroup = append(movedGroup, next)
 	}
 
-	destinationWagons := append([]normalized.Wagon{}, state.WagonsByTrack[operation.DestinationTrackID]...)
-	destinationWagons = append(destinationWagons, movedGroup...)
-	state.WagonsByTrack[operation.DestinationTrackID] = cloneAndSortWagons(destinationWagons)
+	existingDestination := cloneAndSortWagons(state.WagonsByTrack[operation.DestinationTrackID])
+	destinationWagons := make([]normalized.Wagon, 0, len(existingDestination)+len(movedGroup))
+	if destinationPlacement.PlaceAtStart {
+		destinationWagons = append(destinationWagons, movedGroup...)
+		destinationWagons = append(destinationWagons, existingDestination...)
+	} else {
+		destinationWagons = append(destinationWagons, existingDestination...)
+		destinationWagons = append(destinationWagons, movedGroup...)
+	}
+	state.WagonsByTrack[operation.DestinationTrackID] = compactTrackWagons(operation.DestinationTrackID, destinationWagons)
 
 	state.Locomotive.TrackID = operation.DestinationTrackID
-	state.Locomotive.TrackIndex = destinationBoundaryIndex
+	state.Locomotive.TrackIndex = destinationPlacement.BoundaryIndex
 }
 
 // nextFreeTrackIndex возвращает первый свободный TrackIndex на пути.
@@ -398,6 +530,25 @@ func nextFreeTrackIndex(wagons []normalized.Wagon) int {
 		}
 	}
 	return maxIndex + 1
+}
+
+// compactTrackWagons пересобирает состояние одного пути в детерминированный
+// компактный вид: вагоны сохраняют относительный порядок, но их TrackIndex
+// перенумеровываются подряд от нуля.
+//
+// Это нужно builder-у по двум причинам:
+//   - после синтетического переноса групп не оставлять разрывы в индексах
+//   - сделать следующий расчёт destination placement предсказуемым
+func compactTrackWagons(trackID string, wagons []normalized.Wagon) []normalized.Wagon {
+	ordered := cloneAndSortWagons(wagons)
+	result := make([]normalized.Wagon, 0, len(ordered))
+	for index, wagon := range ordered {
+		next := wagon
+		next.TrackID = trackID
+		next.TrackIndex = index
+		result = append(result, next)
+	}
+	return result
 }
 
 // buildMoveLocoScenarioStep создаёт стандартный scenario_step типа move_loco.
