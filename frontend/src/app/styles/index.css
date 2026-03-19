@@ -70,7 +70,38 @@ body,
 .tools {
   display: flex;
   flex-direction: column;
+  gap: 16px;
+}
+
+.toolSection {
+  display: flex;
+  flex-direction: column;
   gap: 10px;
+  padding: 12px;
+  border: 1px solid #233047;
+  border-radius: 12px;
+  background: #111b2d;
+}
+
+.toolSectionHeader {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 0 0 6px;
+  font-size: 11px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #93a4bd;
+  background: #111b2d;
+}
+
+.toolSectionBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .toolButton {
@@ -81,6 +112,21 @@ body,
   padding: 10px 12px;
   text-align: left;
   cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.toolButton:hover {
+  background: #253449;
+}
+
+.toolButtonDanger {
+  border-color: #7f1d1d;
+  background: #3a1115;
+  color: #fecaca;
+}
+
+.toolButtonDanger:hover {
+  background: #57181d;
 }
 
 .toolButton.active {
@@ -150,6 +196,32 @@ body,
   color: #f8fafc;
   padding: 10px 12px;
   width: 100%;
+}
+
+.paintModeBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.colorPaletteRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.colorSwatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 2px solid #334155;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.colorSwatch.active {
+  border-color: #f8fafc;
+  box-shadow: 0 0 0 2px #0f172a;
 }
 
 .scenarioSteps {

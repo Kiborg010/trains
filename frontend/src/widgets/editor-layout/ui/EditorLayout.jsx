@@ -3397,130 +3397,125 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         <div className="panelContent">
           {activePanel === "maneuvers" && (
             <div className="tools">
-              <button
-                type="button"
-                className={`toolButton ${mode === "drawTrack" ? "active" : ""}`}
-                onClick={() => switchMode("drawTrack")}
-              >
-                Добавление пути
-              </button>
-              <button
-                type="button"
-                className={`toolButton ${mode === "placeWagon" ? "active" : ""}`}
-                onClick={() => switchMode("placeWagon")}
-              >
-                Добавление вагонов
-              </button>
-              <button
-                type="button"
-                className={`toolButton ${mode === "placeLocomotive" ? "active" : ""}`}
-                onClick={() => switchMode("placeLocomotive")}
-              >
-                Добавление локомотивов
-              </button>
-              <button
-                type="button"
-                className={`toolButton ${mode === "paintWagon" ? "active" : ""}`}
-                onClick={() => switchMode("paintWagon")}
-              >
-                Покраска
-              </button>
-              <div>
-                <p className="counter" style={{ marginBottom: 6 }}>
-                  Цвет вагона
-                </p>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {WAGON_COLOR_PALETTE.map((color) => (
-                    <button
-                      key={color}
-                      type="button"
-                      onClick={() => setWagonPaintColor(color)}
-                      title={color}
-                      style={{
-                        width: 24,
-                        height: 24,
-                        borderRadius: 6,
-                        background: color,
-                        border: wagonPaintColor === color ? "3px solid #f8fafc" : "2px solid #334155",
-                        boxShadow: wagonPaintColor === color ? "0 0 0 2px #0f172a" : "none",
-                        cursor: "pointer",
-                      }}
-                    />
-                  ))}
+              <section className="toolSection">
+                <div className="toolSectionHeader">Схемы</div>
+                <div className="toolSectionBody">
+                  <input
+                    className="toolInput"
+                    value={layoutName}
+                    onChange={(event) => setLayoutName(event.target.value)}
+                    placeholder="Название схемы"
+                  />
+                  <select
+                    className="toolInput"
+                    value={selectedLayoutId}
+                    onChange={(event) => setSelectedLayoutId(event.target.value)}
+                  >
+                    <option value="">Выбери схему</option>
+                    {savedLayouts.map((layout) => (
+                      <option key={layout.scheme_id} value={String(layout.scheme_id)}>
+                        {layout.name || `Схема ${layout.scheme_id}`}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" className="toolButton" onClick={handleLoadLayout}>
+                    Загрузить схему
+                  </button>
+                  <button type="button" className="toolButton" onClick={handleSaveLayout}>
+                    Сохранить схему
+                  </button>
+                  <button type="button" className="toolButton toolButtonDanger" onClick={handleDeleteLayout}>
+                    Удалить схему
+                  </button>
                 </div>
-              </div>
-              <button
-                type="button"
-                className={`toolButton ${mode === "edit" ? "active" : ""}`}
-                onClick={() => switchMode("edit")}
-              >
-                Редактирование
-              </button>
-              {selectedSegmentIds.length > 0 && (
-                <select
-                  className="toolInput"
-                  value={selectedSegmentsType}
-                  onChange={(event) => handleSelectedSegmentsTypeChange(event.target.value)}
-                >
-                  <option value="">Тип выбранных путей</option>
-                  {PATH_TYPE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <select
-                className="toolInput"
-                value={heuristicLocomotiveId}
-                onChange={(event) => setHeuristicLocomotiveId(event.target.value)}
-              >
-                <option value="">Маневровый локомотив</option>
-                {locomotiveOptions.map((vehicle) => (
-                  <option key={vehicle.id} value={vehicle.id}>
-                    {vehicleCodeById.get(vehicle.id) || vehicle.id}
-                  </option>
-                ))}
-              </select>
-              <button type="button" className="toolButton" onClick={deleteSelectedSegments}>
-                Удалить выбранные пути
-              </button>
-              <button type="button" className="toolButton" onClick={deleteSelectedVehicles}>
-                Удалить выбранные составы
-              </button>
-              <button type="button" className="toolButton" onClick={deleteSelectedAll}>
-                Удалить всё выбранное
-              </button>
-              <button type="button" className="toolButton" onClick={clearLayout}>
-                Очистить все
-              </button>
-              <input
-                className="toolInput"
-                value={layoutName}
-                onChange={(event) => setLayoutName(event.target.value)}
-                placeholder="Название схемы"
-              />
-              <select
-                className="toolInput"
-                value={selectedLayoutId}
-                onChange={(event) => setSelectedLayoutId(event.target.value)}
-              >
-                <option value="">Выбери схему</option>
-                {savedLayouts.map((layout) => (
-                  <option key={layout.scheme_id} value={String(layout.scheme_id)}>
-                    {layout.name || `Схема ${layout.scheme_id}`}
-                  </option>
-                ))}
-              </select>
-              <button type="button" className="toolButton" onClick={handleSaveLayout}>
-                Сохранить схему
-              </button>
-              <button type="button" className="toolButton" onClick={handleLoadLayout}>
-                Загрузить схему
-              </button>
-              <button type="button" className="toolButton" onClick={handleDeleteLayout}>
-                Удалить схему
-              </button>
+              </section>
+
+              <section className="toolSection">
+                <div className="toolSectionHeader">Добавление</div>
+                <div className="toolSectionBody">
+                  <button
+                    type="button"
+                    className={`toolButton ${mode === "drawTrack" ? "active" : ""}`}
+                    onClick={() => switchMode("drawTrack")}
+                  >
+                    Добавление пути
+                  </button>
+                  <button
+                    type="button"
+                    className={`toolButton ${mode === "placeWagon" ? "active" : ""}`}
+                    onClick={() => switchMode("placeWagon")}
+                  >
+                    Добавление вагонов
+                  </button>
+                  <button
+                    type="button"
+                    className={`toolButton ${mode === "placeLocomotive" ? "active" : ""}`}
+                    onClick={() => switchMode("placeLocomotive")}
+                  >
+                    Добавление локомотивов
+                  </button>
+                  <div className="paintModeBlock">
+                    <button
+                      type="button"
+                      className={`toolButton ${mode === "paintWagon" ? "active" : ""}`}
+                      onClick={() => switchMode("paintWagon")}
+                    >
+                      Покраска
+                    </button>
+                    <div className="colorPaletteRow">
+                      {WAGON_COLOR_PALETTE.map((color) => (
+                        <button
+                          key={color}
+                          type="button"
+                          className={`colorSwatch ${wagonPaintColor === color ? "active" : ""}`}
+                          onClick={() => setWagonPaintColor(color)}
+                          title={color}
+                          style={{ background: color }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section className="toolSection">
+                <div className="toolSectionHeader">Работа с объектами</div>
+                <div className="toolSectionBody">
+                  <button
+                    type="button"
+                    className={`toolButton ${mode === "edit" ? "active" : ""}`}
+                    onClick={() => switchMode("edit")}
+                  >
+                    Редактирование
+                  </button>
+                  {selectedSegmentIds.length > 0 && (
+                    <select
+                      className="toolInput"
+                      value={selectedSegmentsType}
+                      onChange={(event) => handleSelectedSegmentsTypeChange(event.target.value)}
+                    >
+                      <option value="">Тип выбранных путей</option>
+                      {PATH_TYPE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <button type="button" className="toolButton toolButtonDanger" onClick={deleteSelectedSegments}>
+                    Удалить выбранные пути
+                  </button>
+                  <button type="button" className="toolButton toolButtonDanger" onClick={deleteSelectedVehicles}>
+                    Удалить выбранные составы
+                  </button>
+                  <button type="button" className="toolButton toolButtonDanger" onClick={deleteSelectedAll}>
+                    Удалить всё выбранное
+                  </button>
+                  <button type="button" className="toolButton toolButtonDanger" onClick={clearLayout}>
+                    Очистить всё
+                  </button>
+                </div>
+              </section>
             </div>
           )}
 
