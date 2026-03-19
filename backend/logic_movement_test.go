@@ -755,15 +755,15 @@ func TestBuildMovementPlanPullsConsistOutToLeftOuterBeforeInternalTransfer(t *te
 		t.Fatal("expected OK=true")
 	}
 
-	foundLeftOuterExtreme := false
+	foundLeftOuterMinimalPullout := false
 	for _, step := range resp.Timeline {
-		if step[0].X == -160 && step[0].Y == 0 {
-			foundLeftOuterExtreme = true
+		if step[0].X == -80 && step[0].Y == 0 {
+			foundLeftOuterMinimalPullout = true
 			break
 		}
 	}
-	if !foundLeftOuterExtreme {
-		t.Fatal("expected consist to fully pull out to the left outer path before internal transfer")
+	if !foundLeftOuterMinimalPullout {
+		t.Fatal("expected consist to stop at the minimal left outer pull-out position before internal transfer")
 	}
 }
 
@@ -808,15 +808,15 @@ func TestBuildMovementPlanPullsConsistOutToRightOuterBeforeInternalTransfer(t *t
 		t.Fatal("expected OK=true")
 	}
 
-	foundRightOuterExtreme := false
+	foundRightOuterMinimalPullout := false
 	for _, step := range resp.Timeline {
-		if step[0].X == 480 && step[0].Y == 0 {
-			foundRightOuterExtreme = true
+		if step[0].X == 400 && step[0].Y == 0 {
+			foundRightOuterMinimalPullout = true
 			break
 		}
 	}
-	if !foundRightOuterExtreme {
-		t.Fatal("expected consist to fully pull out to the right outer path before internal transfer")
+	if !foundRightOuterMinimalPullout {
+		t.Fatal("expected consist to stop at the minimal right outer pull-out position once the whole train cleared the station throat")
 	}
 }
 
@@ -868,15 +868,15 @@ func TestBuildMovementPlanUsesOuterOrientationIndependentlyOfTrackIDs(t *testing
 		t.Fatal("expected OK=true")
 	}
 
-	foundLeftOuterExtreme := false
+	foundLeftOuterMinimalPullout := false
 	for _, step := range resp.Timeline {
-		if step[0].X == -160 && step[0].Y == 0 {
-			foundLeftOuterExtreme = true
+		if step[0].X == -80 && step[0].Y == 0 {
+			foundLeftOuterMinimalPullout = true
 			break
 		}
 	}
-	if !foundLeftOuterExtreme {
-		t.Fatal("expected orientation detection to use the left outer path even with arbitrary track ids")
+	if !foundLeftOuterMinimalPullout {
+		t.Fatal("expected orientation detection to stop at the minimal left outer pull-out position even with arbitrary track ids")
 	}
 }
 
@@ -921,14 +921,14 @@ func TestBuildMovementPlanDoesNotTurnDirectlyBetweenInternalTracksBeforeOuterPul
 		t.Fatal("expected OK=true")
 	}
 
-	reachedOuterExtreme := false
+	reachedOuterMinimalPullout := false
 	for _, step := range resp.Timeline {
 		loco := step[0]
 		wagon := step[1]
-		if loco.X == -160 && loco.Y == 0 {
-			reachedOuterExtreme = true
+		if loco.X == -80 && loco.Y == 0 {
+			reachedOuterMinimalPullout = true
 		}
-		if !reachedOuterExtreme && wagon.Y < 0 {
+		if !reachedOuterMinimalPullout && wagon.Y < 0 {
 			t.Fatalf("wagon entered target internal branch before full pull-out to outer path: loco=(%.2f,%.2f) wagon=(%.2f,%.2f)", loco.X, loco.Y, wagon.X, wagon.Y)
 		}
 	}

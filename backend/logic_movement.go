@@ -753,7 +753,7 @@ func tryBuildOuterPulloutTimeline(
 	if externalSide == "" {
 		return nil, outerPulloutReversalInfo{}, false
 	}
-	outerTargetIndex, err := trackSideIndex(segments, gridSize, outerTrackID, externalSide)
+	outerTargetIndex, err := minimalOuterPulloutIndex(segments, gridSize, outerTrackID, externalSide, len(trainOrder))
 	if err != nil {
 		return nil, outerPulloutReversalInfo{}, false
 	}
@@ -830,6 +830,49 @@ func tryBuildOuterPulloutTimeline(
 		ReversalSlotID: pullPath[len(pullPath)-1],
 		Reason:         "internal-to-internal consist transfer must fully pull out to the station outer track before pushing into the target branch",
 	}, true
+}
+
+func minimalOuterPulloutIndex(
+	segments []Segment,
+	gridSize float64,
+	trackID string,
+	externalSide string,
+	trainLength int,
+) (int, error) {
+	if trainLength < 1 {
+		trainLength = 1
+	}
+	var targetSegment *Segment
+	for i := range segments {
+		if segments[i].ID == trackID {
+			targetSegment = &segments[i]
+			break
+		}
+	}
+	if targetSegment == nil {
+		return 0, fmt.Errorf("track %s was not found", trackID)
+	}
+	points := getSegmentSlots(*targetSegment, gridSize)
+	if len(points) == 0 {
+		return 0, fmt.Errorf("track %s has no slots", trackID)
+	}
+	maxIndex := len(points) - 1
+	switch externalSide {
+	case "start":
+		idx := maxIndex - trainLength
+		if idx < 0 {
+			idx = 0
+		}
+		return idx, nil
+	case "end":
+		idx := trainLength
+		if idx > maxIndex {
+			idx = maxIndex
+		}
+		return idx, nil
+	default:
+		return 0, fmt.Errorf("unsupported external side %q for track %s", externalSide, trackID)
+	}
 }
 
 func simulatePullTimeline(
