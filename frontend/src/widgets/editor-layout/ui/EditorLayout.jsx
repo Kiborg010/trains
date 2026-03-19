@@ -67,6 +67,9 @@ const PATH_TYPE_COLORS = {
   [PATH_TYPE_LEAD]: "#38bdf8",
   [PATH_TYPE_NORMAL]: "#334155",
 };
+const SIDEBAR_MIN_WIDTH = 280;
+const SIDEBAR_DEFAULT_WIDTH = 320;
+const SIDEBAR_MAX_WIDTH = 560;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -1026,6 +1029,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const movementRunIdRef = useRef(0);
   const skipAutoResolvePassesRef = useRef(0);
   const scenarioStopRequestedRef = useRef(false);
+  const sidebarResizeActiveRef = useRef(false);
   const vehicleColorMemoryRef = useRef(new Map());
 
   const [mode, setMode] = useState("drawTrack");
@@ -1072,6 +1076,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [savedLayouts, setSavedLayouts] = useState([]);
   const [selectedLayoutId, setSelectedLayoutId] = useState("");
   const [scenarioName, setScenarioName] = useState("Сценарий 1");
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const [savedScenarios, setSavedScenarios] = useState([]);
   const [selectedScenarioId, setSelectedScenarioId] = useState("");
   const [heuristicTargetColor, setHeuristicTargetColor] = useState("");
@@ -1081,10 +1086,42 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [heuristicDraftResult, setHeuristicDraftResult] = useState(null);
   const [heuristicDraftError, setHeuristicDraftError] = useState("");
   const [isGeneratingHeuristicDraft, setIsGeneratingHeuristicDraft] = useState(false);
+  const [isHeuristicSectionCollapsed, setIsHeuristicSectionCollapsed] = useState(false);
   const [savedHeuristicScenarios, setSavedHeuristicScenarios] = useState([]);
   const [selectedHeuristicScenarioId, setSelectedHeuristicScenarioId] = useState("");
   const [lastSavedHeuristicScenarioId, setLastSavedHeuristicScenarioId] = useState("");
   const [lastSavedStandardScenarioId, setLastSavedStandardScenarioId] = useState("");
+  const [lastSavedStandardScenarioSourceHeuristicId, setLastSavedStandardScenarioSourceHeuristicId] = useState("");
+
+  useEffect(() => {
+    function handlePointerMove(event) {
+      if (!sidebarResizeActiveRef.current) {
+        return;
+      }
+      const nextWidth = clamp(event.clientX, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+      setSidebarWidth(nextWidth);
+    }
+
+    function handlePointerUp() {
+      sidebarResizeActiveRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    }
+
+    window.addEventListener("mousemove", handlePointerMove);
+    window.addEventListener("mouseup", handlePointerUp);
+    return () => {
+      window.removeEventListener("mousemove", handlePointerMove);
+      window.removeEventListener("mouseup", handlePointerUp);
+    };
+  }, []);
+
+  function handleSidebarResizeStart(event) {
+    event.preventDefault();
+    sidebarResizeActiveRef.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }
 
   const viewWidth = viewport.width / zoom;
   const viewHeight = viewport.height / zoom;
@@ -1798,6 +1835,8 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
       setIsGeneratingHeuristicDraft(true);
       setHeuristicDraftError("");
+      setLastSavedStandardScenarioId("");
+      setLastSavedStandardScenarioSourceHeuristicId("");
 
       const response = await generateDraftHeuristicScenario({
         scheme_id: schemeId,
@@ -1841,6 +1880,8 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
       setIsGeneratingHeuristicDraft(true);
       setHeuristicDraftError("");
+      setLastSavedStandardScenarioId("");
+      setLastSavedStandardScenarioSourceHeuristicId("");
 
       const response = await generateAndSaveDraftHeuristicScenario({
         scheme_id: schemeId,
@@ -1884,6 +1925,8 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     }
 
     try {
+      setLastSavedStandardScenarioId("");
+      setLastSavedStandardScenarioSourceHeuristicId("");
       const response = await getHeuristicScenarioDetails(selectedHeuristicScenarioId);
       const draft = response?.heuristic_scenario || null;
       setHeuristicDraftResult({
@@ -1924,6 +1967,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       }
 
       setLastSavedStandardScenarioId(response.created_scenario_id);
+      setLastSavedStandardScenarioSourceHeuristicId(heuristicScenarioId);
       setSelectedScenarioId(String(response.created_scenario_id));
       await refreshSavedScenarios();
       setMovementHint("Heuristic draft сохранён как обычный сценарий.");
@@ -3260,6 +3304,17 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const scenarioStepDisplay = scenarioSteps.length
     ? Math.min(Math.max(currentScenarioStep, 0), scenarioSteps.length)
     : 0;
+  const currentHeuristicScenarioContextId = String(
+    heuristicDraftResult?.draft_scenario?.heuristic_scenario_id ||
+    selectedHeuristicScenarioId ||
+    lastSavedHeuristicScenarioId ||
+    ""
+  ).trim();
+  const visibleCreatedScenarioId =
+    currentHeuristicScenarioContextId &&
+    currentHeuristicScenarioContextId === String(lastSavedStandardScenarioSourceHeuristicId || "").trim()
+      ? lastSavedStandardScenarioId
+      : "";
   const scenarioActiveStepIndex =
     scenarioViewMode === "play" && scenarioExecutingStep != null
       ? scenarioExecutingStep
@@ -3275,7 +3330,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
   return (
     <div className="layout">
-      <aside className="sidebar">
+      <aside className="sidebar" style={{ width: sidebarWidth }}>
         <div className="panelContent">
           {activePanel === "maneuvers" && (
             <div className="tools">
@@ -3468,291 +3523,261 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                 className="scenarioSteps"
                 style={{
                   marginTop: 8,
-                  border: "1px solid #cbd5e1",
+                  border: "1px solid #334155",
                   borderRadius: 10,
                   padding: 10,
-                  background: "#f8fafc",
+                  background: "#111827",
                 }}
               >
                 <div className="scenarioStepRow">
-                  <span className="scenarioStepText">Heuristic Draft Debug</span>
-                </div>
-                <p className="counter">
-                  Схема: {selectedLayoutId || scenarioLayoutId || "-"}
-                </p>
-                <input
-                  className="toolInput"
-                  value={heuristicTargetColor}
-                  onChange={(event) => setHeuristicTargetColor(event.target.value)}
-                  placeholder="target_color"
-                />
-                <input
-                  className="toolInput"
-                  value={heuristicDraftName}
-                  onChange={(event) => setHeuristicDraftName(event.target.value)}
-                  placeholder="name (optional)"
-                />
-                <input
-                  className="toolInput"
-                  value={heuristicRequiredTargetCount}
-                  onChange={(event) => setHeuristicRequiredTargetCount(event.target.value)}
-                  placeholder="required_target_count"
-                />
-                <select
-                  className="toolInput"
-                  value={heuristicFormationTrackId}
-                  onChange={(event) => setHeuristicFormationTrackId(event.target.value)}
-                >
-                  <option value="">formation_track_id (auto)</option>
-                  {leadPathOptions.map((path) => (
-                    <option key={`heuristic-lead-${path.value}`} value={path.value}>
-                      Путь {path.label}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  className="toolButton"
-                  onClick={handleGenerateHeuristicDraft}
-                  disabled={isGeneratingHeuristicDraft}
-                >
-                  {isGeneratingHeuristicDraft ? "Генерация..." : "Generate Heuristic Draft"}
-                </button>
-                <button
-                  type="button"
-                  className="toolButton"
-                  onClick={handleGenerateAndSaveHeuristicDraft}
-                  disabled={isGeneratingHeuristicDraft}
-                >
-                  {isGeneratingHeuristicDraft ? "Сохранение..." : "Generate and Save Heuristic Draft"}
-                </button>
-                <select
-                  className="toolInput"
-                  value={selectedHeuristicScenarioId}
-                  onChange={(event) => setSelectedHeuristicScenarioId(event.target.value)}
-                >
-                  <option value="">Открыть сохранённый heuristic draft</option>
-                  {savedHeuristicScenarios.map((item) => (
-                    <option
-                      key={item.heuristic_scenario_id}
-                      value={String(item.heuristic_scenario_id)}
-                    >
-                      {item.name || `Heuristic Draft ${item.heuristic_scenario_id}`}
-                    </option>
-                  ))}
-                </select>
-                <button type="button" className="toolButton" onClick={handleLoadSavedHeuristicDraft}>
-                  Open Saved Heuristic Draft
-                </button>
-                <p className="counter">saved id: {lastSavedHeuristicScenarioId || "-"}</p>
-                <button
-                  type="button"
-                  className="toolButton"
-                  onClick={handleSaveHeuristicDraftAsScenario}
-                >
-                  Save as Scenario
-                </button>
-                <button
-                  type="button"
-                  className="toolButton"
-                  onClick={handleOpenSavedStandardScenario}
-                >
-                  Open Saved Scenario
-                </button>
-                <p className="counter">created scenario id: {lastSavedStandardScenarioId || "-"}</p>
-                {savedHeuristicScenarios.length > 0 ? (
-                  <div className="scenarioSteps">
-                    {savedHeuristicScenarios.map((item) => (
-                      <div
-                        key={`heuristic-card-${item.heuristic_scenario_id}`}
-                        className="scenarioStepRow"
-                        style={{
-                          display: "block",
-                          border: "1px solid #cbd5e1",
-                          borderRadius: 8,
-                          padding: 8,
-                          background:
-                            selectedHeuristicScenarioId === String(item.heuristic_scenario_id)
-                              ? "#dbeafe"
-                              : "#ffffff",
-                        }}
-                      >
-                        <div className="scenarioStepText">
-                          <strong>{item.name || `Heuristic Draft ${item.heuristic_scenario_id}`}</strong>
-                        </div>
-                        <div className="counter">id: {item.heuristic_scenario_id}</div>
-                        <div className="counter">target_color: {item.target_color}</div>
-                        <div className="counter">required_target_count: {item.required_target_count}</div>
-                        <div className="counter">
-                          formation_track_id:{" "}
-                          {formatHumanReadableTrackLabel(item.formation_track_id, segmentDisplayNameById)}
-                        </div>
-                        <div className="counter">
-                          buffer_track_id:{" "}
-                          {formatHumanReadableTrackLabel(item.buffer_track_id, segmentDisplayNameById)}
-                        </div>
-                        <div className="counter">feasible: {item.feasible ? "true" : "false"}</div>
-                        <div className="counter">
-                          metrics.total_cost: {item.metrics?.total_cost ?? "-"}
-                        </div>
-                        <div className="counter">
-                          metrics.success: {item.metrics == null ? "-" : item.metrics.success ? "true" : "false"}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                <p className="counter">
-                  feasible:{" "}
-                  {heuristicDraftResult == null
-                    ? "-"
-                    : heuristicDraftResult.feasible
-                      ? "true"
-                      : "false"}
-                </p>
-                {heuristicDraftError ? <p className="counter">{heuristicDraftError}</p> : null}
-                {heuristicDraftResult?.reasons?.length ? (
-                  <div className="scenarioSteps">
-                    {heuristicDraftResult.reasons.map((reason, index) => (
-                      <div key={`heuristic-reason-${index}`} className="scenarioStepRow">
-                        <span className="scenarioStepText">{reason}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                {heuristicDraftResult?.draft_scenario ? (
-                  <div
-                    className="scenarioSteps"
-                    style={{
-                      border: "1px solid #cbd5e1",
-                      borderRadius: 8,
-                      padding: 8,
-                      background: "#ffffff",
-                    }}
+                  <span className="scenarioStepText">Эвристический сценарий</span>
+                  <button
+                    type="button"
+                    className="toolButton"
+                    style={{ padding: "6px 10px", fontSize: 12 }}
+                    onClick={() => setIsHeuristicSectionCollapsed((value) => !value)}
                   >
-                    <div className="scenarioStepRow">
-                      <span className="scenarioStepText">Сводка heuristic draft</span>
-                    </div>
+                    {isHeuristicSectionCollapsed ? "Развернуть" : "Свернуть"}
+                  </button>
+                </div>
+                {!isHeuristicSectionCollapsed && (
+                  <>
                     <p className="counter">
-                      name: {heuristicDraftResult.draft_scenario.name || "-"}
+                      Схема: {selectedLayoutId || scenarioLayoutId || "-"}
                     </p>
+                    <input
+                      className="toolInput"
+                      value={heuristicTargetColor}
+                      onChange={(event) => setHeuristicTargetColor(event.target.value)}
+                      placeholder="Целевой цвет вагонов"
+                    />
+                    <input
+                      className="toolInput"
+                      value={heuristicDraftName}
+                      onChange={(event) => setHeuristicDraftName(event.target.value)}
+                      placeholder="Название эвристического сценария"
+                    />
+                    <input
+                      className="toolInput"
+                      value={heuristicRequiredTargetCount}
+                      onChange={(event) => setHeuristicRequiredTargetCount(event.target.value)}
+                      placeholder="Количество целевых вагонов"
+                    />
+                    <select
+                      className="toolInput"
+                      value={heuristicFormationTrackId}
+                      onChange={(event) => setHeuristicFormationTrackId(event.target.value)}
+                    >
+                      <option value="">Путь формирования (авто)</option>
+                      {leadPathOptions.map((path) => (
+                        <option key={`heuristic-lead-${path.value}`} value={path.value}>
+                          Путь {path.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="toolButton"
+                      onClick={handleGenerateHeuristicDraft}
+                      disabled={isGeneratingHeuristicDraft}
+                    >
+                      {isGeneratingHeuristicDraft ? "Генерация..." : "Сгенерировать эвристический сценарий"}
+                    </button>
+                    <button
+                      type="button"
+                      className="toolButton"
+                      onClick={handleGenerateAndSaveHeuristicDraft}
+                      disabled={isGeneratingHeuristicDraft}
+                    >
+                      {isGeneratingHeuristicDraft ? "Сохранение..." : "Сгенерировать и сохранить"}
+                    </button>
+                    <select
+                      className="toolInput"
+                      value={selectedHeuristicScenarioId}
+                      onChange={(event) => setSelectedHeuristicScenarioId(event.target.value)}
+                    >
+                      <option value="">Открыть сохранённый эвристический сценарий</option>
+                      {savedHeuristicScenarios.map((item) => (
+                        <option
+                          key={item.heuristic_scenario_id}
+                          value={String(item.heuristic_scenario_id)}
+                        >
+                          {item.name || `Эвристический сценарий ${item.heuristic_scenario_id}`}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="button" className="toolButton" onClick={handleLoadSavedHeuristicDraft}>
+                      Открыть сохранённый эвристический сценарий
+                    </button>
+                    <p className="counter">id эвристического сценария: {currentHeuristicScenarioContextId || "-"}</p>
+                    <button
+                      type="button"
+                      className="toolButton"
+                      onClick={handleSaveHeuristicDraftAsScenario}
+                    >
+                      Сохранить как обычный сценарий
+                    </button>
+                    <button
+                      type="button"
+                      className="toolButton"
+                      onClick={handleOpenSavedStandardScenario}
+                    >
+                      Открыть сохранённый сценарий
+                    </button>
+                    <p className="counter">id созданного сценария: {visibleCreatedScenarioId || "-"}</p>
                     <p className="counter">
-                      id: {heuristicDraftResult.draft_scenario.heuristic_scenario_id || "-"}
+                      Выполнимость:{" "}
+                      {heuristicDraftResult == null
+                        ? "-"
+                        : heuristicDraftResult.feasible
+                          ? "да"
+                          : "нет"}
                     </p>
-                    <p className="counter">
-                      scheme_id: {heuristicDraftResult.draft_scenario.scheme_id}
-                    </p>
-                    <p className="counter">
-                      target_color: {heuristicDraftResult.draft_scenario.target_color}
-                    </p>
-                    <p className="counter">
-                      required_target_count: {heuristicDraftResult.draft_scenario.required_target_count}
-                    </p>
-                    <p className="counter">
-                      formation_track_id:{" "}
-                      {formatHumanReadableTrackLabel(
-                        heuristicDraftResult.draft_scenario.formation_track_id,
-                        segmentDisplayNameById
-                      )}
-                    </p>
-                    <p className="counter">
-                      buffer_track_id:{" "}
-                      {formatHumanReadableTrackLabel(
-                        heuristicDraftResult.draft_scenario.buffer_track_id,
-                        segmentDisplayNameById
-                      )}
-                    </p>
-                    <p className="counter">
-                      main_track_id:{" "}
-                      {formatHumanReadableTrackLabel(
-                        heuristicDraftResult.draft_scenario.main_track_id,
-                        segmentDisplayNameById
-                      )}
-                    </p>
-                    <p className="counter">
-                      feasible: {heuristicDraftResult.feasible ? "true" : "false"}
-                    </p>
-                    {heuristicDraftResult.metrics ? (
-                      <>
-                        <div className="scenarioStepRow">
-                          <span className="scenarioStepText">Метрики</span>
-                        </div>
-                        <p className="counter">
-                          total_step_count: {heuristicDraftResult.metrics.total_step_count}
-                        </p>
-                        <p className="counter">
-                          total_couple_count: {heuristicDraftResult.metrics.total_couple_count}
-                        </p>
-                        <p className="counter">
-                          total_decouple_count: {heuristicDraftResult.metrics.total_decouple_count}
-                        </p>
-                        <p className="counter">
-                          total_loco_distance: {heuristicDraftResult.metrics.total_loco_distance}
-                        </p>
-                        <p className="counter">
-                          total_switch_cross_count: {heuristicDraftResult.metrics.total_switch_cross_count}
-                        </p>
-                        <p className="counter">
-                          total_cost: {heuristicDraftResult.metrics.total_cost}
-                        </p>
-                        <p className="counter">
-                          success: {heuristicDraftResult.metrics.success ? "true" : "false"}
-                        </p>
-                      </>
-                    ) : null}
-                    <div className="scenarioStepRow">
-                      <span className="scenarioStepText">Шаги</span>
-                    </div>
-                    {Array.isArray(heuristicDraftResult.draft_scenario.steps) &&
-                    heuristicDraftResult.draft_scenario.steps.length > 0 ? (
+                    {heuristicDraftError ? <p className="counter">{heuristicDraftError}</p> : null}
+                    {heuristicDraftResult?.reasons?.length ? (
                       <div className="scenarioSteps">
-                        {heuristicDraftResult.draft_scenario.steps.map((step, index) => (
-                          <div
-                            key={`heuristic-step-${step.step_order ?? index}`}
-                            className="scenarioStepRow"
-                          >
-                            <span className="scenarioStepText">
-                              {index + 1}. {formatHeuristicDraftStepText(step, segmentDisplayNameById)}
-                            </span>
+                        {heuristicDraftResult.reasons.map((reason, index) => (
+                          <div key={`heuristic-reason-${index}`} className="scenarioStepRow">
+                            <span className="scenarioStepText">{reason}</span>
                           </div>
                         ))}
                       </div>
-                    ) : (
-                      <p className="counter">Шагов нет.</p>
-                    )}
-                  </div>
-                ) : null}
-                {heuristicDraftResult ? (
-                  <div className="scenarioSteps">
-                    <div className="scenarioStepRow">
-                      <span className="scenarioStepText">Raw JSON Debug</span>
-                    </div>
-                    <pre
-                      style={{
-                        margin: 0,
-                        padding: 10,
-                        overflowX: "auto",
-                        whiteSpace: "pre-wrap",
-                        wordBreak: "break-word",
-                        borderRadius: 8,
-                        background: "#e2e8f0",
-                        color: "#0f172a",
-                        fontSize: 12,
-                      }}
-                    >
-                      {JSON.stringify(
-                        {
-                          feasible: heuristicDraftResult.feasible,
-                          reasons: heuristicDraftResult.reasons || [],
-                          draft_scenario: heuristicDraftResult.draft_scenario || null,
-                          metrics: heuristicDraftResult.metrics || null,
-                        },
-                        null,
-                        2
-                      )}
-                    </pre>
-                  </div>
-                ) : null}
+                    ) : null}
+                    {heuristicDraftResult?.draft_scenario ? (
+                      <div
+                        className="scenarioSteps"
+                        style={{
+                          border: "1px solid #334155",
+                          borderRadius: 8,
+                          padding: 8,
+                          background: "#0b1220",
+                        }}
+                      >
+                        <div className="scenarioStepRow">
+                          <span className="scenarioStepText">Сводка эвристического сценария</span>
+                        </div>
+                        <p className="counter">
+                          Название: {heuristicDraftResult.draft_scenario.name || "-"}
+                        </p>
+                        <p className="counter">
+                          id: {heuristicDraftResult.draft_scenario.heuristic_scenario_id || "-"}
+                        </p>
+                        <p className="counter">
+                          id схемы: {heuristicDraftResult.draft_scenario.scheme_id}
+                        </p>
+                        <p className="counter">
+                          Целевой цвет: {heuristicDraftResult.draft_scenario.target_color}
+                        </p>
+                        <p className="counter">
+                          Количество целевых вагонов: {heuristicDraftResult.draft_scenario.required_target_count}
+                        </p>
+                        <p className="counter">
+                          Путь формирования:{" "}
+                          {formatHumanReadableTrackLabel(
+                            heuristicDraftResult.draft_scenario.formation_track_id,
+                            segmentDisplayNameById
+                          )}
+                        </p>
+                        <p className="counter">
+                          Вытяжной путь:{" "}
+                          {formatHumanReadableTrackLabel(
+                            heuristicDraftResult.draft_scenario.buffer_track_id,
+                            segmentDisplayNameById
+                          )}
+                        </p>
+                        <p className="counter">
+                          Главный путь:{" "}
+                          {formatHumanReadableTrackLabel(
+                            heuristicDraftResult.draft_scenario.main_track_id,
+                            segmentDisplayNameById
+                          )}
+                        </p>
+                        <p className="counter">
+                          Выполнимость: {heuristicDraftResult.feasible ? "да" : "нет"}
+                        </p>
+                        {heuristicDraftResult.metrics ? (
+                          <>
+                            <div className="scenarioStepRow">
+                              <span className="scenarioStepText">Метрики</span>
+                            </div>
+                            <p className="counter">
+                              Общее число шагов: {heuristicDraftResult.metrics.total_step_count}
+                            </p>
+                            <p className="counter">
+                              Число сцепок: {heuristicDraftResult.metrics.total_couple_count}
+                            </p>
+                            <p className="counter">
+                              Число расцепок: {heuristicDraftResult.metrics.total_decouple_count}
+                            </p>
+                            <p className="counter">
+                              Общий пробег локомотива: {heuristicDraftResult.metrics.total_loco_distance}
+                            </p>
+                            <p className="counter">
+                              Число проходов через стрелки: {heuristicDraftResult.metrics.total_switch_cross_count}
+                            </p>
+                            <p className="counter">
+                              Общая стоимость: {heuristicDraftResult.metrics.total_cost}
+                            </p>
+                            <p className="counter">
+                              Успех: {heuristicDraftResult.metrics.success ? "да" : "нет"}
+                            </p>
+                          </>
+                        ) : null}
+                        <div className="scenarioStepRow">
+                          <span className="scenarioStepText">Шаги</span>
+                        </div>
+                        {Array.isArray(heuristicDraftResult.draft_scenario.steps) &&
+                        heuristicDraftResult.draft_scenario.steps.length > 0 ? (
+                          <div className="scenarioSteps">
+                            {heuristicDraftResult.draft_scenario.steps.map((step, index) => (
+                              <div
+                                key={`heuristic-step-${step.step_order ?? index}`}
+                                className="scenarioStepRow"
+                              >
+                                <span className="scenarioStepText">
+                                  {index + 1}. {formatHeuristicDraftStepText(step, segmentDisplayNameById)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="counter">Шагов нет.</p>
+                        )}
+                      </div>
+                    ) : null}
+                    {heuristicDraftResult ? (
+                      <div className="scenarioSteps">
+                        <div className="scenarioStepRow">
+                          <span className="scenarioStepText">Отладочный JSON</span>
+                        </div>
+                        <pre
+                          style={{
+                            margin: 0,
+                            padding: 10,
+                            overflowX: "auto",
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-word",
+                            borderRadius: 8,
+                            background: "#0b1220",
+                            color: "#cbd5e1",
+                            fontSize: 12,
+                          }}
+                        >
+                          {JSON.stringify(
+                            {
+                              feasible: heuristicDraftResult.feasible,
+                              reasons: heuristicDraftResult.reasons || [],
+                              draft_scenario: heuristicDraftResult.draft_scenario || null,
+                              metrics: heuristicDraftResult.metrics || null,
+                            },
+                            null,
+                            2
+                          )}
+                        </pre>
+                      </div>
+                    ) : null}
+                  </>
+                )}
               </div>
               <select
                 className="toolInput"
@@ -3892,6 +3917,14 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
         <p className="counter">{movementHint || "-"}</p>
       </aside>
+
+      <div
+        className="sidebarResizeHandle"
+        onMouseDown={handleSidebarResizeStart}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Изменить ширину панели инструментов"
+      />
 
       <main className="workspace">
         <header className="toolbar">
