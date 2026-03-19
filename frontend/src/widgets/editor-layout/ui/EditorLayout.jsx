@@ -3080,7 +3080,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   }
 
   function handleCanvasWrapMouseDown(event) {
-    if (event.button !== 1 || isMoving) {
+    if (event.button !== 1) {
       return;
     }
     event.preventDefault();
