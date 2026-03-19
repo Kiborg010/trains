@@ -518,7 +518,7 @@ func planOuterPulloutTransfer(
 	if externalSide == "" {
 		return "", 0, false
 	}
-	return outerTrackID, minimalOuterPulloutIndexForTrack(outerTrack.Capacity, externalSide, len(selection.Wagons)+1), true
+	return outerTrackID, pulloutIndexForTrack(outerTrack.Capacity, externalSide, attachedSide, len(selection.Wagons)+1), true
 }
 
 func detectLowLevelOuterOrientation(
@@ -592,30 +592,38 @@ func locomotiveAttachedSideForSelection(track normalized.Track, sourceSide strin
 	}
 }
 
-func minimalOuterPulloutIndexForTrack(capacity int, externalSide string, trainLength int) int {
+func pulloutIndexForTrack(capacity int, externalSide string, attachedSide string, trainLength int) int {
 	if capacity <= 0 {
 		return 0
 	}
 	if trainLength < 1 {
 		trainLength = 1
 	}
-	maxIndex := capacity - 1
-	switch externalSide {
-	case "start":
-		idx := maxIndex - trainLength
-		if idx < 0 {
-			return 0
-		}
-		return idx
-	case "end":
-		idx := trainLength
-		if idx > maxIndex {
-			return maxIndex
-		}
-		return idx
+	startIndex := centeredConsistStartIndex(capacity, trainLength)
+	switch attachedSide {
+	case "right":
+		return startIndex + trainLength - 1
 	default:
+		return startIndex
+	}
+}
+
+func centeredConsistStartIndex(capacity int, trainLength int) int {
+	if capacity <= 0 {
 		return 0
 	}
+	if trainLength >= capacity {
+		return 0
+	}
+	maxStart := capacity - trainLength
+	startIndex := (capacity - trainLength) / 2
+	if startIndex < 0 {
+		return 0
+	}
+	if startIndex > maxStart {
+		return maxStart
+	}
+	return startIndex
 }
 
 func planDestinationJoin(
@@ -968,6 +976,8 @@ func reserveDestinationPlacement(
 		startIndex = placement.StartIndex
 		boundaryIndex = placement.BoundaryIndex
 		locomotiveIndex = placement.LocomotiveIndex
+	} else if destinationTrack.Type == "lead" {
+		startIndex, boundaryIndex, locomotiveIndex = centeredEmptyLeadPlacement(destinationTrack.Capacity, len(selection.Wagons), placeAtStart)
 	} else if placeAtStart {
 		startIndex = 1
 		boundaryIndex = 1
@@ -990,6 +1000,20 @@ func reserveDestinationPlacement(
 		LocomotiveIndex: locomotiveIndex,
 		PlaceAtStart:    placeAtStart,
 	}, nil
+}
+
+func centeredEmptyLeadPlacement(capacity int, wagonCount int, placeAtStart bool) (int, int, int) {
+	consistLength := wagonCount + 1
+	blockStart := centeredConsistStartIndex(capacity, consistLength)
+	if placeAtStart {
+		locomotiveIndex := blockStart
+		startIndex := blockStart + 1
+		return startIndex, startIndex, locomotiveIndex
+	}
+	startIndex := blockStart
+	boundaryIndex := startIndex + wagonCount - 1
+	locomotiveIndex := boundaryIndex + 1
+	return startIndex, boundaryIndex, locomotiveIndex
 }
 
 func currentConsistBoundary(existing []normalized.Wagon, placeAtStart bool) (lowLevelConsistBoundary, bool) {

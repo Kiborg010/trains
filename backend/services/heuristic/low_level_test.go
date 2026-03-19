@@ -253,8 +253,8 @@ func TestBuildLowLevelScenarioStepsFromHeuristicOperationsForBufferBlockers(t *t
 	if steps[3].ToTrackID == nil || *steps[3].ToTrackID != "lead-1" {
 		t.Fatalf("expected blockers to be transferred to buffer track, got %+v", steps[3].ToTrackID)
 	}
-	if steps[3].ToIndex == nil || *steps[3].ToIndex != 0 {
-		t.Fatalf("expected blockers to be placed from buffer start, got %+v", steps[3].ToIndex)
+	if steps[3].ToIndex == nil || *steps[3].ToIndex != 1 {
+		t.Fatalf("expected blockers to be placed near the center of the empty buffer track, got %+v", steps[3].ToIndex)
 	}
 }
 
@@ -757,6 +757,56 @@ func TestApplyOperationTransferFormationToMainPlacesWholeConsistOnMainTrack(t *t
 	}
 	if state.Locomotive.TrackID != "main" || state.Locomotive.TrackIndex != 8 {
 		t.Fatalf("expected locomotive to remain behind the consist on main in push-mode, got %+v", state.Locomotive)
+	}
+}
+
+func TestPulloutIndexForTrackCentersPushConsistOnLeadTrack(t *testing.T) {
+	if got := pulloutIndexForTrack(12, "start", "right", 3); got != 6 {
+		t.Fatalf("expected left-side push pullout to stop with locomotive near the consist center, got %d", got)
+	}
+	if got := pulloutIndexForTrack(12, "end", "left", 3); got != 4 {
+		t.Fatalf("expected right-side push pullout to stop with locomotive near the consist center, got %d", got)
+	}
+}
+
+func TestPulloutIndexForTrackCentersConsistForEitherOuterSide(t *testing.T) {
+	if got := pulloutIndexForTrack(12, "start", "left", 3); got != 4 {
+		t.Fatalf("expected centered pullout with locomotive on the left edge of the consist, got %d", got)
+	}
+	if got := pulloutIndexForTrack(12, "end", "right", 3); got != 6 {
+		t.Fatalf("expected centered pullout with locomotive on the right edge of the consist, got %d", got)
+	}
+}
+
+func TestReserveDestinationPlacementCentersEmptyLeadTrack(t *testing.T) {
+	state := &lowLevelBuilderState{
+		TracksByID: map[string]normalized.Track{
+			"source":      {TrackID: "source", Type: "sorting", StartX: 100, EndX: 0, Capacity: 12},
+			"lead-empty":  {TrackID: "lead-empty", Type: "lead", StartX: 0, EndX: 100, Capacity: 12},
+		},
+		WagonsByTrack: map[string][]normalized.Wagon{
+			"source": {},
+		},
+	}
+	selection := lowLevelGroupSelection{
+		Wagons: []normalized.Wagon{
+			{WagonID: "w1", TrackID: "source", TrackIndex: 0},
+			{WagonID: "w2", TrackID: "source", TrackIndex: 1},
+		},
+		NormalizedSourceSide: "start",
+	}
+	operation := HeuristicOperation{
+		OperationType:      HeuristicOperationTransferTargetsToFormation,
+		SourceTrackID:      "source",
+		DestinationTrackID: "lead-empty",
+	}
+
+	placement, err := reserveDestinationPlacement(state, operation, selection)
+	if err != nil {
+		t.Fatalf("unexpected placement error: %v", err)
+	}
+	if placement.StartIndex != 4 || placement.BoundaryIndex != 5 || placement.LocomotiveIndex != 6 {
+		t.Fatalf("expected empty lead placement to center the consist, got %+v", placement)
 	}
 }
 
