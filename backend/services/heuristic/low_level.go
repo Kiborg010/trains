@@ -106,6 +106,11 @@ type lowLevelDestinationJoinPlan struct {
 	FinalIndex    int
 }
 
+type lowLevelConsistBoundary struct {
+	Wagon normalized.Wagon
+	Index int
+}
+
 type lowLevelOuterOrientation struct {
 	LeftOuterTrackID    string
 	RightOuterTrackID   string
@@ -186,6 +191,9 @@ func BuildLowLevelScenarioStepsFromHeuristicOperations(
 			return nil, err
 		}
 		destinationJoin := planDestinationJoin(state, operation, selection, destinationPlacement)
+		if err := validateImmediateCouplingPlacement(state, operation, selection, destinationPlacement, destinationJoin); err != nil {
+			return nil, err
+		}
 
 		// Первый шаг skeleton-а: локомотив подъезжает к тому концу пути,
 		// откуда должна быть забрана вся группа операции.
@@ -620,10 +628,19 @@ func planDestinationJoin(
 	if len(existing) == 0 || len(selection.Wagons) == 0 || operation.OperationType == HeuristicOperationTransferFormationToMain {
 		return lowLevelDestinationJoinPlan{}
 	}
+	boundary, ok := currentConsistBoundary(existing, destinationPlacement.PlaceAtStart)
+	if !ok {
+		return lowLevelDestinationJoinPlan{}
+	}
+	sourceTrack, sourceOK := state.TracksByID[operation.SourceTrackID]
+	deliverySide := ""
+	if sourceOK {
+		deliverySide = locomotiveAttachedSideForSelection(sourceTrack, selection.NormalizedSourceSide)
+	}
 
 	if destinationPlacement.PlaceAtStart {
 		moved := cloneAndSortWagons(selection.Wagons)
-		if existing[0].TrackIndex <= len(selection.Wagons) {
+		if deliverySide != "right" && boundary.Index <= len(selection.Wagons) {
 			stageTrackID, stageIndex, ok := findAdjacentLocomotivePlacement(state, operation.DestinationTrackID, "start", operation.SourceTrackID)
 			if ok {
 				return lowLevelDestinationJoinPlan{
@@ -631,7 +648,7 @@ func planDestinationJoin(
 					StageTrackID:  stageTrackID,
 					StageIndex:    stageIndex,
 					JoinObject1ID: moved[len(moved)-1].WagonID,
-					JoinObject2ID: existing[0].WagonID,
+					JoinObject2ID: boundary.Wagon.WagonID,
 					FinalTrackID:  operation.DestinationTrackID,
 					FinalIndex:    destinationPlacement.LocomotiveIndex,
 				}
@@ -642,23 +659,19 @@ func planDestinationJoin(
 			StageTrackID:  operation.DestinationTrackID,
 			StageIndex:    destinationPlacement.LocomotiveIndex,
 			JoinObject1ID: moved[len(moved)-1].WagonID,
-			JoinObject2ID: existing[0].WagonID,
+			JoinObject2ID: boundary.Wagon.WagonID,
 			FinalTrackID:  operation.DestinationTrackID,
 			FinalIndex:    destinationPlacement.LocomotiveIndex,
 		}
 	}
 
-	stageTrackID, stageIndex, ok := findAdjacentLocomotivePlacement(state, operation.DestinationTrackID, "end", operation.SourceTrackID)
-	if !ok {
-		return lowLevelDestinationJoinPlan{}
-	}
 	moved := cloneAndSortWagons(selection.Wagons)
 	return lowLevelDestinationJoinPlan{
 		Enabled:       true,
-		StageTrackID:  stageTrackID,
-		StageIndex:    stageIndex,
+		StageTrackID:  operation.DestinationTrackID,
+		StageIndex:    destinationPlacement.LocomotiveIndex,
 		JoinObject1ID: moved[0].WagonID,
-		JoinObject2ID: existing[len(existing)-1].WagonID,
+		JoinObject2ID: boundary.Wagon.WagonID,
 		FinalTrackID:  operation.DestinationTrackID,
 		FinalIndex:    destinationPlacement.LocomotiveIndex,
 	}
@@ -901,7 +914,7 @@ func reserveDestinationPlacement(
 		reservedEntryOffset = 1
 	}
 
-	placeAtStart := selection.NormalizedSourceSide == "start"
+	placeAtStart := shouldPlaceSelectionAtDestinationStart(state, operation, selection)
 	startIndex := nextFreeTrackIndex(existing) + reservedEntryOffset
 	boundaryIndex := startIndex
 	locomotiveIndex := startIndex + len(selection.Wagons)
@@ -913,21 +926,21 @@ func reserveDestinationPlacement(
 		}
 		boundaryIndex = startIndex
 		locomotiveIndex = startIndex - 1
-	} else if placeAtStart {
-		if len(existing) > 0 {
-			existingMin := existing[0].TrackIndex
-			requiredMin := len(selection.Wagons) + 1
-			if existingMin < requiredMin {
-				existingMin = requiredMin
-			}
-			locomotiveIndex = existingMin - len(selection.Wagons) - 1
-			startIndex = locomotiveIndex + 1
-		} else {
-			startIndex = 1
-			boundaryIndex = 1
-			locomotiveIndex = 0
+	} else if len(existing) > 0 {
+		placement, ok := finalAdjacentJoinSlot(existing, len(selection.Wagons), placeAtStart)
+		if !ok {
+			return lowLevelDestinationPlacement{}, fmt.Errorf(
+				"destination track %s cannot place delivered group adjacent to the current consist boundary",
+				operation.DestinationTrackID,
+			)
 		}
-		boundaryIndex = startIndex
+		startIndex = placement.StartIndex
+		boundaryIndex = placement.BoundaryIndex
+		locomotiveIndex = placement.LocomotiveIndex
+	} else if placeAtStart {
+		startIndex = 1
+		boundaryIndex = 1
+		locomotiveIndex = 0
 	} else {
 		boundaryIndex = startIndex + len(selection.Wagons) - 1
 	}
@@ -946,6 +959,157 @@ func reserveDestinationPlacement(
 		LocomotiveIndex: locomotiveIndex,
 		PlaceAtStart:    placeAtStart,
 	}, nil
+}
+
+func currentConsistBoundary(existing []normalized.Wagon, placeAtStart bool) (lowLevelConsistBoundary, bool) {
+	if len(existing) == 0 {
+		return lowLevelConsistBoundary{}, false
+	}
+	ordered := cloneAndSortWagons(existing)
+	wagon := ordered[len(ordered)-1]
+	if placeAtStart {
+		wagon = ordered[0]
+	}
+	return lowLevelConsistBoundary{
+		Wagon: wagon,
+		Index: wagon.TrackIndex,
+	}, true
+}
+
+func finalAdjacentJoinSlot(existing []normalized.Wagon, selectionCount int, placeAtStart bool) (lowLevelDestinationPlacement, bool) {
+	if selectionCount <= 0 {
+		return lowLevelDestinationPlacement{}, false
+	}
+	boundary, ok := currentConsistBoundary(existing, placeAtStart)
+	if !ok {
+		return lowLevelDestinationPlacement{}, false
+	}
+
+	if placeAtStart {
+		projectedExistingBoundary := boundary.Index
+		requiredMin := selectionCount + 1
+		if projectedExistingBoundary < requiredMin {
+			projectedExistingBoundary = requiredMin
+		}
+		deliveredBoundary := projectedExistingBoundary - 1
+		startIndex := deliveredBoundary - (selectionCount - 1)
+		locomotiveIndex := startIndex - 1
+		return lowLevelDestinationPlacement{
+			StartIndex:      startIndex,
+			BoundaryIndex:   startIndex,
+			LocomotiveIndex: locomotiveIndex,
+			PlaceAtStart:    true,
+		}, true
+	}
+
+	startIndex := boundary.Index + 1
+	return lowLevelDestinationPlacement{
+		StartIndex:      startIndex,
+		BoundaryIndex:   startIndex + selectionCount - 1,
+		LocomotiveIndex: startIndex + selectionCount,
+		PlaceAtStart:    false,
+	}, true
+}
+
+func validateImmediateCouplingPlacement(
+	state *lowLevelBuilderState,
+	operation HeuristicOperation,
+	selection lowLevelGroupSelection,
+	destinationPlacement lowLevelDestinationPlacement,
+	destinationJoin lowLevelDestinationJoinPlan,
+) error {
+	if !destinationJoin.Enabled || operation.OperationType == HeuristicOperationTransferFormationToMain {
+		return nil
+	}
+
+	existing := cloneAndSortWagons(state.WagonsByTrack[operation.DestinationTrackID])
+	boundary, ok := currentConsistBoundary(existing, destinationPlacement.PlaceAtStart)
+	if !ok {
+		return nil
+	}
+
+	expectedPlacement, ok := finalAdjacentJoinSlot(existing, len(selection.Wagons), destinationPlacement.PlaceAtStart)
+	if !ok {
+		return fmt.Errorf("destination join placement could not be resolved for track %s", operation.DestinationTrackID)
+	}
+
+	expectedJoinObject2 := boundary.Wagon.WagonID
+	expectedJoinObject1 := cloneAndSortWagons(selection.Wagons)[0].WagonID
+	if destinationPlacement.PlaceAtStart {
+		moved := cloneAndSortWagons(selection.Wagons)
+		expectedJoinObject1 = moved[len(moved)-1].WagonID
+	}
+
+	actualMovedBoundary := destinationPlacement.StartIndex
+	actualExistingBoundary := boundary.Index
+	if destinationPlacement.PlaceAtStart {
+		projectedExistingBoundary := boundary.Index
+		requiredMin := len(selection.Wagons) + 1
+		if projectedExistingBoundary < requiredMin {
+			projectedExistingBoundary = requiredMin
+		}
+		actualExistingBoundary = projectedExistingBoundary
+		actualMovedBoundary = destinationPlacement.StartIndex + len(selection.Wagons) - 1
+	} else {
+		actualMovedBoundary = destinationPlacement.StartIndex
+	}
+
+	if absInt(actualExistingBoundary-actualMovedBoundary) != 1 {
+		return fmt.Errorf(
+			"destination join is emitted before adjacency is guaranteed: destination=%s existing_boundary=%d delivered_boundary=%d",
+			operation.DestinationTrackID,
+			actualExistingBoundary,
+			actualMovedBoundary,
+		)
+	}
+	if destinationJoin.JoinObject1ID != expectedJoinObject1 || destinationJoin.JoinObject2ID != expectedJoinObject2 {
+		return fmt.Errorf(
+			"destination join uses stale boundary objects on track %s: expected %s-%s, got %s-%s",
+			operation.DestinationTrackID,
+			expectedJoinObject1,
+			expectedJoinObject2,
+			destinationJoin.JoinObject1ID,
+			destinationJoin.JoinObject2ID,
+		)
+	}
+	if expectedPlacement.StartIndex != destinationPlacement.StartIndex || expectedPlacement.LocomotiveIndex != destinationPlacement.LocomotiveIndex {
+		return fmt.Errorf(
+			"destination placement is not aligned with the current consist boundary on track %s",
+			operation.DestinationTrackID,
+		)
+	}
+
+	return nil
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+func shouldPlaceSelectionAtDestinationStart(
+	state *lowLevelBuilderState,
+	operation HeuristicOperation,
+	selection lowLevelGroupSelection,
+) bool {
+	if operation.OperationType == HeuristicOperationTransferFormationToMain {
+		return true
+	}
+
+	sourceTrack, sourceOK := state.TracksByID[operation.SourceTrackID]
+	destinationTrack, destinationOK := state.TracksByID[operation.DestinationTrackID]
+	if !sourceOK || !destinationOK {
+		return selection.NormalizedSourceSide == "start"
+	}
+
+	deliverySide := locomotiveAttachedSideForSelection(sourceTrack, selection.NormalizedSourceSide)
+	startIsLeft := destinationTrack.StartX <= destinationTrack.EndX
+	if deliverySide == "left" {
+		return startIsLeft
+	}
+	return !startIsLeft
 }
 
 // applyOperationTransfer обновляет локальное builder state после того,

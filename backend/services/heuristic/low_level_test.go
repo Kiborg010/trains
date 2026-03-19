@@ -793,3 +793,191 @@ func TestBuildLowLevelScenarioStepsUsesUpdatedDestinationBoundaryForSequentialPr
 		t.Fatalf("expected second prepend push to leave the locomotive at destination:0 after advancing the whole group, got %+v", secondPush)
 	}
 }
+
+func TestBuildLowLevelScenarioStepsStagesOccupiedDestinationJoinThroughAdjacentThroatOnRightSide(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 41,
+		Tracks: []normalized.Track{
+			{TrackID: "source", Type: "sorting", StartX: 0, StartY: 20, EndX: 200, EndY: 20, Capacity: 8, StorageAllowed: true},
+			{TrackID: "destination", Type: "lead", StartX: 0, StartY: -20, EndX: 200, EndY: -20, Capacity: 8, StorageAllowed: true},
+			{TrackID: "source-throat", Type: "lead", StartX: 200, StartY: 20, EndX: 280, EndY: 0, Capacity: 3, StorageAllowed: true},
+			{TrackID: "destination-throat", Type: "lead", StartX: 200, StartY: -20, EndX: 280, EndY: 0, Capacity: 3, StorageAllowed: true},
+			{TrackID: "right-outer", Type: "lead", StartX: 280, StartY: 0, EndX: 400, EndY: 0, Capacity: 8, StorageAllowed: true},
+			{TrackID: "main-left", Type: "main", StartX: -120, StartY: -20, EndX: 0, EndY: -20, Capacity: 8, StorageAllowed: false},
+		},
+		TrackConnections: []normalized.TrackConnection{
+			{ConnectionID: "c1", Track1ID: "source-throat", Track2ID: "source", Track1Side: "start", Track2Side: "end", ConnectionType: "serial"},
+			{ConnectionID: "c2", Track1ID: "destination-throat", Track2ID: "destination", Track1Side: "start", Track2Side: "end", ConnectionType: "serial"},
+			{ConnectionID: "c3", Track1ID: "right-outer", Track2ID: "source-throat", Track1Side: "start", Track2Side: "end", ConnectionType: "switch"},
+			{ConnectionID: "c4", Track1ID: "right-outer", Track2ID: "destination-throat", Track1Side: "start", Track2Side: "end", ConnectionType: "switch"},
+			{ConnectionID: "c5", Track1ID: "destination", Track2ID: "main-left", Track1Side: "start", Track2Side: "end", ConnectionType: "serial"},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "w1", Color: "blue", TrackID: "source", TrackIndex: 6},
+			{WagonID: "f1", Color: "blue", TrackID: "destination", TrackIndex: 5},
+		},
+		Locomotives: []normalized.Locomotive{
+			{LocoID: "l1", TrackID: "right-outer", TrackIndex: 7},
+		},
+	}
+
+	steps, err := BuildLowLevelScenarioStepsFromHeuristicOperations(
+		"nsc-occupied-destination-join-right",
+		scheme,
+		[]HeuristicOperation{
+			{
+				OperationType:      HeuristicOperationTransferTargetsToFormation,
+				SourceTrackID:      "source",
+				DestinationTrackID: "destination",
+				SourceSide:         "end",
+				WagonCount:         1,
+				TargetColor:        "blue",
+				FormationTrackID:   "destination",
+				BufferTrackID:      "right-outer",
+				MainTrackID:        "main-left",
+			},
+		},
+		scheme.Locomotives[0],
+		scheme.Wagons,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(steps) != 6 {
+		t.Fatalf("expected approach/couple/pullout/direct-destination-join/decouple on right-side delivery, got %d steps", len(steps))
+	}
+	if steps[3].StepType != "move_loco" || steps[3].ToTrackID == nil || *steps[3].ToTrackID != "destination" || steps[3].ToIndex == nil || *steps[3].ToIndex != 7 {
+		t.Fatalf("expected right-side delivery to stop directly in the coupling-ready slot on destination, got %+v", steps[3])
+	}
+	if steps[4].StepType != "couple" || steps[4].Object1ID == nil || *steps[4].Object1ID != "w1" || steps[4].Object2ID == nil || *steps[4].Object2ID != "f1" {
+		t.Fatalf("expected delivered wagon w1 to couple immediately with the current right-side boundary wagon f1, got %+v", steps[4])
+	}
+	if steps[5].StepType != "decouple" {
+		t.Fatalf("expected right-side delivery to decouple immediately after the join, got %+v", steps[5])
+	}
+}
+
+func TestBuildLowLevelScenarioStepsUsesUpdatedDestinationBoundaryForSequentialAppendsOnRightSide(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 42,
+		Tracks: []normalized.Track{
+			{TrackID: "source", Type: "sorting", StartX: 0, StartY: 20, EndX: 200, EndY: 20, Capacity: 8, StorageAllowed: true},
+			{TrackID: "destination", Type: "lead", StartX: 0, StartY: -20, EndX: 200, EndY: -20, Capacity: 10, StorageAllowed: true},
+			{TrackID: "source-throat", Type: "lead", StartX: 200, StartY: 20, EndX: 280, EndY: 0, Capacity: 3, StorageAllowed: true},
+			{TrackID: "destination-throat", Type: "lead", StartX: 200, StartY: -20, EndX: 280, EndY: 0, Capacity: 3, StorageAllowed: true},
+			{TrackID: "right-outer", Type: "lead", StartX: 280, StartY: 0, EndX: 400, EndY: 0, Capacity: 8, StorageAllowed: true},
+			{TrackID: "main-left", Type: "main", StartX: -120, StartY: -20, EndX: 0, EndY: -20, Capacity: 8, StorageAllowed: false},
+		},
+		TrackConnections: []normalized.TrackConnection{
+			{ConnectionID: "c1", Track1ID: "source-throat", Track2ID: "source", Track1Side: "start", Track2Side: "end", ConnectionType: "serial"},
+			{ConnectionID: "c2", Track1ID: "destination-throat", Track2ID: "destination", Track1Side: "start", Track2Side: "end", ConnectionType: "serial"},
+			{ConnectionID: "c3", Track1ID: "right-outer", Track2ID: "source-throat", Track1Side: "start", Track2Side: "end", ConnectionType: "switch"},
+			{ConnectionID: "c4", Track1ID: "right-outer", Track2ID: "destination-throat", Track1Side: "start", Track2Side: "end", ConnectionType: "switch"},
+			{ConnectionID: "c5", Track1ID: "destination", Track2ID: "main-left", Track1Side: "start", Track2Side: "end", ConnectionType: "serial"},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "w1", Color: "blue", TrackID: "source", TrackIndex: 5},
+			{WagonID: "w2", Color: "blue", TrackID: "source", TrackIndex: 6},
+			{WagonID: "f1", Color: "blue", TrackID: "destination", TrackIndex: 5},
+		},
+		Locomotives: []normalized.Locomotive{
+			{LocoID: "l1", TrackID: "right-outer", TrackIndex: 7},
+		},
+		Couplings: []normalized.Coupling{
+			{CouplingID: "cw12", Object1ID: "w1", Object2ID: "w2"},
+		},
+	}
+
+	steps, err := BuildLowLevelScenarioStepsFromHeuristicOperations(
+		"nsc-sequential-append-boundary",
+		scheme,
+		[]HeuristicOperation{
+			{
+				OperationType:      HeuristicOperationTransferTargetsToFormation,
+				SourceTrackID:      "source",
+				DestinationTrackID: "destination",
+				SourceSide:         "end",
+				WagonCount:         1,
+				TargetColor:        "blue",
+				FormationTrackID:   "destination",
+				BufferTrackID:      "right-outer",
+				MainTrackID:        "main-left",
+			},
+			{
+				OperationType:      HeuristicOperationTransferTargetsToFormation,
+				SourceTrackID:      "source",
+				DestinationTrackID: "destination",
+				SourceSide:         "end",
+				WagonCount:         1,
+				TargetColor:        "blue",
+				FormationTrackID:   "destination",
+				BufferTrackID:      "right-outer",
+				MainTrackID:        "main-left",
+			},
+		},
+		scheme.Locomotives[0],
+		scheme.Wagons,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(steps) != 13 {
+		t.Fatalf("expected 13 steps for sequential right-side appends with initial source split, got %d", len(steps))
+	}
+
+	secondTransfer := steps[10]
+	if secondTransfer.StepType != "move_loco" || secondTransfer.ToTrackID == nil || *secondTransfer.ToTrackID != "destination" || secondTransfer.ToIndex == nil || *secondTransfer.ToIndex != 8 {
+		t.Fatalf("expected second right-side append to stop directly in the updated coupling-ready slot on destination, got %+v", secondTransfer)
+	}
+	secondJoin := steps[11]
+	if secondJoin.StepType != "couple" || secondJoin.Object1ID == nil || *secondJoin.Object1ID != "w1" || secondJoin.Object2ID == nil || *secondJoin.Object2ID != "w2" {
+		t.Fatalf("expected second right-side append to couple the new wagon w1 to the updated boundary wagon w2, got %+v", secondJoin)
+	}
+	secondDecouple := steps[12]
+	if secondDecouple.StepType != "decouple" {
+		t.Fatalf("expected second right-side append to decouple immediately after the join, got %+v", secondDecouple)
+	}
+}
+
+func TestValidateImmediateCouplingPlacementRejectsNonAdjacentPlan(t *testing.T) {
+	state := &lowLevelBuilderState{
+		WagonsByTrack: map[string][]normalized.Wagon{
+			"destination": {
+				{WagonID: "f1", TrackID: "destination", TrackIndex: 3},
+			},
+		},
+	}
+
+	err := validateImmediateCouplingPlacement(
+		state,
+		HeuristicOperation{
+			OperationType:      HeuristicOperationTransferTargetsToFormation,
+			DestinationTrackID: "destination",
+		},
+		lowLevelGroupSelection{
+			Wagons: []normalized.Wagon{
+				{WagonID: "w1", TrackID: "source", TrackIndex: 1},
+			},
+		},
+		lowLevelDestinationPlacement{
+			StartIndex:      1,
+			BoundaryIndex:   1,
+			LocomotiveIndex: 0,
+			PlaceAtStart:    true,
+		},
+		lowLevelDestinationJoinPlan{
+			Enabled:       true,
+			JoinObject1ID: "w1",
+			JoinObject2ID: "f1",
+			StageTrackID:  "destination",
+			StageIndex:    0,
+			FinalTrackID:  "destination",
+			FinalIndex:    0,
+		},
+	)
+	if err == nil {
+		t.Fatal("expected validateImmediateCouplingPlacement to reject non-adjacent delivery placement")
+	}
+}
