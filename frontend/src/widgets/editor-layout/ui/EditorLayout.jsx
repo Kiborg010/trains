@@ -3488,20 +3488,19 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                   >
                     Редактирование
                   </button>
-                  {selectedSegmentIds.length > 0 && (
-                    <select
-                      className="toolInput"
-                      value={selectedSegmentsType}
-                      onChange={(event) => handleSelectedSegmentsTypeChange(event.target.value)}
-                    >
-                      <option value="">Тип выбранных путей</option>
-                      {PATH_TYPE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  )}
+                  <select
+                    className="toolInput"
+                    value={selectedSegmentsType}
+                    onChange={(event) => handleSelectedSegmentsTypeChange(event.target.value)}
+                    disabled={selectedSegmentIds.length === 0}
+                  >
+                    <option value="">Тип выбранных путей</option>
+                    {PATH_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                   <button type="button" className="toolButton toolButtonDanger" onClick={deleteSelectedSegments}>
                     Удалить выбранные пути
                   </button>
@@ -3542,7 +3541,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
               <button type="button" className="toolButton" onClick={startLocomotiveMovement}>
                 Старт движения
               </button>
-              <button type="button" className="toolButton" onClick={() => stopMovement(false)}>
+              <button type="button" className="toolButton toolButtonDanger" onClick={() => stopMovement(false)}>
                 Стоп
               </button>
             </div>

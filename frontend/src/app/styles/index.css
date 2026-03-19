@@ -198,6 +198,11 @@ body,
   width: 100%;
 }
 
+.toolInput:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
 .paintModeBlock {
   display: flex;
   flex-direction: column;
