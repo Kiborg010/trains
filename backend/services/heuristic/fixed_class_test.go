@@ -226,6 +226,9 @@ func TestEnumerateTargetExtractionCandidatesAndPlan(t *testing.T) {
 	if best.SourceSortingTrackID != "sorting-1" || best.SourceSide != "end" {
 		t.Fatalf("unexpected best candidate: %#v", best)
 	}
+	if best.ChosenBufferTrackID != "lead-1" {
+		t.Fatalf("expected single remaining lead to stay as buffer, got %q", best.ChosenBufferTrackID)
+	}
 
 	plan := BuildOrderedExtractionPlan(state)
 	if len(plan) != 2 {
@@ -274,6 +277,146 @@ func TestEnumerateTargetExtractionCandidatesMarksBufferInfeasible(t *testing.T) 
 	best, ok := ChooseNextTargetExtractionCandidate(candidates)
 	if ok {
 		t.Fatalf("expected no feasible candidate, got %#v", best)
+	}
+}
+
+func TestEnumerateTargetExtractionCandidatesChoosesBestDynamicBufferTrack(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 1,
+		Tracks: []normalized.Track{
+			{TrackID: "main-1", Type: "main", StorageAllowed: false, Capacity: 8},
+			{TrackID: "bypass-1", Type: "bypass", StorageAllowed: false, Capacity: 6},
+			{TrackID: "sorting-1", Type: "sorting", StorageAllowed: true, Capacity: 8},
+			{TrackID: "sorting-2", Type: "sorting", StorageAllowed: true, Capacity: 8},
+			{TrackID: "lead-1", Type: "lead", StorageAllowed: true, Capacity: 4},
+			{TrackID: "lead-2", Type: "lead", StorageAllowed: true, Capacity: 8},
+			{TrackID: "lead-3", Type: "lead", StorageAllowed: true, Capacity: 10},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "f1", Color: "blue", TrackID: "lead-2", TrackIndex: 0},
+			{WagonID: "b1", Color: "blue", TrackID: "lead-1", TrackIndex: 0},
+			{WagonID: "b2", Color: "blue", TrackID: "lead-1", TrackIndex: 1},
+			{WagonID: "t1", Color: "blue", TrackID: "sorting-1", TrackIndex: 0},
+			{WagonID: "r1", Color: "red", TrackID: "sorting-1", TrackIndex: 1},
+		},
+	}
+
+	problem, err := BuildFixedClassProblem(scheme, "red", "lead-2")
+	if err != nil {
+		t.Fatalf("unexpected problem build error: %v", err)
+	}
+	state := BuildFixedClassPlanningState(problem, 1)
+	candidates := EnumerateTargetExtractionCandidates(state)
+	best, ok := ChooseNextTargetExtractionCandidate(candidates)
+	if !ok {
+		t.Fatal("expected feasible candidate")
+	}
+	if best.ChosenBufferTrackID != "lead-3" {
+		t.Fatalf("expected lead-3 as best dynamic buffer, got %q", best.ChosenBufferTrackID)
+	}
+}
+
+func TestEnumerateTargetExtractionCandidatesFeasibleWhenAnyBufferFits(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 1,
+		Tracks: []normalized.Track{
+			{TrackID: "main-1", Type: "main", StorageAllowed: false, Capacity: 8},
+			{TrackID: "bypass-1", Type: "bypass", StorageAllowed: false, Capacity: 6},
+			{TrackID: "sorting-1", Type: "sorting", StorageAllowed: true, Capacity: 8},
+			{TrackID: "sorting-2", Type: "sorting", StorageAllowed: true, Capacity: 8},
+			{TrackID: "lead-1", Type: "lead", StorageAllowed: true, Capacity: 2},
+			{TrackID: "lead-2", Type: "lead", StorageAllowed: true, Capacity: 8},
+			{TrackID: "lead-3", Type: "lead", StorageAllowed: true, Capacity: 5},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "f1", Color: "blue", TrackID: "lead-2", TrackIndex: 0},
+			{WagonID: "x1", Color: "blue", TrackID: "lead-3", TrackIndex: 0},
+			{WagonID: "b1", Color: "blue", TrackID: "sorting-1", TrackIndex: 0},
+			{WagonID: "b2", Color: "blue", TrackID: "sorting-1", TrackIndex: 1},
+			{WagonID: "r1", Color: "red", TrackID: "sorting-1", TrackIndex: 2},
+		},
+	}
+
+	problem, err := BuildFixedClassProblem(scheme, "red", "lead-2")
+	if err != nil {
+		t.Fatalf("unexpected problem build error: %v", err)
+	}
+	state := BuildFixedClassPlanningState(problem, 1)
+	best, ok := ChooseNextTargetExtractionCandidate(EnumerateTargetExtractionCandidates(state))
+	if !ok {
+		t.Fatal("expected feasible candidate")
+	}
+	if best.ChosenBufferTrackID != "lead-3" {
+		t.Fatalf("expected lead-3 to make candidate feasible, got %q", best.ChosenBufferTrackID)
+	}
+}
+
+func TestEnumerateTargetExtractionCandidatesInfeasibleWhenNoDynamicBufferFits(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 1,
+		Tracks: []normalized.Track{
+			{TrackID: "main-1", Type: "main", StorageAllowed: false, Capacity: 8},
+			{TrackID: "bypass-1", Type: "bypass", StorageAllowed: false, Capacity: 6},
+			{TrackID: "sorting-1", Type: "sorting", StorageAllowed: true, Capacity: 8},
+			{TrackID: "sorting-2", Type: "sorting", StorageAllowed: true, Capacity: 8},
+			{TrackID: "lead-1", Type: "lead", StorageAllowed: true, Capacity: 2},
+			{TrackID: "lead-2", Type: "lead", StorageAllowed: true, Capacity: 8},
+			{TrackID: "lead-3", Type: "lead", StorageAllowed: true, Capacity: 2},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "f1", Color: "blue", TrackID: "lead-2", TrackIndex: 0},
+			{WagonID: "b1", Color: "blue", TrackID: "lead-1", TrackIndex: 0},
+			{WagonID: "b1b", Color: "blue", TrackID: "lead-1", TrackIndex: 1},
+			{WagonID: "c1", Color: "blue", TrackID: "lead-3", TrackIndex: 0},
+			{WagonID: "c1b", Color: "blue", TrackID: "lead-3", TrackIndex: 1},
+			{WagonID: "b2", Color: "blue", TrackID: "sorting-1", TrackIndex: 0},
+			{WagonID: "r1", Color: "red", TrackID: "sorting-1", TrackIndex: 1},
+			{WagonID: "b3", Color: "blue", TrackID: "sorting-1", TrackIndex: 2},
+		},
+	}
+
+	problem, err := BuildFixedClassProblem(scheme, "red", "lead-2")
+	if err != nil {
+		t.Fatalf("unexpected problem build error: %v", err)
+	}
+	state := BuildFixedClassPlanningState(problem, 1)
+	best, ok := ChooseNextTargetExtractionCandidate(EnumerateTargetExtractionCandidates(state))
+	if ok {
+		t.Fatalf("expected no feasible candidate, got %#v", best)
+	}
+}
+
+func TestBuildOrderedExtractionPlanUsesDynamicBufferSelection(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 1,
+		Tracks: []normalized.Track{
+			{TrackID: "main-1", Type: "main", StorageAllowed: false, Capacity: 8},
+			{TrackID: "bypass-1", Type: "bypass", StorageAllowed: false, Capacity: 6},
+			{TrackID: "sorting-1", Type: "sorting", StorageAllowed: true, Capacity: 8},
+			{TrackID: "sorting-2", Type: "sorting", StorageAllowed: true, Capacity: 8},
+			{TrackID: "lead-1", Type: "lead", StorageAllowed: true, Capacity: 4},
+			{TrackID: "lead-2", Type: "lead", StorageAllowed: true, Capacity: 8},
+			{TrackID: "lead-3", Type: "lead", StorageAllowed: true, Capacity: 10},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "f1", Color: "blue", TrackID: "lead-2", TrackIndex: 0},
+			{WagonID: "b1", Color: "blue", TrackID: "lead-1", TrackIndex: 0},
+			{WagonID: "b2", Color: "blue", TrackID: "lead-1", TrackIndex: 1},
+			{WagonID: "t1", Color: "blue", TrackID: "sorting-1", TrackIndex: 0},
+			{WagonID: "r1", Color: "red", TrackID: "sorting-1", TrackIndex: 1},
+		},
+	}
+
+	problem, err := BuildFixedClassProblem(scheme, "red", "lead-2")
+	if err != nil {
+		t.Fatalf("unexpected problem build error: %v", err)
+	}
+	plan := BuildOrderedExtractionPlan(BuildFixedClassPlanningState(problem, 1))
+	if len(plan) != 1 {
+		t.Fatalf("expected one extraction decision, got %d", len(plan))
+	}
+	if plan[0].ChosenBufferTrackID != "lead-3" {
+		t.Fatalf("expected ordered plan to keep chosen dynamic buffer lead-3, got %q", plan[0].ChosenBufferTrackID)
 	}
 }
 

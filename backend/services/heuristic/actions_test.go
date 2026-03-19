@@ -45,6 +45,7 @@ func TestBuildHighLevelHeuristicPlan(t *testing.T) {
 		{
 			SourceSortingTrackID: "sorting-1",
 			SourceSide:           "end",
+			ChosenBufferTrackID:  "lead-1",
 			BlockingCount:        0,
 			TargetGroupSize:      2,
 			TakeCount:            2,
@@ -54,6 +55,7 @@ func TestBuildHighLevelHeuristicPlan(t *testing.T) {
 		{
 			SourceSortingTrackID: "sorting-2",
 			SourceSide:           "start",
+			ChosenBufferTrackID:  "lead-1",
 			BlockingCount:        0,
 			TargetGroupSize:      1,
 			TakeCount:            1,
@@ -109,6 +111,7 @@ func TestBuildHighLevelHeuristicPlanAddsBlockerAction(t *testing.T) {
 		{
 			SourceSortingTrackID: "sorting-1",
 			SourceSide:           "start",
+			ChosenBufferTrackID:  "lead-1",
 			BlockingCount:        2,
 			TargetGroupSize:      1,
 			TakeCount:            1,
@@ -133,7 +136,52 @@ func TestBuildHighLevelHeuristicPlanAddsBlockerAction(t *testing.T) {
 	if actions[0].BlockingCount != 2 {
 		t.Fatalf("expected blocking_count=2, got %d", actions[0].BlockingCount)
 	}
+	if actions[0].BufferTrackID != "lead-1" || actions[1].BufferTrackID != "lead-1" {
+		t.Fatalf("expected chosen buffer lead-1 to be propagated, got %#v %#v", actions[0], actions[1])
+	}
 	if actions[1].TakeCount != 1 {
 		t.Fatalf("expected take_count=1, got %d", actions[1].TakeCount)
+	}
+}
+
+func TestBuildHighLevelHeuristicPlanUsesChosenBufferTrackPerDecision(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 1,
+		Tracks: []normalized.Track{
+			{TrackID: "main-1", Type: "main", StorageAllowed: false, Capacity: 8},
+			{TrackID: "bypass-1", Type: "bypass", StorageAllowed: false, Capacity: 6},
+			{TrackID: "sorting-1", Type: "sorting", StorageAllowed: true, Capacity: 8},
+			{TrackID: "sorting-2", Type: "sorting", StorageAllowed: true, Capacity: 8},
+			{TrackID: "lead-1", Type: "lead", StorageAllowed: true, Capacity: 4},
+			{TrackID: "lead-2", Type: "lead", StorageAllowed: true, Capacity: 8},
+			{TrackID: "lead-3", Type: "lead", StorageAllowed: true, Capacity: 10},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "target-1", Color: "red", TrackID: "sorting-1", TrackIndex: 0},
+			{WagonID: "other-1", Color: "blue", TrackID: "lead-2", TrackIndex: 0},
+		},
+	}
+
+	problem, err := BuildFixedClassProblem(scheme, "red", "lead-2")
+	if err != nil {
+		t.Fatalf("unexpected problem build error: %v", err)
+	}
+	state := BuildFixedClassPlanningState(problem, 1)
+	orderedPlan := []TargetExtractionCandidate{
+		{
+			SourceSortingTrackID: "sorting-1",
+			SourceSide:           "start",
+			ChosenBufferTrackID:  "lead-3",
+			BlockingCount:        2,
+			TargetGroupSize:      1,
+			TakeCount:            1,
+			EstimatedCost:        20,
+			Feasible:             true,
+		},
+	}
+
+	actions := BuildHighLevelHeuristicPlan(problem, state, orderedPlan)
+	if actions[0].BufferTrackID != "lead-3" || actions[1].BufferTrackID != "lead-3" {
+		t.Fatalf("expected dynamic buffer lead-3, got %#v %#v", actions[0], actions[1])
 	}
 }

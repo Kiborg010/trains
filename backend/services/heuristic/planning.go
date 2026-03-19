@@ -83,6 +83,7 @@ type FixedClassPlanningState struct {
 	CurrentCollectedCount int
 	FormationTrack        TrackPlanningState
 	BufferTrack           TrackPlanningState
+	BufferTracks          []TrackPlanningState
 	SortingTracks         []TrackPlanningState
 	RemainingTargetWagons []normalized.Wagon
 	CollectedTargetWagons []normalized.Wagon
@@ -113,6 +114,7 @@ type FixedClassPlanningState struct {
 type TargetExtractionCandidate struct {
 	SourceSortingTrackID string
 	SourceSide           string
+	ChosenBufferTrackID  string
 	BlockingCount        int
 	TargetGroupSize      int
 	TakeCount            int
@@ -150,7 +152,22 @@ func BuildFixedClassPlanningState(problem FixedClassProblem, requiredTargetCount
 			Track:  problem.BufferTrack,
 			Wagons: cloneAndSortWagons(problem.WagonsByTrack[problem.BufferTrack.TrackID]),
 		},
+		BufferTracks:  make([]TrackPlanningState, 0, len(problem.LeadTracks)-1),
 		SortingTracks: make([]TrackPlanningState, 0, len(problem.SortingTracks)),
+	}
+
+	for _, track := range problem.LeadTracks {
+		if track.TrackID == problem.FormationTrack.TrackID {
+			continue
+		}
+		trackState := TrackPlanningState{
+			Track:  track,
+			Wagons: cloneAndSortWagons(problem.WagonsByTrack[track.TrackID]),
+		}
+		state.BufferTracks = append(state.BufferTracks, trackState)
+		if track.TrackID == problem.BufferTrack.TrackID {
+			state.BufferTrack = trackState
+		}
 	}
 
 	// Сортировочные пути — это единственные пути, из которых в этой упрощённой
@@ -206,8 +223,8 @@ func EnumerateTargetExtractionCandidates(state FixedClassPlanningState) []Target
 	candidates := make([]TargetExtractionCandidate, 0, len(state.SortingTracks)*2)
 	for _, trackState := range state.SortingTracks {
 		candidates = append(candidates,
-			buildTargetExtractionCandidate(trackState, "start", state.TargetColor, remainingNeeded, availableCapacity(state.BufferTrack)),
-			buildTargetExtractionCandidate(trackState, "end", state.TargetColor, remainingNeeded, availableCapacity(state.BufferTrack)),
+			buildTargetExtractionCandidateWithBuffer(trackState, "start", state.TargetColor, remainingNeeded, state.BufferTracks),
+			buildTargetExtractionCandidateWithBuffer(trackState, "end", state.TargetColor, remainingNeeded, state.BufferTracks),
 		)
 	}
 
@@ -228,6 +245,9 @@ func EnumerateTargetExtractionCandidates(state FixedClassPlanningState) []Target
 		}
 		if left.EstimatedCost != right.EstimatedCost {
 			return left.EstimatedCost < right.EstimatedCost
+		}
+		if left.ChosenBufferTrackID != right.ChosenBufferTrackID {
+			return left.ChosenBufferTrackID < right.ChosenBufferTrackID
 		}
 		if left.SourceSortingTrackID != right.SourceSortingTrackID {
 			return left.SourceSortingTrackID < right.SourceSortingTrackID
@@ -391,6 +411,30 @@ func buildTargetExtractionCandidate(
 	return candidate
 }
 
+func buildTargetExtractionCandidateWithBuffer(
+	trackState TrackPlanningState,
+	side string,
+	targetColor string,
+	remainingNeeded int,
+	bufferTracks []TrackPlanningState,
+) TargetExtractionCandidate {
+	candidate := buildTargetExtractionCandidate(trackState, side, targetColor, remainingNeeded, 0)
+	if candidate.TargetGroupSize <= 0 || candidate.TakeCount <= 0 {
+		candidate.Feasible = false
+		candidate.ChosenBufferTrackID = ""
+		return candidate
+	}
+	bufferTrack, ok := chooseBufferTrackForCandidate(bufferTracks, candidate.BlockingCount)
+	if !ok {
+		candidate.Feasible = false
+		candidate.ChosenBufferTrackID = ""
+		return candidate
+	}
+	candidate.Feasible = true
+	candidate.ChosenBufferTrackID = bufferTrack.Track.TrackID
+	return candidate
+}
+
 // applyExtractionDecision изменяет planning state так,
 // как будто выбранное решение по извлечению успешно выполнено
 // на высоком уровне абстракции.
@@ -415,7 +459,8 @@ func applyExtractionDecision(state *FixedClassPlanningState, candidate TargetExt
 		//   3. остаток, который остаётся на сортировочном пути
 		blocking, targets, remainder := splitTrackForExtraction(source.Wagons, candidate.SourceSide, candidate.BlockingCount, candidate.TakeCount, state.TargetColor)
 		source.Wagons = remainder
-		state.BufferTrack.Wagons = append(state.BufferTrack.Wagons, blocking...)
+		buffer := selectPlanningBufferTrack(state, candidate.ChosenBufferTrackID)
+		buffer.Wagons = append(buffer.Wagons, blocking...)
 		state.FormationTrack.Wagons = append(state.FormationTrack.Wagons, targets...)
 		state.CollectedTargetWagons = append(state.CollectedTargetWagons, targets...)
 		state.CurrentCollectedCount += len(targets)
@@ -425,7 +470,10 @@ func applyExtractionDecision(state *FixedClassPlanningState, candidate TargetExt
 		// чтобы последующие шаги снова видели каноническое представление
 		// порядка вагонов по TrackIndex.
 		source.Wagons = cloneAndSortWagons(source.Wagons)
-		state.BufferTrack.Wagons = cloneAndSortWagons(state.BufferTrack.Wagons)
+		buffer.Wagons = cloneAndSortWagons(buffer.Wagons)
+		if buffer.Track.TrackID == state.BufferTrack.Track.TrackID {
+			state.BufferTrack = *buffer
+		}
 		state.FormationTrack.Wagons = cloneAndSortWagons(state.FormationTrack.Wagons)
 		return
 	}
@@ -492,6 +540,48 @@ func availableCapacity(trackState TrackPlanningState) int {
 	return value
 }
 
+func chooseBufferTrackForCandidate(bufferTracks []TrackPlanningState, blockingCount int) (TrackPlanningState, bool) {
+	candidates := make([]TrackPlanningState, 0, len(bufferTracks))
+	for _, trackState := range bufferTracks {
+		if availableCapacity(trackState) < blockingCount {
+			continue
+		}
+		candidates = append(candidates, trackState)
+	}
+	if len(candidates) == 0 {
+		return TrackPlanningState{}, false
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		left := candidates[i]
+		right := candidates[j]
+		leftAvailable := availableCapacity(left)
+		rightAvailable := availableCapacity(right)
+		if leftAvailable != rightAvailable {
+			return leftAvailable > rightAvailable
+		}
+		if len(left.Wagons) != len(right.Wagons) {
+			return len(left.Wagons) < len(right.Wagons)
+		}
+		if left.Track.Capacity != right.Track.Capacity {
+			return left.Track.Capacity > right.Track.Capacity
+		}
+		return left.Track.TrackID < right.Track.TrackID
+	})
+	return candidates[0], true
+}
+
+func selectPlanningBufferTrack(state *FixedClassPlanningState, trackID string) *TrackPlanningState {
+	if trackID == "" {
+		return &state.BufferTrack
+	}
+	for i := range state.BufferTracks {
+		if state.BufferTracks[i].Track.TrackID == trackID {
+			return &state.BufferTracks[i]
+		}
+	}
+	return &state.BufferTrack
+}
+
 // clonePlanningState глубоко копирует изменяемые части planning state,
 // чтобы вспомогательные функции симуляции могли работать на отдельной копии,
 // не изменяя состояние caller-а.
@@ -505,6 +595,13 @@ func clonePlanningState(state FixedClassPlanningState) FixedClassPlanningState {
 	clone.BufferTrack = TrackPlanningState{
 		Track:  state.BufferTrack.Track,
 		Wagons: cloneAndSortWagons(state.BufferTrack.Wagons),
+	}
+	clone.BufferTracks = make([]TrackPlanningState, 0, len(state.BufferTracks))
+	for _, trackState := range state.BufferTracks {
+		clone.BufferTracks = append(clone.BufferTracks, TrackPlanningState{
+			Track:  trackState.Track,
+			Wagons: cloneAndSortWagons(trackState.Wagons),
+		})
 	}
 	clone.SortingTracks = make([]TrackPlanningState, 0, len(state.SortingTracks))
 	for _, trackState := range state.SortingTracks {
