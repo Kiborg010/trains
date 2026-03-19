@@ -83,6 +83,37 @@ func TestBuildFixedClassProblem(t *testing.T) {
 	}
 }
 
+func TestBuildFixedClassProblemAllowsMultipleNonTargetColors(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 1,
+		Tracks: []normalized.Track{
+			{TrackID: "main-1", Type: "main", StorageAllowed: false},
+			{TrackID: "bypass-1", Type: "bypass", StorageAllowed: false},
+			{TrackID: "sorting-1", Type: "sorting", StorageAllowed: true},
+			{TrackID: "sorting-2", Type: "sorting", StorageAllowed: true},
+			{TrackID: "lead-1", Type: "lead", StorageAllowed: true},
+			{TrackID: "lead-2", Type: "lead", StorageAllowed: true},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "w1", Color: "red", TrackID: "sorting-1", TrackIndex: 0},
+			{WagonID: "w2", Color: "blue", TrackID: "sorting-2", TrackIndex: 1},
+			{WagonID: "w3", Color: "green", TrackID: "lead-2", TrackIndex: 2},
+			{WagonID: "w4", Color: "yellow", TrackID: "lead-1", TrackIndex: 0},
+		},
+	}
+
+	problem, err := BuildFixedClassProblem(scheme, "red", "lead-2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(problem.TargetWagons) != 1 {
+		t.Fatalf("expected 1 target wagon, got %d", len(problem.TargetWagons))
+	}
+	if len(problem.NonTargetWagons) != 3 {
+		t.Fatalf("expected 3 non-target wagons, got %d", len(problem.NonTargetWagons))
+	}
+}
+
 // TestBuildFixedClassProblemRejectsWrongTrackCounts проверяет, что эвристика
 // не принимает схемы, которые не соответствуют минимальному классу.
 //
@@ -148,6 +179,32 @@ func TestCheckFixedClassFeasibilityFeasibleAutoSelection(t *testing.T) {
 	}
 	if result.RequiredTargetCount != 3 {
 		t.Fatalf("expected required target count 3, got %d", result.RequiredTargetCount)
+	}
+}
+
+func TestCheckFixedClassFeasibilityAllowsMultipleNonTargetColors(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 1,
+		Tracks: []normalized.Track{
+			{TrackID: "main-1", Type: "main", StorageAllowed: false, Capacity: 8},
+			{TrackID: "bypass-1", Type: "bypass", StorageAllowed: false, Capacity: 6},
+			{TrackID: "sorting-1", Type: "sorting", StorageAllowed: true, Capacity: 8},
+			{TrackID: "sorting-2", Type: "sorting", StorageAllowed: true, Capacity: 8},
+			{TrackID: "lead-1", Type: "lead", StorageAllowed: true, Capacity: 6},
+			{TrackID: "lead-2", Type: "lead", StorageAllowed: true, Capacity: 8},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "w1", Color: "red", TrackID: "sorting-1", TrackIndex: 0},
+			{WagonID: "w2", Color: "red", TrackID: "sorting-2", TrackIndex: 1},
+			{WagonID: "w3", Color: "blue", TrackID: "lead-2", TrackIndex: 2},
+			{WagonID: "w4", Color: "green", TrackID: "lead-1", TrackIndex: 0},
+			{WagonID: "w5", Color: "yellow", TrackID: "sorting-1", TrackIndex: 2},
+		},
+	}
+
+	result := CheckFixedClassFeasibility(scheme, "red", 2, "")
+	if !result.Feasible {
+		t.Fatalf("expected feasible result with multiple non-target colors, got reasons: %v", result.Reasons)
 	}
 }
 

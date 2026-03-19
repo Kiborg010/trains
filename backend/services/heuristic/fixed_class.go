@@ -246,7 +246,6 @@ func BuildFixedClassProblem(scheme normalized.Scheme, targetColor string, format
 	nonTargetWagons := make([]normalized.Wagon, 0)
 	wagonsByTrack := make(map[string][]normalized.Wagon)
 	tracksByID := make(map[string]normalized.Track, len(scheme.Tracks))
-	colors := map[string]struct{}{}
 	for _, track := range scheme.Tracks {
 		tracksByID[track.TrackID] = track
 	}
@@ -258,7 +257,6 @@ func BuildFixedClassProblem(scheme normalized.Scheme, targetColor string, format
 		if color == "" {
 			return FixedClassProblem{}, fmt.Errorf("wagon %s has empty color", wagon.WagonID)
 		}
-		colors[color] = struct{}{}
 		wagonsByTrack[wagon.TrackID] = append(wagonsByTrack[wagon.TrackID], wagon)
 		if color == targetColor {
 			targetWagons = append(targetWagons, wagon)
@@ -270,12 +268,6 @@ func BuildFixedClassProblem(scheme normalized.Scheme, targetColor string, format
 	// Первая эвристика намеренно узкая:
 	// допускается максимум два цвета и при этом хотя бы один target-вагон.
 	// Иначе планировать просто нечего.
-	if len(colors) > 2 {
-		return FixedClassProblem{}, fmt.Errorf("expected at most 2 wagon colors, got %d", len(colors))
-	}
-	if len(scheme.Wagons) > 0 && len(colors) < 2 {
-		return FixedClassProblem{}, fmt.Errorf("expected exactly 2 wagon colors in scheme with wagons, got %d", len(colors))
-	}
 	if len(targetWagons) == 0 {
 		return FixedClassProblem{}, fmt.Errorf("no wagons of target color %q found", targetColor)
 	}
@@ -417,7 +409,6 @@ func CheckFixedClassFeasibility(scheme normalized.Scheme, targetColor string, re
 	//   - оцениваем текущую занятость путей
 	// Занятость потом используется при выборе formation/buffer.
 	targetCount := 0
-	colors := map[string]struct{}{}
 	occupiedByTrack := map[string]int{}
 	for _, wagon := range scheme.Wagons {
 		color := strings.TrimSpace(wagon.Color)
@@ -425,7 +416,6 @@ func CheckFixedClassFeasibility(scheme normalized.Scheme, targetColor string, re
 			result.Reasons = append(result.Reasons, fmt.Sprintf("wagon %s has empty color", wagon.WagonID))
 			continue
 		}
-		colors[color] = struct{}{}
 		occupiedByTrack[wagon.TrackID]++
 		if color == targetColor {
 			targetCount++
@@ -437,12 +427,6 @@ func CheckFixedClassFeasibility(scheme normalized.Scheme, targetColor string, re
 	// целевой цвет + один "все остальные".
 	// Меньше двух цветов на непустой станции тоже считается недопустимым,
 	// потому что текущий контракт ожидает явное разделение на два класса.
-	if len(colors) > 2 {
-		result.Reasons = append(result.Reasons, fmt.Sprintf("expected at most 2 wagon colors, got %d", len(colors)))
-	}
-	if len(scheme.Wagons) > 0 && len(colors) < 2 {
-		result.Reasons = append(result.Reasons, fmt.Sprintf("expected exactly 2 wagon colors in scheme with wagons, got %d", len(colors)))
-	}
 	if targetCount < requiredTargetCount {
 		result.Reasons = append(result.Reasons, fmt.Sprintf("not enough target wagons: have %d, need %d", targetCount, requiredTargetCount))
 	}
