@@ -357,6 +357,49 @@ function getSegmentDisplayName(segment, index) {
   return String(index + 1);
 }
 
+function mergeSegmentNames(previousSegments, nextSegments) {
+  const prevNameById = new Map(
+    (previousSegments || []).map((segment) => [segment.id, String(segment?.name || "").trim()])
+  );
+  const normalizedNextSegments = Array.isArray(nextSegments) ? nextSegments : [];
+  const usedNames = new Set();
+  let maxNumericName = 0;
+
+  for (const segment of normalizedNextSegments) {
+    const explicitName = String(segment?.name || "").trim();
+    const preservedName = prevNameById.get(segment?.id) || "";
+    const candidate = explicitName || preservedName;
+    if (!candidate) {
+      continue;
+    }
+    usedNames.add(candidate);
+    const numericValue = Number.parseInt(candidate, 10);
+    if (String(numericValue) === candidate && !Number.isNaN(numericValue)) {
+      maxNumericName = Math.max(maxNumericName, numericValue);
+    }
+  }
+
+  return normalizedNextSegments.map((segment) => {
+    const explicitName = String(segment?.name || "").trim();
+    if (explicitName) {
+      return { ...segment, name: explicitName };
+    }
+
+    const preservedName = prevNameById.get(segment?.id) || "";
+    if (preservedName) {
+      return { ...segment, name: preservedName };
+    }
+
+    let nextName = "";
+    do {
+      maxNumericName += 1;
+      nextName = String(maxNumericName);
+    } while (usedNames.has(nextName));
+    usedNames.add(nextName);
+    return { ...segment, name: nextName };
+  });
+}
+
 function getPathDisplayName(pathId, pathNameById) {
   const normalizedId = String(pathId || "").trim();
   if (!normalizedId) {
@@ -1505,7 +1548,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     }
 
     const nextState = response.state || {};
-    setSegments(nextState.segments || []);
+    setSegments((prev) => mergeSegmentNames(prev, nextState.segments || []));
     setVehicles((prev) =>
       mergeVehicleColors(prev, nextState.vehicles || [], vehicleColorMemoryRef.current)
     );
@@ -1557,7 +1600,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         normalizedState.couplings
       );
 
-      setSegments(normalizedState.segments);
+      setSegments((prev) => mergeSegmentNames(prev, normalizedState.segments));
       setVehicles((prev) =>
         mergeVehicleColors(prev, normalizedVehiclesForSave, vehicleColorMemoryRef.current)
       );
@@ -1595,7 +1638,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       const response = await getSchemeDetails(selectedLayoutId);
       const state = buildEditorStateFromSchemeDetails(response);
       stopMovement(true);
-      setSegments(state.segments);
+      setSegments((prev) => mergeSegmentNames(prev, state.segments));
       setVehicles((prev) =>
         mergeVehicleColors(prev, state.vehicles, vehicleColorMemoryRef.current)
       );
@@ -1703,7 +1746,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         const mappedState = buildEditorStateFromSchemeDetails(schemeDetails);
         sourceVehicles = mappedState.vehicles;
         initialSnapshot = cloneLayoutState(mappedState);
-        setSegments(mappedState.segments);
+        setSegments((prev) => mergeSegmentNames(prev, mappedState.segments));
         setVehicles((prev) =>
           mergeVehicleColors(prev, mappedState.vehicles, vehicleColorMemoryRef.current)
         );
@@ -2163,7 +2206,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   function applyLayoutSnapshot(snapshot, skipResolvePasses = 2) {
     const safeSnapshot = cloneLayoutState(snapshot || { segments: [], vehicles: [], couplings: [] });
     skipAutoResolvePassesRef.current = skipResolvePasses;
-    setSegments(safeSnapshot.segments || []);
+    setSegments((prev) => mergeSegmentNames(prev, safeSnapshot.segments || []));
     setVehicles((prev) =>
       mergeVehicleColors(prev, safeSnapshot.vehicles || [], vehicleColorMemoryRef.current)
     );
