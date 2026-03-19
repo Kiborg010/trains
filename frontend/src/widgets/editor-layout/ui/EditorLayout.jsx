@@ -754,6 +754,63 @@ function buildNormalizedSchemePayload(name, segments, vehicles, couplings) {
   };
 }
 
+function cloneNormalizedSchemePayloadWithNewIds(payload) {
+  const trackIdMap = new Map();
+  const objectIdMap = new Map();
+
+  const nextTracks = (payload?.tracks || []).map((track) => {
+    const nextId = `track-${crypto.randomUUID()}`;
+    trackIdMap.set(track.track_id, nextId);
+    return {
+      ...track,
+      track_id: nextId,
+    };
+  });
+
+  const nextWagons = (payload?.wagons || []).map((wagon) => {
+    const nextId = `wagon-${crypto.randomUUID()}`;
+    objectIdMap.set(wagon.wagon_id, nextId);
+    return {
+      ...wagon,
+      wagon_id: nextId,
+      track_id: trackIdMap.get(wagon.track_id) || wagon.track_id,
+    };
+  });
+
+  const nextLocomotives = (payload?.locomotives || []).map((locomotive) => {
+    const nextId = `loco-${crypto.randomUUID()}`;
+    objectIdMap.set(locomotive.loco_id, nextId);
+    return {
+      ...locomotive,
+      loco_id: nextId,
+      track_id: trackIdMap.get(locomotive.track_id) || locomotive.track_id,
+    };
+  });
+
+  const nextConnections = (payload?.track_connections || []).map((connection) => ({
+    ...connection,
+    connection_id: `connection-${crypto.randomUUID()}`,
+    track1_id: trackIdMap.get(connection.track1_id) || connection.track1_id,
+    track2_id: trackIdMap.get(connection.track2_id) || connection.track2_id,
+  }));
+
+  const nextCouplings = (payload?.couplings || []).map((coupling) => ({
+    ...coupling,
+    coupling_id: `coupling-${crypto.randomUUID()}`,
+    object1_id: objectIdMap.get(coupling.object1_id) || coupling.object1_id,
+    object2_id: objectIdMap.get(coupling.object2_id) || coupling.object2_id,
+  }));
+
+  return {
+    ...payload,
+    tracks: nextTracks,
+    track_connections: nextConnections,
+    wagons: nextWagons,
+    locomotives: nextLocomotives,
+    couplings: nextCouplings,
+  };
+}
+
 function buildEditorStateFromSchemeDetails(details) {
   const tracks = Array.isArray(details?.tracks) ? details.tracks : [];
   const segments = tracks.map((track, index) => ({
@@ -1329,6 +1386,12 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
   async function handleSaveLayout() {
     try {
+      const normalizedLayoutName = String(layoutName || "").trim();
+      if (!normalizedLayoutName) {
+        setMovementHint("Укажи название схемы перед сохранением.");
+        return;
+      }
+
       const normalizedState = normalizeEditorLayoutForSave(
         segments,
         vehicles,
@@ -1341,7 +1404,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       );
 
       const payload = buildNormalizedSchemePayload(
-        layoutName,
+        normalizedLayoutName,
         normalizedState.segments,
         normalizedVehiclesForSave,
         normalizedState.couplings
@@ -1355,10 +1418,14 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       setScenarioSteps(normalizedState.scenarioSteps);
 
       let response;
-      if (selectedLayoutId) {
-        response = await updateScheme(selectedLayoutId, payload);
+      const existingByName = savedLayouts.find(
+        (layout) => String(layout?.name || "").trim() === normalizedLayoutName
+      );
+
+      if (existingByName?.scheme_id != null) {
+        response = await updateScheme(existingByName.scheme_id, payload);
       } else {
-        response = await createScheme(payload);
+        response = await createScheme(cloneNormalizedSchemePayloadWithNewIds(payload));
       }
 
       const saved = response.scheme;
@@ -1386,6 +1453,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         mergeVehicleColors(prev, state.vehicles, vehicleColorMemoryRef.current)
       );
       setCouplings(state.couplings);
+      setLayoutName(String(response?.scheme?.name || "").trim() || layoutName);
       setScenarioInitialState(null);
       setScenarioViewMode("start");
       setScenarioExecutingStep(null);
