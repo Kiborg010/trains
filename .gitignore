@@ -4,5 +4,6 @@ QUICKSTART.md
 TRAINSLAB_FULL_CONTEXT.md
 README_PERSONAL.md
 backend/.env
+backend/schema.sql
 .gocache/
 .tmp/

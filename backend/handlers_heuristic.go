@@ -80,6 +80,43 @@ func normalizedHeuristicGenerateAndSaveHandler(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func normalizedHeuristicGenerateFullScenarioHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID, ok := r.Context().Value("userID").(int)
+	if !ok || userID == 0 {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req GenerateFullHeuristicScenarioRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, GenerateFullHeuristicScenarioResponse{
+			OK:      false,
+			Message: "invalid full heuristic scenario request payload",
+		})
+		return
+	}
+
+	resp, err := GenerateFullHeuristicScenario(userID, req)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, GenerateFullHeuristicScenarioResponse{
+			OK:      false,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func normalizedHeuristicScenariosHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)

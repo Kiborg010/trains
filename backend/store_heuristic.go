@@ -130,6 +130,25 @@ func (s *PostgresStore) ListHeuristicScenarios(userID int) ([]normalized.Heurist
 	return result, rows.Err()
 }
 
+func (s *PostgresStore) DeleteHeuristicScenario(userID int, heuristicScenarioID string) error {
+	result, err := s.db.Exec(
+		`DELETE FROM heuristic_scenarios WHERE heuristic_scenario_id = $1 AND user_id = $2`,
+		heuristicScenarioID,
+		userID,
+	)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("heuristic scenario not found")
+	}
+	return nil
+}
+
 func (s *PostgresStore) CreateHeuristicScenarioSteps(userID int, heuristicScenarioID string, steps []normalized.HeuristicScenarioStep) error {
 	var ownerID int
 	if err := s.db.QueryRow(`SELECT user_id FROM heuristic_scenarios WHERE heuristic_scenario_id = $1`, heuristicScenarioID).Scan(&ownerID); err != nil {

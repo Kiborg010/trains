@@ -70,9 +70,10 @@ type CouplingDTO struct {
 }
 
 type ScenarioDTO struct {
-	ScenarioID string `json:"scenario_id"`
-	SchemeID   int    `json:"scheme_id"`
-	Name       string `json:"name"`
+	ScenarioID                string  `json:"scenario_id"`
+	SchemeID                  int     `json:"scheme_id"`
+	Name                      string  `json:"name"`
+	SourceHeuristicScenarioID *string `json:"source_heuristic_scenario_id,omitempty"`
 }
 
 type UpsertNormalizedScenarioRequest struct {
@@ -210,9 +211,10 @@ func toCouplingDTO(item normalized.Coupling) CouplingDTO {
 
 func toScenarioDTO(item normalized.Scenario) ScenarioDTO {
 	return ScenarioDTO{
-		ScenarioID: item.ScenarioID,
-		SchemeID:   item.SchemeID,
-		Name:       item.Name,
+		ScenarioID:                item.ScenarioID,
+		SchemeID:                  item.SchemeID,
+		Name:                      item.Name,
+		SourceHeuristicScenarioID: item.SourceHeuristicScenarioID,
 	}
 }
 
@@ -547,6 +549,26 @@ type SaveHeuristicAsScenarioResponse struct {
 	CreatedScenarioID string            `json:"created_scenario_id,omitempty"`
 	Scenario          *ScenarioDTO      `json:"scenario,omitempty"`
 	ScenarioSteps     []ScenarioStepDTO `json:"scenario_steps,omitempty"`
+}
+
+type GenerateFullHeuristicScenarioRequest struct {
+	SchemeID            int    `json:"scheme_id"`
+	TargetColor         string `json:"target_color"`
+	RequiredTargetCount int    `json:"required_target_count"`
+	FormationTrackID    string `json:"formation_track_id,omitempty"`
+	Name                string `json:"name,omitempty"`
+}
+
+type GenerateFullHeuristicScenarioResponse struct {
+	OK                  bool                          `json:"ok"`
+	Message             string                        `json:"message,omitempty"`
+	Feasible            bool                          `json:"feasible"`
+	Reasons             []string                      `json:"reasons,omitempty"`
+	Feasibility         *DraftHeuristicFeasibilityDTO `json:"feasibility,omitempty"`
+	HeuristicScenarioID string                        `json:"heuristic_scenario_id,omitempty"`
+	CreatedScenarioID   string                        `json:"created_scenario_id,omitempty"`
+	Scenario            *ScenarioDTO                  `json:"scenario,omitempty"`
+	ScenarioSteps       []ScenarioStepDTO             `json:"scenario_steps,omitempty"`
 }
 
 func toDraftHeuristicFeasibilityDTO(item heuristicservice.FixedClassFeasibility) *DraftHeuristicFeasibilityDTO {

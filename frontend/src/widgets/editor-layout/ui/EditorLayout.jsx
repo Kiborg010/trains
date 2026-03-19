@@ -6,17 +6,13 @@ import {
   createScheme,
   deleteNormalizedScenario,
   deleteScheme,
-  generateAndSaveDraftHeuristicScenario,
-  generateDraftHeuristicScenario,
-  getHeuristicScenarioDetails,
+  generateFullHeuristicScenario,
   getNormalizedScenarioDetails,
   getSchemeDetails,
-  listHeuristicScenarios,
   listNormalizedScenarios,
   listSchemes,
   planMovement,
   resolveVehicles,
-  saveHeuristicDraftAsScenario,
   updateNormalizedScenario,
   updateScheme,
 } from "../../../shared/api/simulation.js";
@@ -1218,11 +1214,6 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [heuristicDraftError, setHeuristicDraftError] = useState("");
   const [isGeneratingHeuristicDraft, setIsGeneratingHeuristicDraft] = useState(false);
   const [isHeuristicSectionCollapsed, setIsHeuristicSectionCollapsed] = useState(false);
-  const [savedHeuristicScenarios, setSavedHeuristicScenarios] = useState([]);
-  const [selectedHeuristicScenarioId, setSelectedHeuristicScenarioId] = useState("");
-  const [lastSavedHeuristicScenarioId, setLastSavedHeuristicScenarioId] = useState("");
-  const [lastSavedStandardScenarioId, setLastSavedStandardScenarioId] = useState("");
-  const [lastSavedStandardScenarioSourceHeuristicId, setLastSavedStandardScenarioSourceHeuristicId] = useState("");
 
   useEffect(() => {
     function handlePointerMove(event) {
@@ -1479,15 +1470,13 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
     async function loadSavedData() {
       try {
-        const [layoutsResp, scenariosResp, heuristicResp] = await Promise.all([
+        const [layoutsResp, scenariosResp] = await Promise.all([
           listSchemes(),
           listNormalizedScenarios(),
-          listHeuristicScenarios(),
         ]);
         if (!cancelled) {
           setSavedLayouts(layoutsResp.schemes || []);
           setSavedScenarios(scenariosResp.scenarios || []);
-          setSavedHeuristicScenarios(heuristicResp.heuristic_scenarios || []);
         }
       } catch (error) {
         if (!cancelled) {
@@ -1567,11 +1556,6 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   async function refreshSavedScenarios() {
     const response = await listNormalizedScenarios();
     setSavedScenarios(response.scenarios || []);
-  }
-
-  async function refreshSavedHeuristicScenarios() {
-    const response = await listHeuristicScenarios();
-    setSavedHeuristicScenarios(response.heuristic_scenarios || []);
   }
 
   async function handleSaveLayout() {
@@ -1737,10 +1721,10 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
   async function loadScenarioById(scenarioId) {
     try {
-      const scenario = await getNormalizedScenarioDetails(scenarioId);
-      const schemeId = scenario.scenario?.scheme_id;
+      const scenarioDetails = await getNormalizedScenarioDetails(scenarioId);
+      const schemeId = scenarioDetails.scenario?.scheme_id;
       let sourceVehicles = vehicles;
-      let initialSnapshot = null;
+      let initialSnapshot = cloneLayoutState({ segments, vehicles, couplings });
       if (schemeId) {
         const schemeDetails = await getSchemeDetails(schemeId);
         const mappedState = buildEditorStateFromSchemeDetails(schemeDetails);
@@ -1752,29 +1736,29 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         );
         setCouplings(mappedState.couplings);
       }
-      stopMovement(true);
-      scenarioStopRequestedRef.current = false;
-      setScenarioName(scenario.scenario?.name || "Сценарий");
-      setScenarioLayoutId(
-        schemeId == null || schemeId === ""
-          ? ""
-          : String(schemeId)
-      );
-      const loadedSteps = remapScenarioStepsToCurrentSegments(
-        buildScenarioStepsFromNormalizedScenario(scenario, sourceVehicles),
-        initialSnapshot?.segments || segments
-      );
-      setScenarioSteps(loadedSteps);
-      setCurrentScenarioStep(0);
-      setScenarioStateHistory([]);
-      setScenarioInitialState(initialSnapshot);
-      setScenarioViewMode("start");
-      setScenarioExecutingStep(null);
-
+      applyLoadedScenarioDetails(scenarioDetails, sourceVehicles, initialSnapshot);
       setMovementHint("Сценарий загружен.");
     } catch (error) {
       setMovementHint(error.message || "Не удалось загрузить сценарий.");
     }
+  }
+
+  function applyLoadedScenarioDetails(scenarioDetails, sourceVehicles, initialSnapshot) {
+    const schemeId = scenarioDetails?.scenario?.scheme_id;
+    stopMovement(true);
+    scenarioStopRequestedRef.current = false;
+    setScenarioName(scenarioDetails?.scenario?.name || "Сценарий");
+    setScenarioLayoutId(schemeId == null || schemeId === "" ? "" : String(schemeId));
+    const loadedSteps = remapScenarioStepsToCurrentSegments(
+      buildScenarioStepsFromNormalizedScenario(scenarioDetails, sourceVehicles),
+      initialSnapshot?.segments || segments
+    );
+    setScenarioSteps(loadedSteps);
+    setCurrentScenarioStep(0);
+    setScenarioStateHistory([]);
+    setScenarioInitialState(initialSnapshot);
+    setScenarioViewMode("start");
+    setScenarioExecutingStep(null);
   }
 
   async function handleLoadScenario() {
@@ -1953,50 +1937,6 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       const requiredTargetCount = Number.parseInt(String(heuristicRequiredTargetCount || "").trim(), 10);
       const targetColor = String(heuristicTargetColor || "").trim();
       const formationTrackId = String(heuristicFormationTrackId || "").trim();
-
-      if (Number.isNaN(schemeId) || schemeId <= 0) {
-        throw new Error("Для эвристики выбери сохраненную схему.");
-      }
-      if (!targetColor) {
-        throw new Error("Укажи целевой цвет вагонов.");
-      }
-      if (Number.isNaN(requiredTargetCount) || requiredTargetCount <= 0) {
-        throw new Error("Укажи корректное required_target_count.");
-      }
-
-      setIsGeneratingHeuristicDraft(true);
-      setHeuristicDraftError("");
-      setLastSavedStandardScenarioId("");
-      setLastSavedStandardScenarioSourceHeuristicId("");
-
-      const response = await generateDraftHeuristicScenario({
-        scheme_id: schemeId,
-        target_color: targetColor,
-        required_target_count: requiredTargetCount,
-        ...(formationTrackId ? { formation_track_id: formationTrackId } : {}),
-      });
-
-      setHeuristicDraftResult(response);
-      setMovementHint(
-        response?.feasible
-          ? "Heuristic draft успешно сгенерирован."
-          : "Heuristic draft получен, но задача помечена как infeasible."
-      );
-    } catch (error) {
-      setHeuristicDraftResult(null);
-      setHeuristicDraftError(error.message || "Не удалось сгенерировать heuristic draft.");
-      setMovementHint(error.message || "Не удалось сгенерировать heuristic draft.");
-    } finally {
-      setIsGeneratingHeuristicDraft(false);
-    }
-  }
-
-  async function handleGenerateAndSaveHeuristicDraft() {
-    try {
-      const schemeId = Number.parseInt(String(selectedLayoutId || scenarioLayoutId || "").trim(), 10);
-      const requiredTargetCount = Number.parseInt(String(heuristicRequiredTargetCount || "").trim(), 10);
-      const targetColor = String(heuristicTargetColor || "").trim();
-      const formationTrackId = String(heuristicFormationTrackId || "").trim();
       const draftName = String(heuristicDraftName || "").trim();
 
       if (Number.isNaN(schemeId) || schemeId <= 0) {
@@ -2011,10 +1951,8 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
       setIsGeneratingHeuristicDraft(true);
       setHeuristicDraftError("");
-      setLastSavedStandardScenarioId("");
-      setLastSavedStandardScenarioSourceHeuristicId("");
 
-      const response = await generateAndSaveDraftHeuristicScenario({
+      const response = await generateFullHeuristicScenario({
         scheme_id: schemeId,
         target_color: targetColor,
         required_target_count: requiredTargetCount,
@@ -2022,100 +1960,37 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         ...(draftName ? { name: draftName } : {}),
       });
 
+      setHeuristicDraftResult(response);
       if (!response?.feasible) {
-        setHeuristicDraftResult(response);
-        setLastSavedHeuristicScenarioId("");
-        setMovementHint("Heuristic draft не сохранён: задача infeasible.");
+        setMovementHint("Эвристический сценарий не построен: задача невыполнима.");
         return;
       }
-
-      setHeuristicDraftResult({
-        feasible: response.feasible,
-        reasons: response.reasons || [],
-        draft_scenario: response.heuristic_scenario || null,
-        metrics: response.heuristic_scenario?.metrics || null,
-      });
-      setLastSavedHeuristicScenarioId(response.saved_heuristic_scenario_id || "");
-      if (response.saved_heuristic_scenario_id) {
-        setSelectedHeuristicScenarioId(response.saved_heuristic_scenario_id);
+      if (!response?.scenario || !Array.isArray(response?.scenario_steps)) {
+        throw new Error("Сервер не вернул готовый обычный сценарий.");
       }
-      await refreshSavedHeuristicScenarios();
-      setMovementHint("Heuristic draft сохранён.");
+
+      const currentSnapshot = cloneLayoutState({ segments, vehicles, couplings });
+      applyLoadedScenarioDetails(
+        {
+          ok: true,
+          scenario: response.scenario,
+          scenario_steps: response.scenario_steps,
+        },
+        vehicles,
+        currentSnapshot
+      );
+      if (response?.created_scenario_id) {
+        setSelectedScenarioId(String(response.created_scenario_id));
+      }
+      await refreshSavedScenarios();
+      setMovementHint("Эвристический сценарий сгенерирован и сразу открыт как обычный сценарий.");
     } catch (error) {
-      setHeuristicDraftError(error.message || "Не удалось сохранить heuristic draft.");
-      setMovementHint(error.message || "Не удалось сохранить heuristic draft.");
+      setHeuristicDraftResult(null);
+      setHeuristicDraftError(error.message || "Не удалось сгенерировать эвристический сценарий.");
+      setMovementHint(error.message || "Не удалось сгенерировать эвристический сценарий.");
     } finally {
       setIsGeneratingHeuristicDraft(false);
     }
-  }
-
-  async function handleLoadSavedHeuristicDraft() {
-    if (!selectedHeuristicScenarioId) {
-      setMovementHint("Выбери сохранённый heuristic draft.");
-      return;
-    }
-
-    try {
-      setLastSavedStandardScenarioId("");
-      setLastSavedStandardScenarioSourceHeuristicId("");
-      const response = await getHeuristicScenarioDetails(selectedHeuristicScenarioId);
-      const draft = response?.heuristic_scenario || null;
-      setHeuristicDraftResult({
-        feasible: draft?.feasible ?? false,
-        reasons: draft?.reasons || [],
-        draft_scenario: draft || null,
-        metrics: draft?.metrics || null,
-      });
-      setLastSavedHeuristicScenarioId(draft?.heuristic_scenario_id || selectedHeuristicScenarioId);
-      setMovementHint("Сохранённый heuristic draft загружен.");
-    } catch (error) {
-      setHeuristicDraftError(error.message || "Не удалось загрузить heuristic draft.");
-      setMovementHint(error.message || "Не удалось загрузить heuristic draft.");
-    }
-  }
-
-  async function handleSaveHeuristicDraftAsScenario() {
-    const heuristicScenarioId =
-      String(
-        heuristicDraftResult?.draft_scenario?.heuristic_scenario_id ||
-        selectedHeuristicScenarioId ||
-        lastSavedHeuristicScenarioId ||
-        ""
-      ).trim();
-
-    if (!heuristicScenarioId) {
-      setMovementHint("Сначала открой или сохрани heuristic draft.");
-      return;
-    }
-
-    try {
-      const response = await saveHeuristicDraftAsScenario({
-        heuristic_scenario_id: heuristicScenarioId,
-      });
-
-      if (!response?.ok || !response?.created_scenario_id) {
-        throw new Error(response?.message || "Не удалось сохранить heuristic draft как сценарий.");
-      }
-
-      setLastSavedStandardScenarioId(response.created_scenario_id);
-      setLastSavedStandardScenarioSourceHeuristicId(heuristicScenarioId);
-      setSelectedScenarioId(String(response.created_scenario_id));
-      await refreshSavedScenarios();
-      setMovementHint("Heuristic draft сохранён как обычный сценарий.");
-    } catch (error) {
-      setMovementHint(error.message || "Не удалось сохранить heuristic draft как сценарий.");
-    }
-  }
-
-  async function handleOpenSavedStandardScenario() {
-    const scenarioId = String(lastSavedStandardScenarioId || "").trim();
-    if (!scenarioId) {
-      setMovementHint("Сначала сохрани heuristic draft как сценарий.");
-      return;
-    }
-
-    setSelectedScenarioId(scenarioId);
-    await loadScenarioById(scenarioId);
   }
 
   async function executeMovement(locoId) {
@@ -3453,17 +3328,6 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     ? Math.min(Math.max(currentScenarioStep, 0), scenarioSteps.length)
     : 0;
   const canvasColors = CANVAS_THEME_COLORS[canvasTheme] || CANVAS_THEME_COLORS[CANVAS_THEME_LIGHT];
-  const currentHeuristicScenarioContextId = String(
-    heuristicDraftResult?.draft_scenario?.heuristic_scenario_id ||
-    selectedHeuristicScenarioId ||
-    lastSavedHeuristicScenarioId ||
-    ""
-  ).trim();
-  const visibleCreatedScenarioId =
-    currentHeuristicScenarioContextId &&
-    currentHeuristicScenarioContextId === String(lastSavedStandardScenarioSourceHeuristicId || "").trim()
-      ? lastSavedStandardScenarioId
-      : "";
   const scenarioActiveStepIndex =
     scenarioViewMode === "play" && scenarioExecutingStep != null
       ? scenarioExecutingStep
@@ -3726,48 +3590,6 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                     >
                       {isGeneratingHeuristicDraft ? "Генерация..." : "Сгенерировать эвристический сценарий"}
                     </button>
-                    <button
-                      type="button"
-                      className="toolButton"
-                      onClick={handleGenerateAndSaveHeuristicDraft}
-                      disabled={isGeneratingHeuristicDraft}
-                    >
-                      {isGeneratingHeuristicDraft ? "Сохранение..." : "Сгенерировать и сохранить"}
-                    </button>
-                    <select
-                      className="toolInput"
-                      value={selectedHeuristicScenarioId}
-                      onChange={(event) => setSelectedHeuristicScenarioId(event.target.value)}
-                    >
-                      <option value="">Открыть сохранённый эвристический сценарий</option>
-                      {savedHeuristicScenarios.map((item) => (
-                        <option
-                          key={item.heuristic_scenario_id}
-                          value={String(item.heuristic_scenario_id)}
-                        >
-                          {item.name || `Эвристический сценарий ${item.heuristic_scenario_id}`}
-                        </option>
-                      ))}
-                    </select>
-                    <button type="button" className="toolButton" onClick={handleLoadSavedHeuristicDraft}>
-                      Открыть сохранённый эвристический сценарий
-                    </button>
-                    <p className="counter">id эвристического сценария: {currentHeuristicScenarioContextId || "-"}</p>
-                    <button
-                      type="button"
-                      className="toolButton"
-                      onClick={handleSaveHeuristicDraftAsScenario}
-                    >
-                      Сохранить как обычный сценарий
-                    </button>
-                    <button
-                      type="button"
-                      className="toolButton"
-                      onClick={handleOpenSavedStandardScenario}
-                    >
-                      Открыть сохранённый сценарий
-                    </button>
-                    <p className="counter">id созданного сценария: {visibleCreatedScenarioId || "-"}</p>
                     <p className="counter">
                       Выполнимость:{" "}
                       {heuristicDraftResult == null
@@ -3786,138 +3608,10 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                         ))}
                       </div>
                     ) : null}
-                    {heuristicDraftResult?.draft_scenario ? (
-                      <div
-                        className="scenarioSteps"
-                        style={{
-                          border: "1px solid #334155",
-                          borderRadius: 8,
-                          padding: 8,
-                          background: "#0b1220",
-                        }}
-                      >
-                        <div className="scenarioStepRow">
-                          <span className="scenarioStepText">Сводка эвристического сценария</span>
-                        </div>
-                        <p className="counter">
-                          Название: {heuristicDraftResult.draft_scenario.name || "-"}
-                        </p>
-                        <p className="counter">
-                          id: {heuristicDraftResult.draft_scenario.heuristic_scenario_id || "-"}
-                        </p>
-                        <p className="counter">
-                          id схемы: {heuristicDraftResult.draft_scenario.scheme_id}
-                        </p>
-                        <p className="counter">
-                          Целевой цвет: {heuristicDraftResult.draft_scenario.target_color}
-                        </p>
-                        <p className="counter">
-                          Количество целевых вагонов: {heuristicDraftResult.draft_scenario.required_target_count}
-                        </p>
-                        <p className="counter">
-                          Путь формирования:{" "}
-                          {formatHumanReadableTrackLabel(
-                            heuristicDraftResult.draft_scenario.formation_track_id,
-                            segmentDisplayNameById
-                          )}
-                        </p>
-                        <p className="counter">
-                          Вытяжной путь:{" "}
-                          {formatHumanReadableTrackLabel(
-                            heuristicDraftResult.draft_scenario.buffer_track_id,
-                            segmentDisplayNameById
-                          )}
-                        </p>
-                        <p className="counter">
-                          Главный путь:{" "}
-                          {formatHumanReadableTrackLabel(
-                            heuristicDraftResult.draft_scenario.main_track_id,
-                            segmentDisplayNameById
-                          )}
-                        </p>
-                        <p className="counter">
-                          Выполнимость: {heuristicDraftResult.feasible ? "да" : "нет"}
-                        </p>
-                        {heuristicDraftResult.metrics ? (
-                          <>
-                            <div className="scenarioStepRow">
-                              <span className="scenarioStepText">Метрики</span>
-                            </div>
-                            <p className="counter">
-                              Общее число шагов: {heuristicDraftResult.metrics.total_step_count}
-                            </p>
-                            <p className="counter">
-                              Число сцепок: {heuristicDraftResult.metrics.total_couple_count}
-                            </p>
-                            <p className="counter">
-                              Число расцепок: {heuristicDraftResult.metrics.total_decouple_count}
-                            </p>
-                            <p className="counter">
-                              Общий пробег локомотива: {heuristicDraftResult.metrics.total_loco_distance}
-                            </p>
-                            <p className="counter">
-                              Число проходов через стрелки: {heuristicDraftResult.metrics.total_switch_cross_count}
-                            </p>
-                            <p className="counter">
-                              Общая стоимость: {heuristicDraftResult.metrics.total_cost}
-                            </p>
-                            <p className="counter">
-                              Успех: {heuristicDraftResult.metrics.success ? "да" : "нет"}
-                            </p>
-                          </>
-                        ) : null}
-                        <div className="scenarioStepRow">
-                          <span className="scenarioStepText">Шаги</span>
-                        </div>
-                        {Array.isArray(heuristicDraftResult.draft_scenario.steps) &&
-                        heuristicDraftResult.draft_scenario.steps.length > 0 ? (
-                          <div className="scenarioSteps">
-                            {heuristicDraftResult.draft_scenario.steps.map((step, index) => (
-                              <div
-                                key={`heuristic-step-${step.step_order ?? index}`}
-                                className="scenarioStepRow"
-                              >
-                                <span className="scenarioStepText">
-                                  {index + 1}. {formatHeuristicDraftStepText(step, segmentDisplayNameById)}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="counter">Шагов нет.</p>
-                        )}
-                      </div>
-                    ) : null}
-                    {heuristicDraftResult ? (
-                      <div className="scenarioSteps">
-                        <div className="scenarioStepRow">
-                          <span className="scenarioStepText">Отладочный JSON</span>
-                        </div>
-                        <pre
-                          style={{
-                            margin: 0,
-                            padding: 10,
-                            overflowX: "auto",
-                            whiteSpace: "pre-wrap",
-                            wordBreak: "break-word",
-                            borderRadius: 8,
-                            background: "#0b1220",
-                            color: "#cbd5e1",
-                            fontSize: 12,
-                          }}
-                        >
-                          {JSON.stringify(
-                            {
-                              feasible: heuristicDraftResult.feasible,
-                              reasons: heuristicDraftResult.reasons || [],
-                              draft_scenario: heuristicDraftResult.draft_scenario || null,
-                              metrics: heuristicDraftResult.metrics || null,
-                            },
-                            null,
-                            2
-                          )}
-                        </pre>
-                      </div>
+                    {heuristicDraftResult?.created_scenario_id ? (
+                      <p className="counter">
+                        Открыт обычный сценарий: {heuristicDraftResult.created_scenario_id}
+                      </p>
                     ) : null}
                   </>
                 )}

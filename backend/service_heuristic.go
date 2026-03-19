@@ -274,8 +274,9 @@ func SaveHeuristicDraftAsScenario(userID int, req SaveHeuristicAsScenarioRequest
 	}
 
 	scenario := normalized.Scenario{
-		SchemeID: draft.SchemeID,
-		Name:     name,
+		SchemeID:                  draft.SchemeID,
+		Name:                      name,
+		SourceHeuristicScenarioID: &heuristicScenarioID,
 	}
 
 	scenarioID, err := appStore.CreateNormalizedScenario(userID, scenario)
@@ -303,6 +304,48 @@ func SaveHeuristicDraftAsScenario(userID int, req SaveHeuristicAsScenarioRequest
 		Scenario:          ptrScenarioDTO(toScenarioDTO(*saved)),
 		ScenarioSteps:     toScenarioStepDTOs(saved.Steps),
 	}, nil
+}
+
+func GenerateFullHeuristicScenario(userID int, req GenerateFullHeuristicScenarioRequest) (GenerateFullHeuristicScenarioResponse, error) {
+	savedDraftResp, err := GenerateAndSaveDraftHeuristicScenario(userID, GenerateAndSaveDraftHeuristicScenarioRequest{
+		SchemeID:            req.SchemeID,
+		TargetColor:         req.TargetColor,
+		RequiredTargetCount: req.RequiredTargetCount,
+		FormationTrackID:    req.FormationTrackID,
+		Name:                req.Name,
+	})
+	if err != nil {
+		return GenerateFullHeuristicScenarioResponse{}, err
+	}
+
+	response := GenerateFullHeuristicScenarioResponse{
+		OK:          true,
+		Feasible:    savedDraftResp.Feasible,
+		Reasons:     append([]string{}, savedDraftResp.Reasons...),
+		Feasibility: savedDraftResp.Feasibility,
+	}
+	if !savedDraftResp.Feasible {
+		return response, nil
+	}
+
+	heuristicScenarioID := strings.TrimSpace(savedDraftResp.SavedHeuristicScenarioID)
+	if heuristicScenarioID == "" {
+		return GenerateFullHeuristicScenarioResponse{}, fmt.Errorf("failed to save heuristic scenario")
+	}
+
+	saveAsScenarioResp, err := SaveHeuristicDraftAsScenario(userID, SaveHeuristicAsScenarioRequest{
+		HeuristicScenarioID: heuristicScenarioID,
+		Name:                req.Name,
+	})
+	if err != nil {
+		return GenerateFullHeuristicScenarioResponse{}, err
+	}
+
+	response.HeuristicScenarioID = heuristicScenarioID
+	response.CreatedScenarioID = saveAsScenarioResp.CreatedScenarioID
+	response.Scenario = saveAsScenarioResp.Scenario
+	response.ScenarioSteps = saveAsScenarioResp.ScenarioSteps
+	return response, nil
 }
 
 func draftScenarioToStoredSteps(item heuristicservice.DraftScenario) []normalized.HeuristicScenarioStep {

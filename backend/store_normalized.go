@@ -170,10 +170,11 @@ func (s *InMemoryStore) CreateNormalizedScenario(userID int, scenario normalized
 		scenario.ScenarioID = fmt.Sprintf("nsc-%d", time.Now().UnixNano())
 	}
 	s.normalizedScenariosByID[scenario.ScenarioID] = normalized.Scenario{
-		ScenarioID: scenario.ScenarioID,
-		SchemeID:   scenario.SchemeID,
-		Name:       scenario.Name,
-		Steps:      cloneScenarioSteps(scenario.Steps),
+		ScenarioID:                scenario.ScenarioID,
+		SchemeID:                  scenario.SchemeID,
+		Name:                      scenario.Name,
+		SourceHeuristicScenarioID: cloneOptionalString(scenario.SourceHeuristicScenarioID),
+		Steps:                     cloneScenarioSteps(scenario.Steps),
 	}
 	return scenario.ScenarioID, nil
 }
@@ -187,10 +188,11 @@ func (s *InMemoryStore) GetNormalizedScenario(id string, userID int) (*normalize
 		return nil, fmt.Errorf("scenario not found")
 	}
 	copy := normalized.Scenario{
-		ScenarioID: scenario.ScenarioID,
-		SchemeID:   scenario.SchemeID,
-		Name:       scenario.Name,
-		Steps:      cloneScenarioSteps(scenario.Steps),
+		ScenarioID:                scenario.ScenarioID,
+		SchemeID:                  scenario.SchemeID,
+		Name:                      scenario.Name,
+		SourceHeuristicScenarioID: cloneOptionalString(scenario.SourceHeuristicScenarioID),
+		Steps:                     cloneScenarioSteps(scenario.Steps),
 	}
 	return &copy, nil
 }
@@ -202,10 +204,11 @@ func (s *InMemoryStore) ListNormalizedScenarios(userID int) ([]normalized.Scenar
 	result := make([]normalized.Scenario, 0, len(s.normalizedScenariosByID))
 	for _, scenario := range s.normalizedScenariosByID {
 		result = append(result, normalized.Scenario{
-			ScenarioID: scenario.ScenarioID,
-			SchemeID:   scenario.SchemeID,
-			Name:       scenario.Name,
-			Steps:      cloneScenarioSteps(scenario.Steps),
+			ScenarioID:                scenario.ScenarioID,
+			SchemeID:                  scenario.SchemeID,
+			Name:                      scenario.Name,
+			SourceHeuristicScenarioID: cloneOptionalString(scenario.SourceHeuristicScenarioID),
+			Steps:                     cloneScenarioSteps(scenario.Steps),
 		})
 	}
 	return result, nil
@@ -219,10 +222,11 @@ func (s *InMemoryStore) UpdateNormalizedScenario(userID int, scenario normalized
 		return fmt.Errorf("scenario not found")
 	}
 	s.normalizedScenariosByID[scenario.ScenarioID] = normalized.Scenario{
-		ScenarioID: scenario.ScenarioID,
-		SchemeID:   scenario.SchemeID,
-		Name:       scenario.Name,
-		Steps:      cloneScenarioSteps(withScenarioIDForSteps(scenario.ScenarioID, scenario.Steps)),
+		ScenarioID:                scenario.ScenarioID,
+		SchemeID:                  scenario.SchemeID,
+		Name:                      scenario.Name,
+		SourceHeuristicScenarioID: cloneOptionalString(scenario.SourceHeuristicScenarioID),
+		Steps:                     cloneScenarioSteps(withScenarioIDForSteps(scenario.ScenarioID, scenario.Steps)),
 	}
 	return nil
 }
@@ -233,6 +237,9 @@ func (s *InMemoryStore) DeleteNormalizedScenario(userID int, scenarioID string) 
 
 	if _, ok := s.normalizedScenariosByID[scenarioID]; !ok {
 		return fmt.Errorf("scenario not found")
+	}
+	if heuristicScenarioID := s.normalizedScenariosByID[scenarioID].SourceHeuristicScenarioID; heuristicScenarioID != nil && *heuristicScenarioID != "" {
+		delete(s.heuristicScenariosByID, *heuristicScenarioID)
 	}
 	delete(s.normalizedScenariosByID, scenarioID)
 	return nil
@@ -298,6 +305,17 @@ func (s *InMemoryStore) ListHeuristicScenarios(userID int) ([]normalized.Heurist
 		result = append(result, copyScenario)
 	}
 	return result, nil
+}
+
+func (s *InMemoryStore) DeleteHeuristicScenario(userID int, heuristicScenarioID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.heuristicScenariosByID[heuristicScenarioID]; !ok {
+		return fmt.Errorf("heuristic scenario not found")
+	}
+	delete(s.heuristicScenariosByID, heuristicScenarioID)
+	return nil
 }
 
 func (s *InMemoryStore) CreateHeuristicScenarioSteps(userID int, heuristicScenarioID string, steps []normalized.HeuristicScenarioStep) error {
@@ -599,7 +617,14 @@ func (s *PostgresStore) CreateNormalizedScenario(userID int, scenario normalized
 	if scenario.ScenarioID == "" {
 		scenario.ScenarioID = fmt.Sprintf("nsc-%d", time.Now().UnixNano())
 	}
-	if _, err := s.db.Exec(`INSERT INTO scenarios (scenario_id, user_id, scheme_id, name) VALUES ($1, $2, $3, $4)`, scenario.ScenarioID, userID, scenario.SchemeID, scenario.Name); err != nil {
+	if _, err := s.db.Exec(
+		`INSERT INTO scenarios (scenario_id, user_id, scheme_id, name, source_heuristic_scenario_id) VALUES ($1, $2, $3, $4, $5)`,
+		scenario.ScenarioID,
+		userID,
+		scenario.SchemeID,
+		scenario.Name,
+		scenario.SourceHeuristicScenarioID,
+	); err != nil {
 		return "", err
 	}
 	if err := s.CreateScenarioSteps(userID, scenario.ScenarioID, scenario.Steps); err != nil {
@@ -610,7 +635,11 @@ func (s *PostgresStore) CreateNormalizedScenario(userID int, scenario normalized
 
 func (s *PostgresStore) GetNormalizedScenario(id string, userID int) (*normalized.Scenario, error) {
 	var scenario normalized.Scenario
-	if err := s.db.QueryRow(`SELECT scenario_id, scheme_id, name FROM scenarios WHERE scenario_id = $1 AND user_id = $2`, id, userID).Scan(&scenario.ScenarioID, &scenario.SchemeID, &scenario.Name); err != nil {
+	if err := s.db.QueryRow(
+		`SELECT scenario_id, scheme_id, name, source_heuristic_scenario_id FROM scenarios WHERE scenario_id = $1 AND user_id = $2`,
+		id,
+		userID,
+	).Scan(&scenario.ScenarioID, &scenario.SchemeID, &scenario.Name, &scenario.SourceHeuristicScenarioID); err != nil {
 		return nil, err
 	}
 	steps, err := s.ListScenarioStepsByScenario(userID, id)
@@ -622,7 +651,10 @@ func (s *PostgresStore) GetNormalizedScenario(id string, userID int) (*normalize
 }
 
 func (s *PostgresStore) ListNormalizedScenarios(userID int) ([]normalized.Scenario, error) {
-	rows, err := s.db.Query(`SELECT scenario_id, scheme_id, name FROM scenarios WHERE user_id = $1 ORDER BY scenario_id`, userID)
+	rows, err := s.db.Query(
+		`SELECT scenario_id, scheme_id, name, source_heuristic_scenario_id FROM scenarios WHERE user_id = $1 ORDER BY scenario_id`,
+		userID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -631,7 +663,7 @@ func (s *PostgresStore) ListNormalizedScenarios(userID int) ([]normalized.Scenar
 	result := make([]normalized.Scenario, 0)
 	for rows.Next() {
 		var scenario normalized.Scenario
-		if err := rows.Scan(&scenario.ScenarioID, &scenario.SchemeID, &scenario.Name); err != nil {
+		if err := rows.Scan(&scenario.ScenarioID, &scenario.SchemeID, &scenario.Name, &scenario.SourceHeuristicScenarioID); err != nil {
 			return nil, err
 		}
 		result = append(result, scenario)
@@ -646,9 +678,10 @@ func (s *PostgresStore) UpdateNormalizedScenario(userID int, scenario normalized
 	}
 	defer tx.Rollback()
 
-	result, err := tx.Exec(`UPDATE scenarios SET scheme_id = $1, name = $2, updated_at = $3 WHERE scenario_id = $4 AND user_id = $5`,
+	result, err := tx.Exec(`UPDATE scenarios SET scheme_id = $1, name = $2, source_heuristic_scenario_id = $3, updated_at = $4 WHERE scenario_id = $5 AND user_id = $6`,
 		scenario.SchemeID,
 		scenario.Name,
+		scenario.SourceHeuristicScenarioID,
 		time.Now(),
 		scenario.ScenarioID,
 		userID,
@@ -682,6 +715,15 @@ func (s *PostgresStore) UpdateNormalizedScenario(userID int, scenario normalized
 }
 
 func (s *PostgresStore) DeleteNormalizedScenario(userID int, scenarioID string) error {
+	var sourceHeuristicScenarioID *string
+	if err := s.db.QueryRow(
+		`SELECT source_heuristic_scenario_id FROM scenarios WHERE scenario_id = $1 AND user_id = $2`,
+		scenarioID,
+		userID,
+	).Scan(&sourceHeuristicScenarioID); err != nil {
+		return fmt.Errorf("scenario not found")
+	}
+
 	result, err := s.db.Exec(`DELETE FROM scenarios WHERE scenario_id = $1 AND user_id = $2`, scenarioID, userID)
 	if err != nil {
 		return err
@@ -692,6 +734,11 @@ func (s *PostgresStore) DeleteNormalizedScenario(userID int, scenarioID string) 
 	}
 	if rows == 0 {
 		return fmt.Errorf("scenario not found")
+	}
+	if sourceHeuristicScenarioID != nil && *sourceHeuristicScenarioID != "" {
+		if err := s.DeleteHeuristicScenario(userID, *sourceHeuristicScenarioID); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -964,6 +1011,14 @@ func cloneScenarioSteps(items []normalized.ScenarioStep) []normalized.ScenarioSt
 	result := make([]normalized.ScenarioStep, len(items))
 	copy(result, items)
 	return result
+}
+
+func cloneOptionalString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	copyValue := *value
+	return &copyValue
 }
 
 func cloneHeuristicScenario(scenario normalized.HeuristicScenario) normalized.HeuristicScenario {

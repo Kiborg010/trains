@@ -61,10 +61,11 @@ type Coupling struct {
 }
 
 type Scenario struct {
-	ScenarioID string         `json:"scenario_id"`
-	SchemeID   int            `json:"scheme_id"`
-	Name       string         `json:"name"`
-	Steps      []ScenarioStep `json:"steps,omitempty"`
+	ScenarioID                string         `json:"scenario_id"`
+	SchemeID                  int            `json:"scheme_id"`
+	Name                      string         `json:"name"`
+	SourceHeuristicScenarioID *string        `json:"source_heuristic_scenario_id,omitempty"`
+	Steps                     []ScenarioStep `json:"steps,omitempty"`
 }
 
 type ScenarioStep struct {

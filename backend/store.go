@@ -60,6 +60,7 @@ type Store interface {
 	CreateHeuristicScenario(userID int, scenario normalized.HeuristicScenario) (string, error)
 	GetHeuristicScenario(id string, userID int) (*normalized.HeuristicScenario, error)
 	ListHeuristicScenarios(userID int) ([]normalized.HeuristicScenario, error)
+	DeleteHeuristicScenario(userID int, heuristicScenarioID string) error
 	CreateHeuristicScenarioSteps(userID int, heuristicScenarioID string, steps []normalized.HeuristicScenarioStep) error
 	ListHeuristicScenarioStepsByScenario(userID int, heuristicScenarioID string) ([]normalized.HeuristicScenarioStep, error)
 }
