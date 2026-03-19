@@ -727,7 +727,7 @@ func selectOperationGroup(state *lowLevelBuilderState, operation HeuristicOperat
 
 	side := strings.TrimSpace(operation.SourceSide)
 	if operation.OperationType == HeuristicOperationTransferFormationToMain {
-		if resolvedSide, ok := resolveTransferFormationToMainSourceSide(state, sourceTrack, wagons); ok {
+		if resolvedSide, ok := resolveTransferFormationToMainSourceSide(state, operation, sourceTrack, wagons); ok {
 			side = resolvedSide
 		}
 	}
@@ -792,9 +792,13 @@ func selectOperationGroup(state *lowLevelBuilderState, operation HeuristicOperat
 
 func resolveTransferFormationToMainSourceSide(
 	state *lowLevelBuilderState,
+	operation HeuristicOperation,
 	sourceTrack normalized.Track,
 	wagons []normalized.Wagon,
 ) (string, bool) {
+	if side, ok := resolveTransferFormationToMainEntrySide(state, operation); ok {
+		return side, true
+	}
 	if len(wagons) == 0 {
 		return "", false
 	}
@@ -806,6 +810,24 @@ func resolveTransferFormationToMainSourceSide(
 			return "start", true
 		case lastIndex + 1:
 			return "end", true
+		}
+	}
+	return "", false
+}
+
+func resolveTransferFormationToMainEntrySide(
+	state *lowLevelBuilderState,
+	operation HeuristicOperation,
+) (string, bool) {
+	if operation.DestinationTrackID == "" {
+		return "", false
+	}
+	for _, connection := range state.Connections {
+		switch {
+		case connection.Track1ID == operation.DestinationTrackID && connection.Track2ID != operation.DestinationTrackID:
+			return connection.Track1Side, true
+		case connection.Track2ID == operation.DestinationTrackID && connection.Track1ID != operation.DestinationTrackID:
+			return connection.Track2Side, true
 		}
 	}
 	return "", false
@@ -919,13 +941,22 @@ func reserveDestinationPlacement(
 	boundaryIndex := startIndex
 	locomotiveIndex := startIndex + len(selection.Wagons)
 	if operation.OperationType == HeuristicOperationTransferFormationToMain {
-		placeAtStart = true
-		startIndex = nextFreeTrackIndex(existing) + 2
-		if startIndex < 2 {
-			startIndex = 2
+		placeAtStart = shouldPlaceSelectionAtDestinationStart(state, operation, selection)
+		if placeAtStart {
+			startIndex = nextFreeTrackIndex(existing) + 2
+			if startIndex < 2 {
+				startIndex = 2
+			}
+			boundaryIndex = startIndex
+			locomotiveIndex = startIndex - 1
+		} else {
+			locomotiveIndex = destinationTrack.Capacity - 2
+			if locomotiveIndex < 0 {
+				locomotiveIndex = 0
+			}
+			startIndex = locomotiveIndex - len(selection.Wagons)
+			boundaryIndex = startIndex + len(selection.Wagons) - 1
 		}
-		boundaryIndex = startIndex
-		locomotiveIndex = startIndex - 1
 	} else if len(existing) > 0 {
 		placement, ok := finalAdjacentJoinSlot(existing, len(selection.Wagons), placeAtStart)
 		if !ok {
@@ -1095,6 +1126,9 @@ func shouldPlaceSelectionAtDestinationStart(
 	selection lowLevelGroupSelection,
 ) bool {
 	if operation.OperationType == HeuristicOperationTransferFormationToMain {
+		if entrySide, ok := resolveTransferFormationToMainEntrySide(state, operation); ok {
+			return entrySide == "start"
+		}
 		return true
 	}
 

@@ -644,6 +644,122 @@ func TestBuildLowLevelScenarioStepsTransferFormationToMainUsesDirectFinalSequenc
 	}
 }
 
+func TestBuildLowLevelScenarioStepsTransferFormationToMainUsesPushSideWhenMainEntryIsEnd(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 43,
+		Tracks: []normalized.Track{
+			{TrackID: "formation", Type: "lead", StartX: 0, StartY: 0, EndX: 200, EndY: 0, Capacity: 8, StorageAllowed: true},
+			{TrackID: "main", Type: "main", StartX: -160, StartY: 0, EndX: 0, EndY: 0, Capacity: 10, StorageAllowed: false},
+		},
+		TrackConnections: []normalized.TrackConnection{
+			{ConnectionID: "c1", Track1ID: "formation", Track2ID: "main", Track1Side: "start", Track2Side: "end", ConnectionType: "serial"},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "w1", Color: "blue", TrackID: "formation", TrackIndex: 1},
+			{WagonID: "w2", Color: "blue", TrackID: "formation", TrackIndex: 2},
+			{WagonID: "w3", Color: "blue", TrackID: "formation", TrackIndex: 3},
+		},
+		Locomotives: []normalized.Locomotive{
+			{LocoID: "l1", TrackID: "formation", TrackIndex: 0},
+		},
+		Couplings: []normalized.Coupling{
+			{CouplingID: "c1", Object1ID: "w1", Object2ID: "w2"},
+			{CouplingID: "c2", Object1ID: "w2", Object2ID: "w3"},
+		},
+	}
+
+	steps, err := BuildLowLevelScenarioStepsFromHeuristicOperations(
+		"nsc-final-push-end-entry",
+		scheme,
+		[]HeuristicOperation{
+			{
+				OperationType:      HeuristicOperationTransferFormationToMain,
+				SourceTrackID:      "formation",
+				DestinationTrackID: "main",
+				WagonCount:         3,
+				FormationTrackID:   "formation",
+				MainTrackID:        "main",
+			},
+		},
+		scheme.Locomotives[0],
+		scheme.Wagons,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(steps) != 3 {
+		t.Fatalf("expected approach + couple + push-to-main sequence, got %d steps", len(steps))
+	}
+	if steps[0].StepType != "move_loco" || steps[0].ToTrackID == nil || *steps[0].ToTrackID != "formation" || steps[0].ToIndex == nil || *steps[0].ToIndex != 4 {
+		t.Fatalf("expected locomotive to reposition to the far boundary before pushing the formation to main, got %+v", steps[0])
+	}
+	if steps[1].StepType != "couple" || steps[1].Object2ID == nil || *steps[1].Object2ID != "w3" {
+		t.Fatalf("expected final transfer to couple to the end boundary wagon for push-mode, got %+v", steps[1])
+	}
+	if steps[2].StepType != "move_loco" || steps[2].ToTrackID == nil || *steps[2].ToTrackID != "main" || steps[2].ToIndex == nil || *steps[2].ToIndex != 8 {
+		t.Fatalf("expected push-mode final move to stop the locomotive near the main-track end after pushing the full consist, got %+v", steps[2])
+	}
+}
+
+func TestApplyOperationTransferFormationToMainPlacesWholeConsistOnMainTrack(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 44,
+		Tracks: []normalized.Track{
+			{TrackID: "formation", Type: "lead", StartX: 0, StartY: 0, EndX: 200, EndY: 0, Capacity: 8, StorageAllowed: true},
+			{TrackID: "main", Type: "main", StartX: -160, StartY: 0, EndX: 0, EndY: 0, Capacity: 10, StorageAllowed: false},
+		},
+		TrackConnections: []normalized.TrackConnection{
+			{ConnectionID: "c1", Track1ID: "formation", Track2ID: "main", Track1Side: "start", Track2Side: "end", ConnectionType: "serial"},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "w1", Color: "blue", TrackID: "formation", TrackIndex: 1},
+			{WagonID: "w2", Color: "blue", TrackID: "formation", TrackIndex: 2},
+			{WagonID: "w3", Color: "blue", TrackID: "formation", TrackIndex: 3},
+		},
+		Locomotives: []normalized.Locomotive{
+			{LocoID: "l1", TrackID: "formation", TrackIndex: 4},
+		},
+		Couplings: []normalized.Coupling{
+			{CouplingID: "c1", Object1ID: "w1", Object2ID: "w2"},
+			{CouplingID: "c2", Object1ID: "w2", Object2ID: "w3"},
+			{CouplingID: "c3", Object1ID: "l1", Object2ID: "w3"},
+		},
+	}
+
+	state := newLowLevelBuilderState(scheme, scheme.Locomotives[0], scheme.Wagons)
+	operation := HeuristicOperation{
+		OperationType:      HeuristicOperationTransferFormationToMain,
+		SourceTrackID:      "formation",
+		DestinationTrackID: "main",
+		WagonCount:         3,
+		FormationTrackID:   "formation",
+		MainTrackID:        "main",
+	}
+
+	selection, err := selectOperationGroup(state, operation)
+	if err != nil {
+		t.Fatalf("unexpected selection error: %v", err)
+	}
+	placement, err := reserveDestinationPlacement(state, operation, selection)
+	if err != nil {
+		t.Fatalf("unexpected placement error: %v", err)
+	}
+
+	applyOperationTransfer(state, operation, selection, placement, lowLevelDestinationJoinPlan{})
+
+	mainWagons := cloneAndSortWagons(state.WagonsByTrack["main"])
+	if len(mainWagons) != 3 {
+		t.Fatalf("expected all formation wagons to be moved onto main, got %+v", mainWagons)
+	}
+	if mainWagons[0].TrackIndex != 5 || mainWagons[1].TrackIndex != 6 || mainWagons[2].TrackIndex != 7 {
+		t.Fatalf("expected full consist to occupy contiguous main-track slots before the locomotive, got %+v", mainWagons)
+	}
+	if state.Locomotive.TrackID != "main" || state.Locomotive.TrackIndex != 8 {
+		t.Fatalf("expected locomotive to remain behind the consist on main in push-mode, got %+v", state.Locomotive)
+	}
+}
+
 func TestBuildLowLevelScenarioStepsStagesOccupiedDestinationJoinThroughAdjacentThroat(t *testing.T) {
 	scheme := normalized.Scheme{
 		SchemeID: 30,
