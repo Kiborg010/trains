@@ -75,6 +75,52 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function roundGridValue(value) {
+  return Math.round(value * 100) / 100;
+}
+
+function computeCanvasGridSize(segments) {
+  const frequencies = new Map();
+  for (const segment of segments || []) {
+    const slots = getSegmentSlots(segment);
+    if (!Array.isArray(slots) || slots.length < 2) {
+      continue;
+    }
+    for (let index = 1; index < slots.length; index += 1) {
+      const prev = slots[index - 1];
+      const current = slots[index];
+      const distance = Math.hypot(current.x - prev.x, current.y - prev.y);
+      if (!Number.isFinite(distance) || distance <= 0) {
+        continue;
+      }
+      const key = roundGridValue(distance);
+      frequencies.set(key, (frequencies.get(key) || 0) + 1);
+    }
+  }
+
+  let bestValue = GRID_SIZE;
+  let bestCount = -1;
+  for (const [value, count] of frequencies.entries()) {
+    if (count > bestCount) {
+      bestValue = Number(value);
+      bestCount = count;
+    }
+  }
+  return bestValue;
+}
+
+function buildGridLines(start, end, step) {
+  if (!Number.isFinite(step) || step <= 0 || !Number.isFinite(start) || !Number.isFinite(end)) {
+    return [];
+  }
+  const first = Math.floor(start / step) * step;
+  const lines = [];
+  for (let value = first; value <= end + step; value += step) {
+    lines.push(roundGridValue(value));
+  }
+  return lines;
+}
+
 function normalizeRect(start, end) {
   return {
     left: Math.min(start.x, end.x),
@@ -3285,7 +3331,24 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     setZoom(1);
   }
 
-  const majorGrid = GRID_SIZE * 5;
+  const canvasGridSize = useMemo(() => computeCanvasGridSize(segments), [segments]);
+  const majorCanvasGrid = canvasGridSize * 5;
+  const minorVerticalGridLines = useMemo(
+    () => buildGridLines(camera.x, camera.x + viewWidth, canvasGridSize),
+    [camera.x, viewWidth, canvasGridSize]
+  );
+  const minorHorizontalGridLines = useMemo(
+    () => buildGridLines(camera.y, camera.y + viewHeight, canvasGridSize),
+    [camera.y, viewHeight, canvasGridSize]
+  );
+  const majorVerticalGridLines = useMemo(
+    () => buildGridLines(camera.x, camera.x + viewWidth, majorCanvasGrid),
+    [camera.x, viewWidth, majorCanvasGrid]
+  );
+  const majorHorizontalGridLines = useMemo(
+    () => buildGridLines(camera.y, camera.y + viewHeight, majorCanvasGrid),
+    [camera.y, viewHeight, majorCanvasGrid]
+  );
   const selectionRect = selectionBox ? normalizeRect(selectionBox.start, selectionBox.end) : null;
   const activeModeLabel =
     mode === "drawTrack"
@@ -3964,30 +4027,61 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
           >
-            <defs>
-              <pattern id="rail-grid-minor" width={GRID_SIZE} height={GRID_SIZE} patternUnits="userSpaceOnUse">
-                <path
-                  d={`M ${GRID_SIZE} 0 L 0 0 0 ${GRID_SIZE}`}
-                  fill="none"
+            <rect x={camera.x} y={camera.y} width={viewWidth} height={viewHeight} fill="#ffffff" />
+            <g aria-hidden="true">
+              {minorVerticalGridLines.map((x) => (
+                <line
+                  key={`grid-minor-v-${x}`}
+                  x1={x}
+                  y1={camera.y}
+                  x2={x}
+                  y2={camera.y + viewHeight}
                   stroke="#d8e2ee"
                   strokeWidth="1"
+                  vectorEffect="non-scaling-stroke"
                   shapeRendering="crispEdges"
                 />
-              </pattern>
-              <pattern id="rail-grid-major" width={majorGrid} height={majorGrid} patternUnits="userSpaceOnUse">
-                <path
-                  d={`M ${majorGrid} 0 L 0 0 0 ${majorGrid}`}
-                  fill="none"
+              ))}
+              {minorHorizontalGridLines.map((y) => (
+                <line
+                  key={`grid-minor-h-${y}`}
+                  x1={camera.x}
+                  y1={y}
+                  x2={camera.x + viewWidth}
+                  y2={y}
+                  stroke="#d8e2ee"
+                  strokeWidth="1"
+                  vectorEffect="non-scaling-stroke"
+                  shapeRendering="crispEdges"
+                />
+              ))}
+              {majorVerticalGridLines.map((x) => (
+                <line
+                  key={`grid-major-v-${x}`}
+                  x1={x}
+                  y1={camera.y}
+                  x2={x}
+                  y2={camera.y + viewHeight}
                   stroke="#b6c7db"
                   strokeWidth="1.2"
+                  vectorEffect="non-scaling-stroke"
                   shapeRendering="crispEdges"
                 />
-              </pattern>
-            </defs>
-
-            <rect x={camera.x} y={camera.y} width={viewWidth} height={viewHeight} fill="#ffffff" />
-            <rect x={camera.x} y={camera.y} width={viewWidth} height={viewHeight} fill="url(#rail-grid-minor)" />
-            <rect x={camera.x} y={camera.y} width={viewWidth} height={viewHeight} fill="url(#rail-grid-major)" />
+              ))}
+              {majorHorizontalGridLines.map((y) => (
+                <line
+                  key={`grid-major-h-${y}`}
+                  x1={camera.x}
+                  y1={y}
+                  x2={camera.x + viewWidth}
+                  y2={y}
+                  stroke="#b6c7db"
+                  strokeWidth="1.2"
+                  vectorEffect="non-scaling-stroke"
+                  shapeRendering="crispEdges"
+                />
+              ))}
+            </g>
 
             {segments.map((segment) => {
               const pathName = getPathDisplayName(segment.id, segmentDisplayNameById);
@@ -4188,7 +4282,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         </section>
 
         <footer className="statusbar">
-          X: {mousePoint.x} | Y: {mousePoint.y} | Zoom: {Math.round(zoom * 100)}% | Grid: {GRID_SIZE}
+          X: {mousePoint.x} | Y: {mousePoint.y} | Zoom: {Math.round(zoom * 100)}% | Grid: {roundGridValue(canvasGridSize)}
         </footer>
       </main>
     </div>
