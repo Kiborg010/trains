@@ -34,6 +34,8 @@ func applyScenarioStep(state RuntimeState, step normalized.ScenarioStep) (Runtim
 		for _, p := range lastStep {
 			posByID[p.ID] = p
 		}
+		trackConnections := buildTrackConnectionsFromSegments(state.Segments)
+		pathSlots := collectPathSlotsWithConnections(state.Segments, 32, trackConnections)
 		nextVehicles := make([]Vehicle, 0, len(state.Vehicles))
 		for _, v := range state.Vehicles {
 			pos, ok := posByID[v.ID]
@@ -41,13 +43,19 @@ func applyScenarioStep(state RuntimeState, step normalized.ScenarioStep) (Runtim
 				nextVehicles = append(nextVehicles, v)
 				continue
 			}
+			pathID := v.PathID
+			pathIndex := v.PathIndex
+			if nearest := findNearestPathSlot(Point{X: pos.X, Y: pos.Y}, pathSlots, nil); nearest != nil {
+				pathID = nearest.PathID
+				pathIndex = nearest.Index
+			}
 			nextVehicles = append(nextVehicles, Vehicle{
 				ID:        v.ID,
 				Type:      v.Type,
 				Code:      v.Code,
 				Color:     v.Color,
-				PathID:    v.PathID,
-				PathIndex: v.PathIndex,
+				PathID:    pathID,
+				PathIndex: pathIndex,
 				X:         pos.X,
 				Y:         pos.Y,
 			})
@@ -339,10 +347,8 @@ func validateCouplingInternal(req ValidateCouplingRequest) (ValidateCouplingResp
 		return ValidateCouplingResponse{OK: false, Message: "These vehicles are already coupled."}, nil
 	}
 
-	adjacentPairs := buildAdjacentSlotPairs(req.Segments, req.GridSize)
-	slotA := slotID(va.X, va.Y)
-	slotB := slotID(vb.X, vb.Y)
-	if _, ok := adjacentPairs[pairKey(slotA, slotB)]; !ok {
+	slotAdj := buildSlotAdjacency(req.Segments, req.GridSize)
+	if !areVehiclesAdjacentOnLayout(pathSlots, slotAdj, va, vb) {
 		return ValidateCouplingResponse{OK: false, Message: "Coupling is allowed only for adjacent slots."}, nil
 	}
 
@@ -412,14 +418,14 @@ func resolveVehicles(req ResolveVehiclesRequest) ([]Vehicle, error) {
 	}
 
 	if req.StrictCouplings {
-		pathAdjPairs := buildAdjacentPathSlotPairs(req.Segments, req.GridSize)
+		slotAdj := buildSlotAdjacency(req.Segments, req.GridSize)
 		for _, c := range req.Couplings {
 			va, okA := nextByID[c.A]
 			vb, okB := nextByID[c.B]
 			if !okA || !okB {
 				continue
 			}
-			if _, ok := pathAdjPairs[pathSlotPairKey(va.PathID, va.PathIndex, vb.PathID, vb.PathIndex)]; !ok {
+			if !areVehiclesAdjacentOnLayout(pathSlots, slotAdj, va, vb) {
 				return nil, errors.New("Coupled vehicles must stay on adjacent slots.")
 			}
 		}
@@ -445,6 +451,25 @@ func normalizeVehicleToPath(vehicle Vehicle, pathSlots []PathSlot) Vehicle {
 	vehicle.X = nearest.X
 	vehicle.Y = nearest.Y
 	return vehicle
+}
+
+func areVehiclesAdjacentOnLayout(
+	pathSlots []PathSlot,
+	slotAdj map[string]map[string]struct{},
+	a Vehicle,
+	b Vehicle,
+) bool {
+	slotA := pathSlotOccupancyKey(pathSlots, a.PathID, a.PathIndex)
+	slotB := pathSlotOccupancyKey(pathSlots, b.PathID, b.PathIndex)
+	if slotA == slotB {
+		return true
+	}
+	neighbors, ok := slotAdj[slotA]
+	if !ok {
+		return false
+	}
+	_, ok = neighbors[slotB]
+	return ok
 }
 
 func finalizeRuntimeState(state RuntimeState, gridSize float64) RuntimeState {

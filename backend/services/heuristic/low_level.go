@@ -52,6 +52,7 @@ type lowLevelBuilderState struct {
 	Locomotive    normalized.Locomotive
 	WagonsByTrack map[string][]normalized.Wagon
 	TracksByID    map[string]normalized.Track
+	Connections   []normalized.TrackConnection
 	Couplings     map[string]struct{}
 }
 
@@ -93,6 +94,22 @@ type lowLevelDestinationPlacement struct {
 	BoundaryIndex   int
 	LocomotiveIndex int
 	PlaceAtStart    bool
+}
+
+type lowLevelDestinationJoinPlan struct {
+	Enabled       bool
+	StageTrackID  string
+	StageIndex    int
+	JoinObject1ID string
+	JoinObject2ID string
+	FinalTrackID  string
+	FinalIndex    int
+}
+
+type lowLevelOuterOrientation struct {
+	LeftOuterTrackID    string
+	RightOuterTrackID   string
+	ExternalSideByTrack map[string]string
 }
 
 // BuildLowLevelScenarioStepsFromHeuristicOperations строит первый низкоуровневый
@@ -168,6 +185,7 @@ func BuildLowLevelScenarioStepsFromHeuristicOperations(
 		if err != nil {
 			return nil, err
 		}
+		destinationJoin := planDestinationJoin(state, operation, selection, destinationPlacement)
 
 		// Первый шаг skeleton-а: локомотив подъезжает к тому концу пути,
 		// откуда должна быть забрана вся группа операции.
@@ -213,22 +231,89 @@ func BuildLowLevelScenarioStepsFromHeuristicOperations(
 		// Мы намеренно не делим группу внутри одного draft-шага:
 		// если operation говорит о переносе N вагонов, move_loco здесь описывает
 		// перемещение всего этого блока сразу.
-		steps = append(steps, buildMoveLocoScenarioStep(
-			scenarioID,
-			stepOrder,
-			state.Locomotive.LocoID,
-			operation.SourceTrackID,
-			selection.ApproachIndex,
-			operation.DestinationTrackID,
-			destinationPlacement.LocomotiveIndex,
-			buildLowLevelStepPayload("transfer", operation, selection.Wagons),
-		))
-		stepOrder++
+		transferLegs := []struct {
+			FromTrackID string
+			FromIndex   int
+			ToTrackID   string
+			ToIndex     int
+			Phase       string
+		}{
+			{
+				FromTrackID: operation.SourceTrackID,
+				FromIndex:   selection.ApproachIndex,
+				ToTrackID:   destinationJoin.finalTargetTrackID(operation.DestinationTrackID),
+				ToIndex:     destinationJoin.finalTargetIndex(destinationPlacement.LocomotiveIndex),
+				Phase:       "transfer",
+			},
+		}
+		if pulloutTrackID, pulloutIndex, ok := planOuterPulloutTransfer(state, operation, selection); ok {
+			transferLegs = []struct {
+				FromTrackID string
+				FromIndex   int
+				ToTrackID   string
+				ToIndex     int
+				Phase       string
+			}{
+				{
+					FromTrackID: operation.SourceTrackID,
+					FromIndex:   selection.ApproachIndex,
+					ToTrackID:   pulloutTrackID,
+					ToIndex:     pulloutIndex,
+					Phase:       "pullout",
+				},
+				{
+					FromTrackID: pulloutTrackID,
+					FromIndex:   pulloutIndex,
+					ToTrackID:   destinationJoin.finalTargetTrackID(operation.DestinationTrackID),
+					ToIndex:     destinationJoin.finalTargetIndex(destinationPlacement.LocomotiveIndex),
+					Phase:       "transfer",
+				},
+			}
+		}
+		for _, leg := range transferLegs {
+			steps = append(steps, buildMoveLocoScenarioStep(
+				scenarioID,
+				stepOrder,
+				state.Locomotive.LocoID,
+				leg.FromTrackID,
+				leg.FromIndex,
+				leg.ToTrackID,
+				leg.ToIndex,
+				buildLowLevelStepPayload(leg.Phase, operation, selection.Wagons),
+			))
+			stepOrder++
+		}
+		if destinationJoin.Enabled {
+			steps = append(steps, buildCouplingScenarioStep(
+				scenarioID,
+				stepOrder,
+				"couple",
+				destinationJoin.JoinObject1ID,
+				destinationJoin.JoinObject2ID,
+				buildLowLevelStepPayload("destination_join", operation, selection.Wagons),
+			))
+			stepOrder++
+			state.addCoupling(destinationJoin.JoinObject1ID, destinationJoin.JoinObject2ID)
+
+			if destinationJoin.StageTrackID != destinationJoin.FinalTrackID || destinationJoin.StageIndex != destinationJoin.FinalIndex {
+				steps = append(steps, buildMoveLocoScenarioStep(
+					scenarioID,
+					stepOrder,
+					state.Locomotive.LocoID,
+					destinationJoin.StageTrackID,
+					destinationJoin.StageIndex,
+					destinationJoin.FinalTrackID,
+					destinationJoin.FinalIndex,
+					buildLowLevelStepPayload("push_destination", operation, selection.Wagons),
+				))
+				stepOrder++
+			}
+		}
 
 		// После генерации шагов обновляем локальное состояние,
 		// чтобы следующая operation начиналась с нового положения локомотива
 		// и уже переставленных вагонов.
-		applyOperationTransfer(state, operation, selection, destinationPlacement)
+		applyOperationTransfer(state, operation, selection, destinationPlacement, destinationJoin)
 		if operation.OperationType == HeuristicOperationTransferFormationToMain {
 			continue
 		}
@@ -280,6 +365,7 @@ func newLowLevelBuilderState(
 		Locomotive:    currentLocomotive,
 		WagonsByTrack: wagonsByTrack,
 		TracksByID:    tracksByID,
+		Connections:   append([]normalized.TrackConnection{}, scheme.TrackConnections...),
 		Couplings:     buildCouplingIndex(scheme.Couplings),
 	}
 }
@@ -384,6 +470,207 @@ func findBoundaryCouplingToCut(
 	}
 
 	return [2]string{}, false
+}
+
+func planOuterPulloutTransfer(
+	state *lowLevelBuilderState,
+	operation HeuristicOperation,
+	selection lowLevelGroupSelection,
+) (string, int, bool) {
+	orientation, ok := detectLowLevelOuterOrientation(state.TracksByID, state.Connections)
+	if !ok {
+		return "", 0, false
+	}
+	if operation.SourceTrackID == operation.DestinationTrackID {
+		return "", 0, false
+	}
+	if operation.SourceTrackID == orientation.LeftOuterTrackID || operation.SourceTrackID == orientation.RightOuterTrackID {
+		return "", 0, false
+	}
+	if operation.DestinationTrackID == orientation.LeftOuterTrackID || operation.DestinationTrackID == orientation.RightOuterTrackID {
+		return "", 0, false
+	}
+
+	attachedSide := locomotiveAttachedSideForSelection(state.TracksByID[operation.SourceTrackID], selection.NormalizedSourceSide)
+	outerTrackID := orientation.RightOuterTrackID
+	if attachedSide == "left" {
+		outerTrackID = orientation.LeftOuterTrackID
+	}
+
+	outerTrack, ok := state.TracksByID[outerTrackID]
+	if !ok {
+		return "", 0, false
+	}
+	externalSide := orientation.ExternalSideByTrack[outerTrackID]
+	if externalSide == "" {
+		return "", 0, false
+	}
+	return outerTrackID, minimalOuterPulloutIndexForTrack(outerTrack.Capacity, externalSide, len(selection.Wagons)+1), true
+}
+
+func detectLowLevelOuterOrientation(
+	tracksByID map[string]normalized.Track,
+	connections []normalized.TrackConnection,
+) (lowLevelOuterOrientation, bool) {
+	connectedSides := map[string]map[string]int{}
+	for _, connection := range connections {
+		if connectedSides[connection.Track1ID] == nil {
+			connectedSides[connection.Track1ID] = map[string]int{}
+		}
+		if connectedSides[connection.Track2ID] == nil {
+			connectedSides[connection.Track2ID] = map[string]int{}
+		}
+		connectedSides[connection.Track1ID][connection.Track1Side]++
+		connectedSides[connection.Track2ID][connection.Track2Side]++
+	}
+
+	type candidate struct {
+		TrackID      string
+		CenterX      float64
+		ExternalSide string
+	}
+	candidates := make([]candidate, 0, 2)
+	for _, track := range tracksByID {
+		startConnected := connectedSides[track.TrackID]["start"]
+		endConnected := connectedSides[track.TrackID]["end"]
+		if (startConnected == 0 && endConnected == 0) || (startConnected > 0 && endConnected > 0) {
+			continue
+		}
+		externalSide := "start"
+		if startConnected > 0 {
+			externalSide = "end"
+		}
+		candidates = append(candidates, candidate{
+			TrackID:      track.TrackID,
+			CenterX:      (track.StartX + track.EndX) / 2,
+			ExternalSide: externalSide,
+		})
+	}
+	if len(candidates) < 2 {
+		return lowLevelOuterOrientation{}, false
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].CenterX < candidates[j].CenterX
+	})
+	left := candidates[0]
+	right := candidates[len(candidates)-1]
+	return lowLevelOuterOrientation{
+		LeftOuterTrackID:  left.TrackID,
+		RightOuterTrackID: right.TrackID,
+		ExternalSideByTrack: map[string]string{
+			left.TrackID:  left.ExternalSide,
+			right.TrackID: right.ExternalSide,
+		},
+	}, true
+}
+
+func locomotiveAttachedSideForSelection(track normalized.Track, sourceSide string) string {
+	switch sourceSide {
+	case "end":
+		if track.EndX >= track.StartX {
+			return "right"
+		}
+		return "left"
+	default:
+		if track.StartX <= track.EndX {
+			return "left"
+		}
+		return "right"
+	}
+}
+
+func minimalOuterPulloutIndexForTrack(capacity int, externalSide string, trainLength int) int {
+	if capacity <= 0 {
+		return 0
+	}
+	if trainLength < 1 {
+		trainLength = 1
+	}
+	maxIndex := capacity - 1
+	switch externalSide {
+	case "start":
+		idx := maxIndex - trainLength
+		if idx < 0 {
+			return 0
+		}
+		return idx
+	case "end":
+		idx := trainLength
+		if idx > maxIndex {
+			return maxIndex
+		}
+		return idx
+	default:
+		return 0
+	}
+}
+
+func planDestinationJoin(
+	state *lowLevelBuilderState,
+	operation HeuristicOperation,
+	selection lowLevelGroupSelection,
+	destinationPlacement lowLevelDestinationPlacement,
+) lowLevelDestinationJoinPlan {
+	existing := cloneAndSortWagons(state.WagonsByTrack[operation.DestinationTrackID])
+	if len(existing) == 0 || len(selection.Wagons) == 0 || operation.OperationType == HeuristicOperationTransferFormationToMain {
+		return lowLevelDestinationJoinPlan{}
+	}
+
+	if destinationPlacement.PlaceAtStart {
+		moved := cloneAndSortWagons(selection.Wagons)
+		if existing[0].TrackIndex <= len(selection.Wagons) {
+			stageTrackID, stageIndex, ok := findAdjacentLocomotivePlacement(state, operation.DestinationTrackID, "start", operation.SourceTrackID)
+			if ok {
+				return lowLevelDestinationJoinPlan{
+					Enabled:       true,
+					StageTrackID:  stageTrackID,
+					StageIndex:    stageIndex,
+					JoinObject1ID: moved[len(moved)-1].WagonID,
+					JoinObject2ID: existing[0].WagonID,
+					FinalTrackID:  operation.DestinationTrackID,
+					FinalIndex:    destinationPlacement.LocomotiveIndex,
+				}
+			}
+		}
+		return lowLevelDestinationJoinPlan{
+			Enabled:       true,
+			StageTrackID:  operation.DestinationTrackID,
+			StageIndex:    destinationPlacement.LocomotiveIndex,
+			JoinObject1ID: moved[len(moved)-1].WagonID,
+			JoinObject2ID: existing[0].WagonID,
+			FinalTrackID:  operation.DestinationTrackID,
+			FinalIndex:    destinationPlacement.LocomotiveIndex,
+		}
+	}
+
+	stageTrackID, stageIndex, ok := findAdjacentLocomotivePlacement(state, operation.DestinationTrackID, "end", operation.SourceTrackID)
+	if !ok {
+		return lowLevelDestinationJoinPlan{}
+	}
+	moved := cloneAndSortWagons(selection.Wagons)
+	return lowLevelDestinationJoinPlan{
+		Enabled:       true,
+		StageTrackID:  stageTrackID,
+		StageIndex:    stageIndex,
+		JoinObject1ID: moved[0].WagonID,
+		JoinObject2ID: existing[len(existing)-1].WagonID,
+		FinalTrackID:  operation.DestinationTrackID,
+		FinalIndex:    destinationPlacement.LocomotiveIndex,
+	}
+}
+
+func (plan lowLevelDestinationJoinPlan) finalTargetTrackID(defaultTrackID string) string {
+	if plan.Enabled {
+		return plan.StageTrackID
+	}
+	return defaultTrackID
+}
+
+func (plan lowLevelDestinationJoinPlan) finalTargetIndex(defaultIndex int) int {
+	if plan.Enabled {
+		return plan.StageIndex
+	}
+	return defaultIndex
 }
 
 // selectOperationGroup выбирает фактическую группу вагонов,
@@ -596,9 +883,20 @@ func reserveDestinationPlacement(
 		boundaryIndex = startIndex
 		locomotiveIndex = startIndex - 1
 	} else if placeAtStart {
-		startIndex = 1
-		boundaryIndex = 1
-		locomotiveIndex = 0
+		if len(existing) > 0 {
+			existingMin := existing[0].TrackIndex
+			requiredMin := len(selection.Wagons) + 1
+			if existingMin < requiredMin {
+				existingMin = requiredMin
+			}
+			locomotiveIndex = existingMin - len(selection.Wagons) - 1
+			startIndex = locomotiveIndex + 1
+		} else {
+			startIndex = 1
+			boundaryIndex = 1
+			locomotiveIndex = 0
+		}
+		boundaryIndex = startIndex
 	} else {
 		boundaryIndex = startIndex + len(selection.Wagons) - 1
 	}
@@ -630,6 +928,7 @@ func applyOperationTransfer(
 	operation HeuristicOperation,
 	selection lowLevelGroupSelection,
 	destinationPlacement lowLevelDestinationPlacement,
+	destinationJoin lowLevelDestinationJoinPlan,
 ) {
 	selectedByID := make(map[string]struct{}, len(selection.Wagons))
 	for _, wagon := range selection.Wagons {
@@ -645,11 +944,20 @@ func applyOperationTransfer(
 	}
 	state.WagonsByTrack[operation.SourceTrackID] = cloneAndSortWagons(sourceRemainder)
 
+	movedStartIndex := destinationPlacement.StartIndex
+	// Builder state stores the final placement after the whole delivery operation.
+	// If we staged via a throat and then pushed onto the destination track, the
+	// delivered wagons end up immediately after the locomotive on the target path,
+	// not one slot deeper at the temporary throat-stage geometry.
+	if destinationPlacement.PlaceAtStart && destinationJoin.Enabled && destinationJoin.StageTrackID != destinationJoin.FinalTrackID {
+		movedStartIndex = destinationPlacement.LocomotiveIndex + 1
+	}
+
 	movedGroup := make([]normalized.Wagon, 0, len(selection.Wagons))
 	for index, wagon := range cloneAndSortWagons(selection.Wagons) {
 		next := wagon
 		next.TrackID = operation.DestinationTrackID
-		next.TrackIndex = destinationPlacement.StartIndex + index
+		next.TrackIndex = movedStartIndex + index
 		movedGroup = append(movedGroup, next)
 	}
 
@@ -657,10 +965,18 @@ func applyOperationTransfer(
 	destinationWagons := make([]normalized.Wagon, 0, len(existingDestination)+len(movedGroup))
 	if destinationPlacement.PlaceAtStart {
 		destinationWagons = append(destinationWagons, movedGroup...)
-		for index, wagon := range existingDestination {
-			next := wagon
-			next.TrackIndex = destinationPlacement.StartIndex + len(movedGroup) + index
-			destinationWagons = append(destinationWagons, next)
+		if len(existingDestination) > 0 {
+			existingMin := existingDestination[0].TrackIndex
+			desiredExistingStart := movedStartIndex + len(movedGroup)
+			shift := desiredExistingStart - existingMin
+			if shift < 0 {
+				shift = 0
+			}
+			for _, wagon := range existingDestination {
+				next := wagon
+				next.TrackIndex = wagon.TrackIndex + shift
+				destinationWagons = append(destinationWagons, next)
+			}
 		}
 	} else {
 		destinationWagons = append(destinationWagons, existingDestination...)
@@ -670,6 +986,78 @@ func applyOperationTransfer(
 
 	state.Locomotive.TrackID = operation.DestinationTrackID
 	state.Locomotive.TrackIndex = destinationPlacement.LocomotiveIndex
+	if destinationJoin.Enabled {
+		state.addCoupling(destinationJoin.JoinObject1ID, destinationJoin.JoinObject2ID)
+	}
+}
+
+func findAdjacentLocomotivePlacement(
+	state *lowLevelBuilderState,
+	destinationTrackID string,
+	destinationSide string,
+	preferredSourceTrackID string,
+) (string, int, bool) {
+	type candidate struct {
+		TrackID string
+		Index   int
+		Score   int
+	}
+	candidates := make([]candidate, 0, 2)
+	for _, connection := range state.Connections {
+		var otherTrackID string
+		var otherSide string
+		switch {
+		case connection.Track1ID == destinationTrackID && connection.Track1Side == destinationSide:
+			otherTrackID = connection.Track2ID
+			otherSide = connection.Track2Side
+		case connection.Track2ID == destinationTrackID && connection.Track2Side == destinationSide:
+			otherTrackID = connection.Track1ID
+			otherSide = connection.Track1Side
+		default:
+			continue
+		}
+		otherTrack, ok := state.TracksByID[otherTrackID]
+		if !ok {
+			continue
+		}
+		index := 0
+		switch otherSide {
+		case "start":
+			index = 1
+			if index >= otherTrack.Capacity {
+				index = otherTrack.Capacity - 1
+			}
+		case "end":
+			index = otherTrack.Capacity - 2
+			if index < 0 {
+				index = 0
+			}
+		default:
+			continue
+		}
+		score := 1
+		if otherTrackID == preferredSourceTrackID {
+			score = 0
+		}
+		candidates = append(candidates, candidate{
+			TrackID: otherTrackID,
+			Index:   index,
+			Score:   score,
+		})
+	}
+	if len(candidates) == 0 {
+		return "", 0, false
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].Score != candidates[j].Score {
+			return candidates[i].Score < candidates[j].Score
+		}
+		if candidates[i].TrackID != candidates[j].TrackID {
+			return candidates[i].TrackID < candidates[j].TrackID
+		}
+		return candidates[i].Index < candidates[j].Index
+	})
+	return candidates[0].TrackID, candidates[0].Index, true
 }
 
 // nextFreeTrackIndex возвращает первый свободный TrackIndex на пути.

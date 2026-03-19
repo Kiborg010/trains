@@ -395,11 +395,11 @@ func TestBuildLowLevelScenarioStepsFromHeuristicOperationsForWholeScenario(t *te
 
 	// Проверяем финальную пятёрку шагов для transfer_formation_to_main:
 	// подход, сцепка локомотива, достройка цепочки состава, перенос, расцепка.
-	last := steps[9:]
-	if len(last) != 4 {
-		t.Fatalf("expected 4 steps in final operation without final decouple, got %d", len(last))
+	last := steps[10:]
+	if len(last) != 3 {
+		t.Fatalf("expected 3 steps in final operation without final decouple, got %d", len(last))
 	}
-	if last[0].StepType != "move_loco" || last[1].StepType != "couple" || last[2].StepType != "couple" || last[3].StepType != "move_loco" {
+	if last[0].StepType != "move_loco" || last[1].StepType != "couple" || last[2].StepType != "move_loco" {
 		t.Fatalf("unexpected final operation shape: %+v", last)
 	}
 	if last[0].FromTrackID == nil || *last[0].FromTrackID != "lead-2" {
@@ -411,17 +411,11 @@ func TestBuildLowLevelScenarioStepsFromHeuristicOperationsForWholeScenario(t *te
 	if last[1].Object2ID == nil || *last[1].Object2ID != "w4" {
 		t.Fatalf("expected final couple to use the boundary wagon of the whole formation, got %+v", last[1].Object2ID)
 	}
-	if last[2].Object1ID == nil || last[2].Object2ID == nil {
-		t.Fatalf("expected final operation to add an internal coupling before transfer, got %+v %+v", last[2].Object1ID, last[2].Object2ID)
+	if last[2].ToTrackID == nil || *last[2].ToTrackID != "main-1" {
+		t.Fatalf("expected final transfer to main track, got %+v", last[2].ToTrackID)
 	}
-	if *last[2].Object1ID == "l1" || *last[2].Object2ID == "l1" {
-		t.Fatalf("expected internal wagon coupling before final transfer, got locomotive coupling %+v %+v", last[2].Object1ID, last[2].Object2ID)
-	}
-	if last[3].ToTrackID == nil || *last[3].ToTrackID != "main-1" {
-		t.Fatalf("expected final transfer to main track, got %+v", last[3].ToTrackID)
-	}
-	if last[3].ToIndex == nil || *last[3].ToIndex != 1 {
-		t.Fatalf("expected final transfer to leave locomotive on first inner main-track node, got %+v", last[3].ToIndex)
+	if last[2].ToIndex == nil || *last[2].ToIndex != 1 {
+		t.Fatalf("expected final transfer to leave locomotive on first inner main-track node, got %+v", last[2].ToIndex)
 	}
 }
 
@@ -598,5 +592,155 @@ func TestBuildLowLevelScenarioStepsPreservesRealSourceIndicesBetweenOperations(t
 	}
 	if secondApproach.ToIndex == nil || *secondApproach.ToIndex != 3 {
 		t.Fatalf("expected second approach to use real free slot next to remaining wagon at index 2, got %+v", secondApproach.ToIndex)
+	}
+}
+
+func TestBuildLowLevelScenarioStepsStagesOccupiedDestinationJoinThroughAdjacentThroat(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 30,
+		Tracks: []normalized.Track{
+			{TrackID: "left-outer", Type: "lead", StartX: -200, StartY: 0, EndX: -80, EndY: 0, Capacity: 8, StorageAllowed: true},
+			{TrackID: "source-throat", Type: "lead", StartX: -80, StartY: 0, EndX: 0, EndY: 20, Capacity: 3, StorageAllowed: true},
+			{TrackID: "destination-throat", Type: "lead", StartX: -80, StartY: 0, EndX: 0, EndY: -20, Capacity: 3, StorageAllowed: true},
+			{TrackID: "source", Type: "sorting", StartX: 0, StartY: 20, EndX: 200, EndY: 20, Capacity: 8, StorageAllowed: true},
+			{TrackID: "destination", Type: "lead", StartX: 0, StartY: -20, EndX: 200, EndY: -20, Capacity: 8, StorageAllowed: true},
+			{TrackID: "main-right", Type: "main", StartX: 200, StartY: -20, EndX: 320, EndY: -20, Capacity: 8, StorageAllowed: false},
+		},
+		TrackConnections: []normalized.TrackConnection{
+			{ConnectionID: "c1", Track1ID: "left-outer", Track2ID: "source-throat", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+			{ConnectionID: "c2", Track1ID: "left-outer", Track2ID: "destination-throat", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+			{ConnectionID: "c3", Track1ID: "source-throat", Track2ID: "source", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{ConnectionID: "c4", Track1ID: "destination-throat", Track2ID: "destination", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{ConnectionID: "c5", Track1ID: "destination", Track2ID: "main-right", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "w1", Color: "blue", TrackID: "source", TrackIndex: 1},
+			{WagonID: "f1", Color: "blue", TrackID: "destination", TrackIndex: 0},
+		},
+		Locomotives: []normalized.Locomotive{
+			{LocoID: "l1", TrackID: "left-outer", TrackIndex: 0},
+		},
+	}
+
+	steps, err := BuildLowLevelScenarioStepsFromHeuristicOperations(
+		"nsc-occupied-destination-join",
+		scheme,
+		[]HeuristicOperation{
+			{
+				OperationType:      HeuristicOperationTransferTargetsToFormation,
+				SourceTrackID:      "source",
+				DestinationTrackID: "destination",
+				SourceSide:         "start",
+				WagonCount:         1,
+				TargetColor:        "blue",
+				FormationTrackID:   "destination",
+				BufferTrackID:      "left-outer",
+				MainTrackID:        "main-right",
+			},
+		},
+		scheme.Locomotives[0],
+		scheme.Wagons,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(steps) != 7 {
+		t.Fatalf("expected approach/couple/pullout/transfer/destination_join/push/decouple, got %d steps", len(steps))
+	}
+	if steps[2].StepType != "move_loco" || steps[2].ToTrackID == nil || *steps[2].ToTrackID != "left-outer" {
+		t.Fatalf("expected third step to pull the consist out to the outer track, got %+v", steps[2])
+	}
+	if steps[3].StepType != "move_loco" || steps[3].ToTrackID == nil || *steps[3].ToTrackID != "destination-throat" || steps[3].ToIndex == nil || *steps[3].ToIndex != 1 {
+		t.Fatalf("expected fourth step to stage the locomotive on the adjacent throat before destination join, got %+v", steps[3])
+	}
+	if steps[4].StepType != "couple" || steps[4].Object1ID == nil || *steps[4].Object1ID != "w1" || steps[4].Object2ID == nil || *steps[4].Object2ID != "f1" {
+		t.Fatalf("expected destination join to couple the delivered wagon to the boundary wagon on destination, got %+v", steps[4])
+	}
+	if steps[5].StepType != "move_loco" || steps[5].ToTrackID == nil || *steps[5].ToTrackID != "destination" || steps[5].ToIndex == nil || *steps[5].ToIndex != 0 {
+		t.Fatalf("expected push_destination to move the locomotive onto the destination track coupling-ready slot, got %+v", steps[5])
+	}
+}
+
+func TestBuildLowLevelScenarioStepsUsesUpdatedDestinationBoundaryForSequentialPrepends(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 31,
+		Tracks: []normalized.Track{
+			{TrackID: "left-outer", Type: "lead", StartX: -200, StartY: 0, EndX: -80, EndY: 0, Capacity: 8, StorageAllowed: true},
+			{TrackID: "source-throat", Type: "lead", StartX: -80, StartY: 0, EndX: 0, EndY: 20, Capacity: 3, StorageAllowed: true},
+			{TrackID: "destination-throat", Type: "lead", StartX: -80, StartY: 0, EndX: 0, EndY: -20, Capacity: 3, StorageAllowed: true},
+			{TrackID: "source", Type: "sorting", StartX: 0, StartY: 20, EndX: 200, EndY: 20, Capacity: 8, StorageAllowed: true},
+			{TrackID: "destination", Type: "lead", StartX: 0, StartY: -20, EndX: 200, EndY: -20, Capacity: 8, StorageAllowed: true},
+			{TrackID: "main-right", Type: "main", StartX: 200, StartY: -20, EndX: 320, EndY: -20, Capacity: 8, StorageAllowed: false},
+		},
+		TrackConnections: []normalized.TrackConnection{
+			{ConnectionID: "c1", Track1ID: "left-outer", Track2ID: "source-throat", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+			{ConnectionID: "c2", Track1ID: "left-outer", Track2ID: "destination-throat", Track1Side: "end", Track2Side: "start", ConnectionType: "switch"},
+			{ConnectionID: "c3", Track1ID: "source-throat", Track2ID: "source", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{ConnectionID: "c4", Track1ID: "destination-throat", Track2ID: "destination", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+			{ConnectionID: "c5", Track1ID: "destination", Track2ID: "main-right", Track1Side: "end", Track2Side: "start", ConnectionType: "serial"},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "w1", Color: "blue", TrackID: "source", TrackIndex: 1},
+			{WagonID: "w2", Color: "blue", TrackID: "source", TrackIndex: 2},
+			{WagonID: "f1", Color: "blue", TrackID: "destination", TrackIndex: 0},
+		},
+		Locomotives: []normalized.Locomotive{
+			{LocoID: "l1", TrackID: "left-outer", TrackIndex: 0},
+		},
+		Couplings: []normalized.Coupling{
+			{CouplingID: "cw12", Object1ID: "w1", Object2ID: "w2"},
+		},
+	}
+
+	steps, err := BuildLowLevelScenarioStepsFromHeuristicOperations(
+		"nsc-sequential-prepend-boundary",
+		scheme,
+		[]HeuristicOperation{
+			{
+				OperationType:      HeuristicOperationTransferTargetsToFormation,
+				SourceTrackID:      "source",
+				DestinationTrackID: "destination",
+				SourceSide:         "start",
+				WagonCount:         1,
+				TargetColor:        "blue",
+				FormationTrackID:   "destination",
+				BufferTrackID:      "left-outer",
+				MainTrackID:        "main-right",
+			},
+			{
+				OperationType:      HeuristicOperationTransferTargetsToFormation,
+				SourceTrackID:      "source",
+				DestinationTrackID: "destination",
+				SourceSide:         "start",
+				WagonCount:         1,
+				TargetColor:        "blue",
+				FormationTrackID:   "destination",
+				BufferTrackID:      "left-outer",
+				MainTrackID:        "main-right",
+			},
+		},
+		scheme.Locomotives[0],
+		scheme.Wagons,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(steps) != 15 {
+		t.Fatalf("expected 15 steps for sequential prepends with initial source split and destination joins, got %d", len(steps))
+	}
+
+	secondStage := steps[11]
+	if secondStage.StepType != "move_loco" || secondStage.ToTrackID == nil || *secondStage.ToTrackID != "destination-throat" || secondStage.ToIndex == nil || *secondStage.ToIndex != 1 {
+		t.Fatalf("expected second prepend to stage the locomotive on the adjacent throat using the updated destination boundary, got %+v", secondStage)
+	}
+	secondJoin := steps[12]
+	if secondJoin.StepType != "couple" || secondJoin.Object1ID == nil || *secondJoin.Object1ID != "w2" || secondJoin.Object2ID == nil || *secondJoin.Object2ID != "w1" {
+		t.Fatalf("expected second prepend to couple the new wagon to the updated boundary wagon w1, got %+v", secondJoin)
+	}
+	secondPush := steps[13]
+	if secondPush.StepType != "move_loco" || secondPush.ToTrackID == nil || *secondPush.ToTrackID != "destination" || secondPush.ToIndex == nil || *secondPush.ToIndex != 0 {
+		t.Fatalf("expected second prepend push to leave the locomotive at destination:0 after advancing the whole group, got %+v", secondPush)
 	}
 }
