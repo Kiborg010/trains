@@ -67,9 +67,42 @@ const PATH_TYPE_COLORS = {
   [PATH_TYPE_LEAD]: "#38bdf8",
   [PATH_TYPE_NORMAL]: "#334155",
 };
+const PATH_TYPE_COLORS_DARK = {
+  [PATH_TYPE_MAIN]: "#fbbf24",
+  [PATH_TYPE_BYPASS]: "#fb7185",
+  [PATH_TYPE_SORTING]: "#4ade80",
+  [PATH_TYPE_LEAD]: "#7dd3fc",
+  [PATH_TYPE_NORMAL]: "#cbd5e1",
+};
 const SIDEBAR_MIN_WIDTH = 280;
 const SIDEBAR_DEFAULT_WIDTH = 320;
 const SIDEBAR_MAX_WIDTH = 560;
+const CANVAS_THEME_LIGHT = "light";
+const CANVAS_THEME_DARK = "dark";
+const CANVAS_THEME_COLORS = {
+  [CANVAS_THEME_LIGHT]: {
+    background: "#ffffff",
+    gridMinor: "#d8e2ee",
+    gridMajor: "#b6c7db",
+    pathLabel: "#0f172a",
+    emptySlot: "#cbd5e1",
+    occupiedSlot: "#94a3b8",
+    node: "#cbd5e1",
+    selectionFill: "rgba(37, 99, 235, 0.18)",
+    selectionStroke: "#2563eb",
+  },
+  [CANVAS_THEME_DARK]: {
+    background: "#0b1220",
+    gridMinor: "#223045",
+    gridMajor: "#314760",
+    pathLabel: "#e2e8f0",
+    emptySlot: "#475569",
+    occupiedSlot: "#94a3b8",
+    node: "#64748b",
+    selectionFill: "rgba(96, 165, 250, 0.18)",
+    selectionStroke: "#60a5fa",
+  },
+};
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -258,6 +291,14 @@ function getSegmentStrokeColor(segmentType, isSelected) {
     return "#2563eb";
   }
   return PATH_TYPE_COLORS[normalizePathType(segmentType)] || PATH_TYPE_COLORS[PATH_TYPE_NORMAL];
+}
+
+function getCanvasSegmentStrokeColor(segmentType, isSelected, canvasTheme) {
+  if (isSelected) {
+    return "#2563eb";
+  }
+  const palette = canvasTheme === CANVAS_THEME_DARK ? PATH_TYPE_COLORS_DARK : PATH_TYPE_COLORS;
+  return palette[normalizePathType(segmentType)] || palette[PATH_TYPE_NORMAL];
 }
 
 function normalizeScenarioStep(step) {
@@ -1123,6 +1164,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [selectedLayoutId, setSelectedLayoutId] = useState("");
   const [scenarioName, setScenarioName] = useState("Сценарий 1");
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
+  const [canvasTheme, setCanvasTheme] = useState(CANVAS_THEME_LIGHT);
   const [savedScenarios, setSavedScenarios] = useState([]);
   const [selectedScenarioId, setSelectedScenarioId] = useState("");
   const [heuristicTargetColor, setHeuristicTargetColor] = useState("");
@@ -3367,6 +3409,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const scenarioStepDisplay = scenarioSteps.length
     ? Math.min(Math.max(currentScenarioStep, 0), scenarioSteps.length)
     : 0;
+  const canvasColors = CANVAS_THEME_COLORS[canvasTheme] || CANVAS_THEME_COLORS[CANVAS_THEME_LIGHT];
   const currentHeuristicScenarioContextId = String(
     heuristicDraftResult?.draft_scenario?.heuristic_scenario_id ||
     selectedHeuristicScenarioId ||
@@ -3983,25 +4026,37 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         aria-label="Изменить ширину панели инструментов"
       />
 
-      <main className="workspace">
-        <header className="toolbar">
-          <div>Режим: <strong>{activeModeLabel}</strong></div>
-          <div className="zoomControls">
-            <button type="button" className="zoomButton" onClick={zoomOut}>
-              -
+      <main className={`workspace workspaceTheme-${canvasTheme}`}>
+        <header className={`toolbar toolbarTheme-${canvasTheme}`}>
+          <div className="toolbarActions">
+            <button
+              type="button"
+              className={`zoomButton zoomButtonTheme ${canvasTheme === CANVAS_THEME_DARK ? "active" : ""}`}
+              onClick={() =>
+                setCanvasTheme((prev) =>
+                  prev === CANVAS_THEME_DARK ? CANVAS_THEME_LIGHT : CANVAS_THEME_DARK
+                )
+              }
+            >
+              {canvasTheme === CANVAS_THEME_DARK ? "Светлый холст" : "Тёмный холст"}
             </button>
-            <button type="button" className="zoomButton" onClick={resetZoom}>
-              {Math.round(zoom * 100)}%
-            </button>
-            <button type="button" className="zoomButton" onClick={zoomIn}>
-              +
-            </button>
+            <div className="zoomControls">
+              <button type="button" className="zoomButton" onClick={zoomOut}>
+                -
+              </button>
+              <button type="button" className="zoomButton zoomButtonValue" onClick={resetZoom}>
+                {Math.round(zoom * 100)}%
+              </button>
+              <button type="button" className="zoomButton" onClick={zoomIn}>
+                +
+              </button>
+            </div>
           </div>
         </header>
 
         <section
           ref={canvasWrapRef}
-          className={`canvasWrap ${isPanning ? "panning" : ""}`}
+          className={`canvasWrap canvasTheme-${canvasTheme} ${isPanning ? "panning" : ""}`}
           onMouseDown={handleCanvasWrapMouseDown}
           onAuxClick={(event) => {
             if (event.button === 1) {
@@ -4021,7 +4076,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
           >
-            <rect x={camera.x} y={camera.y} width={viewWidth} height={viewHeight} fill="#ffffff" />
+            <rect x={camera.x} y={camera.y} width={viewWidth} height={viewHeight} fill={canvasColors.background} />
             <g aria-hidden="true">
               {minorVerticalGridLines.map((x) => (
                 <line
@@ -4030,7 +4085,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                   y1={camera.y}
                   x2={x}
                   y2={camera.y + viewHeight}
-                  stroke="#d8e2ee"
+                  stroke={canvasColors.gridMinor}
                   strokeWidth="1"
                   vectorEffect="non-scaling-stroke"
                   shapeRendering="crispEdges"
@@ -4043,7 +4098,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                   y1={y}
                   x2={camera.x + viewWidth}
                   y2={y}
-                  stroke="#d8e2ee"
+                  stroke={canvasColors.gridMinor}
                   strokeWidth="1"
                   vectorEffect="non-scaling-stroke"
                   shapeRendering="crispEdges"
@@ -4056,7 +4111,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                   y1={camera.y}
                   x2={x}
                   y2={camera.y + viewHeight}
-                  stroke="#b6c7db"
+                  stroke={canvasColors.gridMajor}
                   strokeWidth="1.2"
                   vectorEffect="non-scaling-stroke"
                   shapeRendering="crispEdges"
@@ -4069,7 +4124,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                   y1={y}
                   x2={camera.x + viewWidth}
                   y2={y}
-                  stroke="#b6c7db"
+                  stroke={canvasColors.gridMajor}
                   strokeWidth="1.2"
                   vectorEffect="non-scaling-stroke"
                   shapeRendering="crispEdges"
@@ -4080,7 +4135,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
             {segments.map((segment) => {
               const pathName = getPathDisplayName(segment.id, segmentDisplayNameById);
               const midpointX = (segment.from.x + segment.to.x) / 2;
-              const midpointY = (segment.from.y + segment.to.y) / 2 - 10;
+              const midpointY = (segment.from.y + segment.to.y) / 2 - 24;
               return (
                 <g key={segment.id}>
                   <line
@@ -4088,7 +4143,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                     y1={segment.from.y}
                     x2={segment.to.x}
                     y2={segment.to.y}
-                    stroke={getSegmentStrokeColor(segment.type, selectedSegmentSet.has(segment.id))}
+                    stroke={getCanvasSegmentStrokeColor(segment.type, selectedSegmentSet.has(segment.id), canvasTheme)}
                     strokeWidth={selectedSegmentSet.has(segment.id) ? "8" : "6"}
                     strokeLinecap="round"
                     className={isEditMode ? "draggableLine" : ""}
@@ -4116,7 +4171,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                   <text
                     x={midpointX}
                     y={midpointY}
-                    fill="#0f172a"
+                    fill={canvasColors.pathLabel}
                     fontSize="14"
                     fontWeight="700"
                     textAnchor="middle"
@@ -4159,8 +4214,8 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                   targetPathId === slot.pathId && targetPathIndex === slot.index
                     ? "#22c55e"
                     : occupiedSlots.has(slot.id)
-                      ? "#94a3b8"
-                      : "#cbd5e1"
+                      ? canvasColors.occupiedSlot
+                      : canvasColors.emptySlot
                 }
                 className="slotPoint"
                 onClick={(event) => handleSlotClick(event, slot)}
@@ -4219,8 +4274,8 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                     cx={node.x}
                     cy={node.y}
                     r="7"
-                    fill="#60a5fa"
-                    stroke="#1e3a8a"
+                    fill={canvasTheme === CANVAS_THEME_DARK ? "#93c5fd" : "#60a5fa"}
+                    stroke={canvasTheme === CANVAS_THEME_DARK ? "#dbeafe" : "#1e3a8a"}
                     strokeWidth="2"
                     className="draggablePoint"
                     onMouseDown={(event) => startNodeDrag(event, node)}
@@ -4243,7 +4298,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                     cx={node.x}
                     cy={node.y}
                     r="4.5"
-                    fill="#cbd5e1"
+                    fill={canvasColors.node}
                     pointerEvents="none"
                   />
                 </g>
@@ -4270,12 +4325,14 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                 y={selectionRect.top}
                 width={Math.max(selectionRect.right - selectionRect.left, 1)}
                 height={Math.max(selectionRect.bottom - selectionRect.top, 1)}
+                fill={canvasColors.selectionFill}
+                stroke={canvasColors.selectionStroke}
               />
             )}
           </svg>
         </section>
 
-        <footer className="statusbar">
+        <footer className={`statusbar statusbarTheme-${canvasTheme}`}>
           X: {mousePoint.x} | Y: {mousePoint.y} | Zoom: {Math.round(zoom * 100)}% | Grid: {roundGridValue(canvasGridSize)}
         </footer>
       </main>
