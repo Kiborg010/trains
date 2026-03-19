@@ -21,10 +21,10 @@ export default function LoginPage() {
       if (result.ok) {
         navigate('/');
       } else {
-        setError(result.error || 'Login failed');
+        setError(result.error || 'Не удалось войти.');
       }
     } catch (err) {
-      setError(err.message || 'An error occurred');
+      setError(err.message || 'Произошла ошибка.');
     } finally {
       setLoading(false);
     }
@@ -32,12 +32,13 @@ export default function LoginPage() {
 
   return (
     <div className={styles.container}>
+      <div className={styles.pageBrand}>Trains Lab</div>
       <div className={styles.card}>
-        <h1>Login</h1>
+        <h1>Вход</h1>
         {error && <div className={styles.error}>{error}</div>}
         <form onSubmit={handleSubmit}>
           <div className={styles.formGroup}>
-            <label htmlFor="email">Email</label>
+            <label htmlFor="email">Электронная почта</label>
             <input
               id="email"
               type="email"
@@ -48,7 +49,7 @@ export default function LoginPage() {
             />
           </div>
           <div className={styles.formGroup}>
-            <label htmlFor="password">Password</label>
+            <label htmlFor="password">Пароль</label>
             <input
               id="password"
               type="password"
@@ -59,12 +60,12 @@ export default function LoginPage() {
             />
           </div>
           <button type="submit" disabled={loading}>
-            {loading ? 'Logging in...' : 'Login'}
+            {loading ? 'Вход...' : 'Войти'}
           </button>
         </form>
         <p>
-          Don't have an account?{' '}
-          <a href="/register">Register here</a>
+          Нет аккаунта?{' '}
+          <a href="/register">Зарегистрироваться</a>
         </p>
       </div>
     </div>

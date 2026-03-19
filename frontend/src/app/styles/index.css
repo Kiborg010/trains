@@ -84,9 +84,6 @@ body,
 }
 
 .toolSectionHeader {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   margin: 0;
   padding: 0 0 6px;
   font-size: 11px;
@@ -95,7 +92,6 @@ body,
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #93a4bd;
-  background: #111b2d;
 }
 
 .toolSectionBody {

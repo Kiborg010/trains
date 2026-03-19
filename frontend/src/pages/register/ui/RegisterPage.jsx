@@ -21,13 +21,13 @@ export default function RegisterPage() {
 
     // Validation
     if (password !== confirmPassword) {
-      setError('Passwords do not match');
+      setError('Пароли не совпадают.');
       setLoading(false);
       return;
     }
 
     if (password.length < 6) {
-      setError('Password must be at least 6 characters');
+      setError('Пароль должен содержать не менее 6 символов.');
       setLoading(false);
       return;
     }
@@ -35,15 +35,15 @@ export default function RegisterPage() {
     try {
       const result = await register(email, password);
       if (result.ok) {
-        setSuccess('Registration successful! Redirecting to login...');
+        setSuccess('Регистрация прошла успешно. Переходим ко входу...');
         setTimeout(() => {
           navigate('/login');
         }, 2000);
       } else {
-        setError(result.error || 'Registration failed');
+        setError(result.error || 'Не удалось зарегистрироваться.');
       }
     } catch (err) {
-      setError(err.message || 'An error occurred');
+      setError(err.message || 'Произошла ошибка.');
     } finally {
       setLoading(false);
     }
@@ -51,13 +51,14 @@ export default function RegisterPage() {
 
   return (
     <div className={styles.container}>
+      <div className={styles.pageBrand}>Trains Lab</div>
       <div className={styles.card}>
-        <h1>Register</h1>
+        <h1>Регистрация</h1>
         {error && <div className={styles.error}>{error}</div>}
         {success && <div className={styles.success}>{success}</div>}
         <form onSubmit={handleSubmit}>
           <div className={styles.formGroup}>
-            <label htmlFor="email">Email</label>
+            <label htmlFor="email">Электронная почта</label>
             <input
               id="email"
               type="email"
@@ -68,7 +69,7 @@ export default function RegisterPage() {
             />
           </div>
           <div className={styles.formGroup}>
-            <label htmlFor="password">Password</label>
+            <label htmlFor="password">Пароль</label>
             <input
               id="password"
               type="password"
@@ -79,7 +80,7 @@ export default function RegisterPage() {
             />
           </div>
           <div className={styles.formGroup}>
-            <label htmlFor="confirmPassword">Confirm Password</label>
+            <label htmlFor="confirmPassword">Подтверждение пароля</label>
             <input
               id="confirmPassword"
               type="password"
@@ -90,12 +91,12 @@ export default function RegisterPage() {
             />
           </div>
           <button type="submit" disabled={loading}>
-            {loading ? 'Registering...' : 'Register'}
+            {loading ? 'Регистрация...' : 'Зарегистрироваться'}
           </button>
         </form>
         <p>
-          Already have an account?{' '}
-          <a href="/login">Login here</a>
+          Уже есть аккаунт?{' '}
+          <a href="/login">Войти</a>
         </p>
       </div>
     </div>

@@ -45,7 +45,7 @@ export function AuthProvider({ children }) {
 
         const data = await response.json();
         if (!data?.ok || !data?.user) {
-          throw new Error('Invalid /auth/me response');
+          throw new Error('Некорректный ответ /auth/me');
         }
 
         if (!cancelled) {
@@ -83,7 +83,7 @@ export function AuthProvider({ children }) {
 
       if (!response.ok) {
         const err = await response.json();
-        throw new Error(err.error || 'Login failed');
+        throw new Error(err.error || 'Не удалось войти');
       }
 
       const data = await response.json();
@@ -94,7 +94,7 @@ export function AuthProvider({ children }) {
         return { ok: true, user: data.user, token: data.token };
       }
 
-      throw new Error('Invalid response');
+      throw new Error('Некорректный ответ сервера');
     } catch (error) {
       return { ok: false, error: error.message };
     }
@@ -110,7 +110,7 @@ export function AuthProvider({ children }) {
 
       if (!response.ok) {
         const err = await response.json();
-        throw new Error(err.error || 'Registration failed');
+        throw new Error(err.error || 'Не удалось зарегистрироваться');
       }
 
       const data = await response.json();
@@ -119,7 +119,7 @@ export function AuthProvider({ children }) {
         return { ok: true, user: data.user };
       }
 
-      throw new Error('Invalid response');
+      throw new Error('Некорректный ответ сервера');
     } catch (error) {
       return { ok: false, error: error.message };
     }
@@ -147,7 +147,7 @@ export function AuthProvider({ children }) {
 export function useAuth() {
   const context = React.useContext(AuthContext);
   if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
+    throw new Error('useAuth должен использоваться внутри AuthProvider');
   }
   return context;
 }

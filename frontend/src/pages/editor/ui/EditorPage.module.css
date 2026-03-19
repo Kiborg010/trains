@@ -8,11 +8,17 @@
 
 /* Верхняя панель */
 .topbar {
+  position: relative;
+  flex: 0 0 72px;
   height: 72px;
+  min-height: 72px;
+  max-height: 72px;
   padding: 0 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  box-sizing: border-box;
+  overflow: hidden;
 
   background: #0b1220;            /* можешь менять */
   color: #fff;
@@ -38,10 +44,15 @@
 
 /* Вторая панель (ниже) */
 .subbar {
+  flex: 0 0 54px;
   height: 54px;
+  min-height: 54px;
+  max-height: 54px;
   padding: 0 20px;
   display: flex;
   align-items: center;
+  box-sizing: border-box;
+  overflow: hidden;
 
   background: #111827;            /* чуть светлее/темнее topbar */
   color: #fff;
