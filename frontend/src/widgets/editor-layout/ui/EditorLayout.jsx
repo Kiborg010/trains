@@ -40,7 +40,6 @@ const WAGON_COLOR_PALETTE = [
   "#ef4444",
   "#a855f7",
   "#14b8a6",
-  "#64748b",
 ];
 const PATH_TYPE_OPTIONS = [
   { value: PATH_TYPE_MAIN, label: "Главный" },
@@ -3150,6 +3149,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     try {
       await applyLayoutAction("place_vehicle", {
         vehicleType: type,
+        color: type === "wagon" ? wagonPaintColor || DEFAULT_WAGON_COLOR : undefined,
         targetPathId: slot.pathId,
         targetIndex: slot.index,
       });
@@ -3632,12 +3632,21 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                     <p className="counter">
                       Схема: {selectedLayoutId || scenarioLayoutId || "-"}
                     </p>
-                    <input
-                      className="toolInput"
-                      value={heuristicTargetColor}
-                      onChange={(event) => setHeuristicTargetColor(event.target.value)}
-                      placeholder="Целевой цвет вагонов"
-                    />
+                    <div className="paintModeBlock">
+                      <p className="counter">Целевой цвет вагонов</p>
+                      <div className="colorPaletteRow">
+                        {WAGON_COLOR_PALETTE.map((color) => (
+                          <button
+                            key={`heuristic-color-${color}`}
+                            type="button"
+                            className={`colorSwatch ${heuristicTargetColor === color ? "active" : ""}`}
+                            onClick={() => setHeuristicTargetColor(color)}
+                            title={color}
+                            style={{ background: color }}
+                          />
+                        ))}
+                      </div>
+                    </div>
                     <input
                       className="toolInput"
                       value={heuristicDraftName}

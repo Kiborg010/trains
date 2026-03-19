@@ -92,6 +92,7 @@ type PlaceVehicleRequest struct {
 	Segments     []Segment `json:"segments"`
 	Vehicles     []Vehicle `json:"vehicles"`
 	VehicleType  string    `json:"vehicleType"`
+	Color        string    `json:"color,omitempty"`
 	TargetPathID string    `json:"targetPathId"`
 	TargetIndex  int       `json:"targetIndex"`
 }
@@ -141,6 +142,7 @@ type LayoutOperationRequest struct {
 	IDs                []string `json:"ids,omitempty"`
 	SelectedVehicleIDs []string `json:"selectedVehicleIds,omitempty"`
 	VehicleType        string   `json:"vehicleType,omitempty"`
+	Color              string   `json:"color,omitempty"`
 	TargetPathID       string   `json:"targetPathId,omitempty"`
 	TargetIndex        int      `json:"targetIndex,omitempty"`
 	MovedVehicleIDs    []string `json:"movedVehicleIds,omitempty"`

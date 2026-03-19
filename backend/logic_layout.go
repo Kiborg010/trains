@@ -201,6 +201,7 @@ func applyLayoutOperation(req LayoutOperationRequest) (RuntimeState, string, err
 			Segments:     state.Segments,
 			Vehicles:     state.Vehicles,
 			VehicleType:  req.VehicleType,
+			Color:        req.Color,
 			TargetPathID: req.TargetPathID,
 			TargetIndex:  req.TargetIndex,
 		})
@@ -300,6 +301,7 @@ func placeVehicleInternal(req PlaceVehicleRequest) (PlaceVehicleResponse, error)
 		ID:        fmt.Sprintf("%d", time.Now().UnixNano()),
 		Type:      req.VehicleType,
 		Code:      nextVehicleCode(req.Vehicles, req.VehicleType),
+		Color:     req.Color,
 		PathID:    target.PathID,
 		PathIndex: target.Index,
 		X:         target.X,
