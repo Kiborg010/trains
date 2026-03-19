@@ -61,6 +61,17 @@ func findPathSlot(slots []PathSlot, pathID string, index int) (PathSlot, bool) {
 	return PathSlot{}, false
 }
 
+func pathSlotOccupancyKey(slots []PathSlot, pathID string, index int) string {
+	if slot, ok := findPathSlot(slots, pathID, index); ok {
+		return slotID(slot.X, slot.Y)
+	}
+	return pathSlotKey(pathID, index)
+}
+
+func arePathSlotsEquivalent(slots []PathSlot, pathA string, indexA int, pathB string, indexB int) bool {
+	return pathSlotOccupancyKey(slots, pathA, indexA) == pathSlotOccupancyKey(slots, pathB, indexB)
+}
+
 func findNearestPathSlot(point Point, slots []PathSlot, blocked map[string]struct{}) *PathSlot {
 	var best *PathSlot
 	bestDist := math.Inf(1)

@@ -550,6 +550,28 @@ function getSegmentSlotsWithEndpointOverrides(segment, endpointOverrides) {
   );
 }
 
+function getPathSlotPoint(segments, endpointOverrides, pathId, pathIndex) {
+  const segment = (segments || []).find((item) => item.id === pathId);
+  if (!segment) {
+    return null;
+  }
+  const points = getSegmentSlotsWithEndpointOverrides(segment, endpointOverrides);
+  const index = Number(pathIndex);
+  if (!Number.isInteger(index) || index < 0 || index >= points.length) {
+    return null;
+  }
+  return points[index];
+}
+
+function arePathPositionsEquivalent(segments, endpointOverrides, leftPathId, leftPathIndex, rightPathId, rightPathIndex) {
+  const left = getPathSlotPoint(segments, endpointOverrides, leftPathId, leftPathIndex);
+  const right = getPathSlotPoint(segments, endpointOverrides, rightPathId, rightPathIndex);
+  if (!left || !right) {
+    return false;
+  }
+  return Math.abs(left.x - right.x) < 1e-9 && Math.abs(left.y - right.y) < 1e-9;
+}
+
 function buildSharedEndpointModel(segments) {
   const connections = buildTrackConnectionsFromSegments(segments);
   const parent = new Map();
@@ -2078,8 +2100,18 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         throw new Error(`Объект ${stepCode} не локомотив.`);
       }
       if (
-        target.pathId !== expectedFromPathId ||
-        Number(target.pathIndex) !== step.payload.fromIndex
+        !(
+          target.pathId === expectedFromPathId &&
+          Number(target.pathIndex) === step.payload.fromIndex
+        ) &&
+        !arePathPositionsEquivalent(
+          segments,
+          sharedEndpointModel.endpointOverrides,
+          target.pathId,
+          Number(target.pathIndex),
+          expectedFromPathId,
+          step.payload.fromIndex
+        )
       ) {
         throw new Error(
           `Локомотив ${codeMap.get(target.id) || target.id} сейчас в ${target.pathId}:${target.pathIndex}, а не в ${expectedFromPathId}:${step.payload.fromIndex}.`
@@ -2442,8 +2474,18 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
           }
 
           if (
-            target.pathId !== step.payload.fromPathId ||
-            Number(target.pathIndex) !== step.payload.fromIndex
+            !(
+              target.pathId === step.payload.fromPathId &&
+              Number(target.pathIndex) === step.payload.fromIndex
+            ) &&
+            !arePathPositionsEquivalent(
+              segments,
+              sharedEndpointModel.endpointOverrides,
+              target.pathId,
+              Number(target.pathIndex),
+              step.payload.fromPathId,
+              step.payload.fromIndex
+            )
           ) {
             setScenarioExecutingStep(null);
             setScenarioViewMode("paused");

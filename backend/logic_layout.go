@@ -279,12 +279,12 @@ func placeVehicleInternal(req PlaceVehicleRequest) (PlaceVehicleResponse, error)
 	occupied := map[string]struct{}{}
 	for _, v := range req.Vehicles {
 		if v.PathID != "" {
-			occupied[pathSlotKey(v.PathID, v.PathIndex)] = struct{}{}
+			occupied[pathSlotOccupancyKey(pathSlots, v.PathID, v.PathIndex)] = struct{}{}
 			continue
 		}
 		occupied[slotID(v.X, v.Y)] = struct{}{}
 	}
-	if _, exists := occupied[pathSlotKey(target.PathID, target.Index)]; exists {
+	if _, exists := occupied[pathSlotOccupancyKey(pathSlots, target.PathID, target.Index)]; exists {
 		return PlaceVehicleResponse{}, errors.New("Target slot is occupied.")
 	}
 
@@ -374,7 +374,7 @@ func resolveVehicles(req ResolveVehiclesRequest) ([]Vehicle, error) {
 			continue
 		}
 		if v.PathID != "" {
-			blocked[pathSlotKey(v.PathID, v.PathIndex)] = struct{}{}
+			blocked[pathSlotOccupancyKey(pathSlots, v.PathID, v.PathIndex)] = struct{}{}
 			continue
 		}
 		blocked[slotID(v.X, v.Y)] = struct{}{}
@@ -408,7 +408,7 @@ func resolveVehicles(req ResolveVehiclesRequest) ([]Vehicle, error) {
 		}
 		next = append(next, resolved)
 		nextByID[v.ID] = resolved
-		blocked[pathSlotKey(nearest.PathID, nearest.Index)] = struct{}{}
+		blocked[pathSlotOccupancyKey(pathSlots, nearest.PathID, nearest.Index)] = struct{}{}
 	}
 
 	if req.StrictCouplings {
