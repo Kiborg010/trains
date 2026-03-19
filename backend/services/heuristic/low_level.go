@@ -151,6 +151,19 @@ func BuildLowLevelScenarioStepsFromHeuristicOperations(
 			return nil, err
 		}
 
+		if cutPair, ok := findBoundaryCouplingToCut(state, operation, selection); ok {
+			steps = append(steps, buildCouplingScenarioStep(
+				scenarioID,
+				stepOrder,
+				"decouple",
+				cutPair[0],
+				cutPair[1],
+				buildLowLevelStepPayload("source_split", operation, selection.Wagons),
+			))
+			stepOrder++
+			state.removeCoupling(cutPair[0], cutPair[1])
+		}
+
 		destinationPlacement, err := reserveDestinationPlacement(state, operation, selection)
 		if err != nil {
 			return nil, err
@@ -327,6 +340,50 @@ func missingInternalGroupCouplings(state *lowLevelBuilderState, wagons []normali
 		result = append(result, [2]string{a, b})
 	}
 	return result
+}
+
+func findBoundaryCouplingToCut(
+	state *lowLevelBuilderState,
+	operation HeuristicOperation,
+	selection lowLevelGroupSelection,
+) ([2]string, bool) {
+	sourceWagons := cloneAndSortWagons(state.WagonsByTrack[operation.SourceTrackID])
+	if len(selection.Wagons) == 0 || len(sourceWagons) <= len(selection.Wagons) {
+		return [2]string{}, false
+	}
+
+	selected := make(map[string]struct{}, len(selection.Wagons))
+	for _, wagon := range selection.Wagons {
+		selected[wagon.WagonID] = struct{}{}
+	}
+
+	switch selection.NormalizedSourceSide {
+	case "start":
+		lastInside := selection.Wagons[len(selection.Wagons)-1]
+		for _, wagon := range sourceWagons {
+			if _, ok := selected[wagon.WagonID]; ok {
+				continue
+			}
+			if wagon.TrackIndex == lastInside.TrackIndex+1 && state.hasCoupling(lastInside.WagonID, wagon.WagonID) {
+				return [2]string{lastInside.WagonID, wagon.WagonID}, true
+			}
+			break
+		}
+	case "end":
+		firstInside := selection.Wagons[0]
+		for i := len(sourceWagons) - 1; i >= 0; i-- {
+			wagon := sourceWagons[i]
+			if _, ok := selected[wagon.WagonID]; ok {
+				continue
+			}
+			if wagon.TrackIndex == firstInside.TrackIndex-1 && state.hasCoupling(wagon.WagonID, firstInside.WagonID) {
+				return [2]string{wagon.WagonID, firstInside.WagonID}, true
+			}
+			break
+		}
+	}
+
+	return [2]string{}, false
 }
 
 // selectOperationGroup выбирает фактическую группу вагонов,

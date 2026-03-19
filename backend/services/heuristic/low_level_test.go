@@ -479,6 +479,61 @@ func TestBuildLowLevelScenarioStepsAddsInternalCouplingsForMultiWagonGroup(t *te
 	}
 }
 
+func TestBuildLowLevelScenarioStepsCutsSourceCouplingBeforeMovingSelectedGroup(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 22,
+		Tracks: []normalized.Track{
+			{TrackID: "sorting-1", Type: "sorting", Capacity: 8, StorageAllowed: true},
+			{TrackID: "lead-1", Type: "lead", Capacity: 8, StorageAllowed: true},
+			{TrackID: "lead-2", Type: "lead", Capacity: 8, StorageAllowed: true},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "w1", Color: "blue", TrackID: "sorting-1", TrackIndex: 1},
+			{WagonID: "w2", Color: "red", TrackID: "sorting-1", TrackIndex: 2},
+			{WagonID: "w3", Color: "red", TrackID: "sorting-1", TrackIndex: 3},
+		},
+		Locomotives: []normalized.Locomotive{
+			{LocoID: "l1", TrackID: "lead-1", TrackIndex: 0},
+		},
+		Couplings: []normalized.Coupling{
+			{CouplingID: "c1", Object1ID: "w1", Object2ID: "w2"},
+			{CouplingID: "c2", Object1ID: "w2", Object2ID: "w3"},
+		},
+	}
+
+	steps, err := BuildLowLevelScenarioStepsFromHeuristicOperations(
+		"nsc-cut-source",
+		scheme,
+		[]HeuristicOperation{
+			{
+				OperationType:      HeuristicOperationTransferTargetsToFormation,
+				SourceTrackID:      "sorting-1",
+				DestinationTrackID: "lead-2",
+				SourceSide:         "end",
+				WagonCount:         2,
+				TargetColor:        "red",
+				FormationTrackID:   "lead-2",
+				BufferTrackID:      "lead-1",
+			},
+		},
+		scheme.Locomotives[0],
+		scheme.Wagons,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(steps) != 5 {
+		t.Fatalf("expected source split plus approach/couple/transfer/decouple, got %d steps", len(steps))
+	}
+	if steps[0].StepType != "decouple" {
+		t.Fatalf("expected first step to decouple source boundary, got %s", steps[0].StepType)
+	}
+	if steps[0].Object1ID == nil || *steps[0].Object1ID != "w1" || steps[0].Object2ID == nil || *steps[0].Object2ID != "w2" {
+		t.Fatalf("expected source split on w1-w2, got %+v %+v", steps[0].Object1ID, steps[0].Object2ID)
+	}
+}
+
 func TestBuildLowLevelScenarioStepsPreservesRealSourceIndicesBetweenOperations(t *testing.T) {
 	scheme := normalized.Scheme{
 		SchemeID: 20,
