@@ -1,6 +1,8 @@
 package heuristic
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"trains/backend/normalized"
@@ -272,5 +274,165 @@ func TestEnumerateTargetExtractionCandidatesMarksBufferInfeasible(t *testing.T) 
 	best, ok := ChooseNextTargetExtractionCandidate(candidates)
 	if ok {
 		t.Fatalf("expected no feasible candidate, got %#v", best)
+	}
+}
+
+func TestBuildFixedClassProblemSupportsThreeSortingTracks(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 2,
+		Tracks: []normalized.Track{
+			{TrackID: "main-1", Type: "main", StorageAllowed: false},
+			{TrackID: "bypass-1", Type: "bypass", StorageAllowed: false},
+			{TrackID: "sorting-1", Type: "sorting", StorageAllowed: true},
+			{TrackID: "sorting-2", Type: "sorting", StorageAllowed: true},
+			{TrackID: "sorting-3", Type: "sorting", StorageAllowed: true},
+			{TrackID: "lead-1", Type: "lead", StorageAllowed: true},
+			{TrackID: "lead-2", Type: "lead", StorageAllowed: true},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "w1", Color: "red", TrackID: "sorting-1", TrackIndex: 0},
+			{WagonID: "w2", Color: "blue", TrackID: "sorting-2", TrackIndex: 0},
+			{WagonID: "w3", Color: "red", TrackID: "sorting-3", TrackIndex: 0},
+		},
+	}
+
+	problem, err := BuildFixedClassProblem(scheme, "red", "lead-2")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(problem.SortingTracks) != 3 {
+		t.Fatalf("expected 3 sorting tracks, got %d", len(problem.SortingTracks))
+	}
+}
+
+func TestCheckFixedClassFeasibilitySupportsThreeLeadTracks(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 3,
+		Tracks: []normalized.Track{
+			{TrackID: "main-1", Type: "main", StorageAllowed: false, Capacity: 8},
+			{TrackID: "bypass-1", Type: "bypass", StorageAllowed: false, Capacity: 6},
+			{TrackID: "sorting-1", Type: "sorting", StorageAllowed: true, Capacity: 8},
+			{TrackID: "sorting-2", Type: "sorting", StorageAllowed: true, Capacity: 8},
+			{TrackID: "lead-1", Type: "lead", StorageAllowed: true, Capacity: 4},
+			{TrackID: "lead-2", Type: "lead", StorageAllowed: true, Capacity: 7},
+			{TrackID: "lead-3", Type: "lead", StorageAllowed: true, Capacity: 9},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "w1", Color: "red", TrackID: "sorting-1", TrackIndex: 0},
+			{WagonID: "w2", Color: "red", TrackID: "sorting-2", TrackIndex: 1},
+			{WagonID: "w3", Color: "blue", TrackID: "lead-1", TrackIndex: 0},
+		},
+	}
+
+	result := CheckFixedClassFeasibility(scheme, "red", 2, "")
+	if !result.Feasible {
+		t.Fatalf("expected feasible result, got reasons: %v", result.Reasons)
+	}
+	if result.ChosenFormationTrackID != "lead-3" {
+		t.Fatalf("expected highest-capacity free lead lead-3 as formation, got %s", result.ChosenFormationTrackID)
+	}
+	if result.ChosenBufferTrackID != "lead-2" {
+		t.Fatalf("expected remaining best lead lead-2 as buffer, got %s", result.ChosenBufferTrackID)
+	}
+}
+
+func TestEnumerateTargetExtractionCandidatesSupportsManySortingTracks(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 4,
+		Tracks: []normalized.Track{
+			{TrackID: "main-1", Type: "main", StorageAllowed: false, Capacity: 8},
+			{TrackID: "bypass-1", Type: "bypass", StorageAllowed: false, Capacity: 6},
+			{TrackID: "sorting-1", Type: "sorting", StorageAllowed: true, Capacity: 8},
+			{TrackID: "sorting-2", Type: "sorting", StorageAllowed: true, Capacity: 8},
+			{TrackID: "sorting-3", Type: "sorting", StorageAllowed: true, Capacity: 8},
+			{TrackID: "sorting-4", Type: "sorting", StorageAllowed: true, Capacity: 8},
+			{TrackID: "sorting-5", Type: "sorting", StorageAllowed: true, Capacity: 8},
+			{TrackID: "lead-1", Type: "lead", StorageAllowed: true, Capacity: 6},
+			{TrackID: "lead-2", Type: "lead", StorageAllowed: true, Capacity: 8},
+			{TrackID: "lead-3", Type: "lead", StorageAllowed: true, Capacity: 7},
+			{TrackID: "lead-4", Type: "lead", StorageAllowed: true, Capacity: 9},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "w1", Color: "red", TrackID: "sorting-1", TrackIndex: 0},
+			{WagonID: "w2", Color: "blue", TrackID: "sorting-1", TrackIndex: 1},
+			{WagonID: "w3", Color: "red", TrackID: "sorting-2", TrackIndex: 0},
+			{WagonID: "w4", Color: "blue", TrackID: "sorting-3", TrackIndex: 0},
+			{WagonID: "w5", Color: "red", TrackID: "sorting-4", TrackIndex: 0},
+			{WagonID: "w6", Color: "blue", TrackID: "sorting-5", TrackIndex: 0},
+			{WagonID: "w7", Color: "blue", TrackID: "lead-1", TrackIndex: 0},
+		},
+	}
+
+	problem, err := BuildFixedClassProblem(scheme, "red", "lead-4")
+	if err != nil {
+		t.Fatalf("unexpected problem build error: %v", err)
+	}
+	state := BuildFixedClassPlanningState(problem, 3)
+	candidates := EnumerateTargetExtractionCandidates(state)
+	if len(candidates) != 10 {
+		t.Fatalf("expected 10 candidates for 5 sorting tracks, got %d", len(candidates))
+	}
+}
+
+func TestFixedClassTrackCountValidationRange(t *testing.T) {
+	testCases := []struct {
+		name          string
+		sortingCount  int
+		leadCount     int
+		expectedError string
+	}{
+		{name: "sorting below minimum", sortingCount: 1, leadCount: 2, expectedError: "expected at least 2 sorting tracks"},
+		{name: "lead below minimum", sortingCount: 2, leadCount: 1, expectedError: "expected at least 2 lead tracks"},
+		{name: "sorting above maximum", sortingCount: 11, leadCount: 2, expectedError: "expected at most 10 sorting tracks"},
+		{name: "lead above maximum", sortingCount: 2, leadCount: 11, expectedError: "expected at most 10 lead tracks"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			tracks := []normalized.Track{
+				{TrackID: "main-1", Type: "main", StorageAllowed: false, Capacity: 8},
+				{TrackID: "bypass-1", Type: "bypass", StorageAllowed: false, Capacity: 6},
+			}
+			for i := 0; i < tc.sortingCount; i++ {
+				tracks = append(tracks, normalized.Track{
+					TrackID:        fmt.Sprintf("sorting-%d", i+1),
+					Type:           "sorting",
+					StorageAllowed: true,
+					Capacity:       8,
+				})
+			}
+			for i := 0; i < tc.leadCount; i++ {
+				tracks = append(tracks, normalized.Track{
+					TrackID:        fmt.Sprintf("lead-%d", i+1),
+					Type:           "lead",
+					StorageAllowed: true,
+					Capacity:       8,
+				})
+			}
+			scheme := normalized.Scheme{
+				Tracks: tracks,
+				Wagons: []normalized.Wagon{
+					{WagonID: "w1", Color: "red", TrackID: "sorting-1", TrackIndex: 0},
+					{WagonID: "w2", Color: "blue", TrackID: "lead-1", TrackIndex: 0},
+				},
+			}
+
+			_, err := BuildFixedClassProblem(scheme, "red", "")
+			if err == nil || !strings.Contains(err.Error(), tc.expectedError) {
+				t.Fatalf("expected error containing %q, got %v", tc.expectedError, err)
+			}
+
+			result := CheckFixedClassFeasibility(scheme, "red", 1, "")
+			found := false
+			for _, reason := range result.Reasons {
+				if strings.Contains(reason, tc.expectedError) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("expected feasibility reasons to contain %q, got %v", tc.expectedError, result.Reasons)
+			}
+		})
 	}
 }

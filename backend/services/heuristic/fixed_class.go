@@ -8,6 +8,13 @@ import (
 	"trains/backend/normalized"
 )
 
+const (
+	minSortingTrackCount = 2
+	maxSortingTrackCount = 10
+	minLeadTrackCount    = 2
+	maxLeadTrackCount    = 10
+)
+
 // Этот файл реализует первые два этапа эвристики для фиксированного минимального класса схем.
 //
 // Область ответственности файла:
@@ -193,11 +200,11 @@ func BuildFixedClassProblem(scheme normalized.Scheme, targetColor string, format
 	if len(bypassTracks) != 1 {
 		return FixedClassProblem{}, fmt.Errorf("expected exactly 1 bypass track, got %d", len(bypassTracks))
 	}
-	if len(sortingTracks) != 2 {
-		return FixedClassProblem{}, fmt.Errorf("expected exactly 2 sorting tracks, got %d", len(sortingTracks))
+	if err := validateTrackCountInRange("sorting", len(sortingTracks), minSortingTrackCount, maxSortingTrackCount); err != nil {
+		return FixedClassProblem{}, err
 	}
-	if len(leadTracks) != 2 {
-		return FixedClassProblem{}, fmt.Errorf("expected exactly 2 lead tracks, got %d", len(leadTracks))
+	if err := validateTrackCountInRange("lead", len(leadTracks), minLeadTrackCount, maxLeadTrackCount); err != nil {
+		return FixedClassProblem{}, err
 	}
 
 	mainTrack := mainTracks[0]
@@ -374,11 +381,11 @@ func CheckFixedClassFeasibility(scheme normalized.Scheme, targetColor string, re
 	if len(bypassTracks) != 1 {
 		result.Reasons = append(result.Reasons, fmt.Sprintf("expected exactly 1 bypass track, got %d", len(bypassTracks)))
 	}
-	if len(sortingTracks) != 2 {
-		result.Reasons = append(result.Reasons, fmt.Sprintf("expected exactly 2 sorting tracks, got %d", len(sortingTracks)))
+	if err := validateTrackCountInRange("sorting", len(sortingTracks), minSortingTrackCount, maxSortingTrackCount); err != nil {
+		result.Reasons = append(result.Reasons, err.Error())
 	}
-	if len(leadTracks) != 2 {
-		result.Reasons = append(result.Reasons, fmt.Sprintf("expected exactly 2 lead tracks, got %d", len(leadTracks)))
+	if err := validateTrackCountInRange("lead", len(leadTracks), minLeadTrackCount, maxLeadTrackCount); err != nil {
+		result.Reasons = append(result.Reasons, err.Error())
 	}
 	if len(result.Reasons) > 0 {
 		return result
@@ -482,8 +489,8 @@ func CheckFixedClassFeasibility(scheme normalized.Scheme, targetColor string, re
 //   - она не проверяет вместимость и занятость
 //   - такие policy-решения принадлежат selectFormationAndBufferTracks
 func chooseLeadTracks(leadTracks []normalized.Track, formationTrackID string) (normalized.Track, normalized.Track, error) {
-	if len(leadTracks) != 2 {
-		return normalized.Track{}, normalized.Track{}, fmt.Errorf("exactly 2 lead tracks are required")
+	if len(leadTracks) < minLeadTrackCount {
+		return normalized.Track{}, normalized.Track{}, fmt.Errorf("at least %d lead tracks are required", minLeadTrackCount)
 	}
 	// Пустой выбор означает:
 	// "использовать детерминированный порядок по умолчанию".
@@ -491,11 +498,15 @@ func chooseLeadTracks(leadTracks []normalized.Track, formationTrackID string) (n
 	if formationTrackID == "" {
 		return leadTracks[0], leadTracks[1], nil
 	}
-	if leadTracks[0].TrackID == formationTrackID {
-		return leadTracks[0], leadTracks[1], nil
-	}
-	if leadTracks[1].TrackID == formationTrackID {
-		return leadTracks[1], leadTracks[0], nil
+	for _, track := range leadTracks {
+		if track.TrackID != formationTrackID {
+			continue
+		}
+		bufferTrack, ok := chooseBufferTrack(leadTracks, formationTrackID, nil)
+		if !ok {
+			return normalized.Track{}, normalized.Track{}, fmt.Errorf("buffer track was not found")
+		}
+		return track, bufferTrack, nil
 	}
 	return normalized.Track{}, normalized.Track{}, fmt.Errorf("formation track %s is not one of the lead tracks", formationTrackID)
 }
@@ -530,17 +541,32 @@ func selectFormationAndBufferTracks(
 	formationTrackID string,
 ) (normalized.Track, normalized.Track, []string) {
 	reasons := []string{}
-	if len(leadTracks) != 2 {
-		return normalized.Track{}, normalized.Track{}, []string{"exactly 2 lead tracks are required"}
+	if len(leadTracks) < minLeadTrackCount {
+		return normalized.Track{}, normalized.Track{}, []string{fmt.Sprintf("at least %d lead tracks are required", minLeadTrackCount)}
+	}
+	if len(leadTracks) > maxLeadTrackCount {
+		return normalized.Track{}, normalized.Track{}, []string{fmt.Sprintf("at most %d lead tracks are allowed", maxLeadTrackCount)}
 	}
 
 	// Если caller явно указал formation-путь, мы валидируем этот выбор,
 	// а второй lead автоматически становится буфером.
 	formationTrackID = strings.TrimSpace(formationTrackID)
 	if formationTrackID != "" {
-		formationTrack, bufferTrack, err := chooseLeadTracks(leadTracks, formationTrackID)
-		if err != nil {
-			return normalized.Track{}, normalized.Track{}, []string{err.Error()}
+		var formationTrack normalized.Track
+		found := false
+		for _, track := range leadTracks {
+			if track.TrackID == formationTrackID {
+				formationTrack = track
+				found = true
+				break
+			}
+		}
+		if !found {
+			return normalized.Track{}, normalized.Track{}, []string{fmt.Sprintf("formation track %s is not one of the lead tracks", formationTrackID)}
+		}
+		bufferTrack, ok := chooseBufferTrack(leadTracks, formationTrack.TrackID, occupiedByTrack)
+		if !ok {
+			return normalized.Track{}, normalized.Track{}, []string{"buffer track was not found"}
 		}
 		if formationTrack.Capacity < requiredTargetCount {
 			reasons = append(reasons, fmt.Sprintf(
@@ -584,18 +610,54 @@ func selectFormationAndBufferTracks(
 	})
 
 	formationTrack := candidates[0]
-	var bufferTrack normalized.Track
-	// Фиксированный класс гарантирует ровно два lead-пути,
-	// поэтому буфер — это просто тот путь, который не был выбран formation.
-	for _, track := range leadTracks {
-		if track.TrackID != formationTrack.TrackID {
-			bufferTrack = track
-			break
-		}
-	}
-	if bufferTrack.TrackID == "" {
+	bufferTrack, ok := chooseBufferTrack(leadTracks, formationTrack.TrackID, occupiedByTrack)
+	if !ok {
 		return normalized.Track{}, normalized.Track{}, []string{"buffer track was not found"}
 	}
 
 	return formationTrack, bufferTrack, nil
+}
+
+func validateTrackCountInRange(trackKind string, count int, min int, max int) error {
+	switch {
+	case count < min:
+		return fmt.Errorf("expected at least %d %s tracks, got %d", min, trackKind, count)
+	case count > max:
+		return fmt.Errorf("expected at most %d %s tracks, got %d", max, trackKind, count)
+	default:
+		return nil
+	}
+}
+
+func chooseBufferTrack(
+	leadTracks []normalized.Track,
+	formationTrackID string,
+	occupiedByTrack map[string]int,
+) (normalized.Track, bool) {
+	candidates := make([]normalized.Track, 0, len(leadTracks))
+	for _, track := range leadTracks {
+		if track.TrackID == formationTrackID {
+			continue
+		}
+		candidates = append(candidates, track)
+	}
+	if len(candidates) == 0 {
+		return normalized.Track{}, false
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		leftAvailable := candidates[i].Capacity
+		rightAvailable := candidates[j].Capacity
+		if occupiedByTrack != nil {
+			leftAvailable -= occupiedByTrack[candidates[i].TrackID]
+			rightAvailable -= occupiedByTrack[candidates[j].TrackID]
+		}
+		if leftAvailable != rightAvailable {
+			return leftAvailable > rightAvailable
+		}
+		if candidates[i].Capacity != candidates[j].Capacity {
+			return candidates[i].Capacity > candidates[j].Capacity
+		}
+		return candidates[i].TrackID < candidates[j].TrackID
+	})
+	return candidates[0], true
 }
