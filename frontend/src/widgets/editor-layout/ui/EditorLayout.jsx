@@ -1190,8 +1190,11 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [scenarioFromIndex, setScenarioFromIndex] = useState("");
   const [scenarioToPathId, setScenarioToPathId] = useState("");
   const [scenarioToIndex, setScenarioToIndex] = useState("");
+  const [scenarioLinkObject1Code, setScenarioLinkObject1Code] = useState("");
+  const [scenarioLinkObject2Code, setScenarioLinkObject2Code] = useState("");
   const [scenarioStepType, setScenarioStepType] = useState(SCENARIO_STEP_MOVE);
   const [scenarioSteps, setScenarioSteps] = useState([]);
+  const [selectedScenarioStepId, setSelectedScenarioStepId] = useState("");
   const [scenarioInitialState, setScenarioInitialState] = useState(null);
   const [scenarioLayoutId, setScenarioLayoutId] = useState("");
   const [currentScenarioStep, setCurrentScenarioStep] = useState(0);
@@ -1747,6 +1750,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     const schemeId = scenarioDetails?.scenario?.scheme_id;
     stopMovement(true);
     scenarioStopRequestedRef.current = false;
+    resetScenarioEditorState(scenarioStepType);
     setScenarioName(scenarioDetails?.scenario?.name || "Сценарий");
     setScenarioLayoutId(schemeId == null || schemeId === "" ? "" : String(schemeId));
     const loadedSteps = remapScenarioStepsToCurrentSegments(
@@ -1785,6 +1789,18 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       }
     }
   }, [selectedLocomotiveId, vehicleById, vehicleCodeById]);
+
+  useEffect(() => {
+    if (selectedScenarioStepId || scenarioStepType === SCENARIO_STEP_MOVE) {
+      return;
+    }
+    const selectedCodes = selectedVehicleIds
+      .map((id) => normalizeUnitCode(vehicleCodeById.get(id)))
+      .filter(Boolean)
+      .slice(0, 2);
+    setScenarioLinkObject1Code(selectedCodes[0] || "");
+    setScenarioLinkObject2Code(selectedCodes[1] || "");
+  }, [selectedScenarioStepId, scenarioStepType, selectedVehicleIds, vehicleCodeById]);
 
   useEffect(() => {
     if (targetPathId) {
@@ -1998,7 +2014,57 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     return playTimeline(timeline, "Движение запущено.");
   }
 
-  function buildDraftScenarioStep() {
+  function resetScenarioEditorState(nextStepType = SCENARIO_STEP_MOVE) {
+    setSelectedScenarioStepId("");
+    setScenarioStepType(normalizeScenarioStepType(nextStepType));
+    setScenarioUnitCode("");
+    setScenarioFromPathId("");
+    setScenarioFromIndex("");
+    setScenarioToPathId("");
+    setScenarioToIndex("");
+    setScenarioLinkObject1Code("");
+    setScenarioLinkObject2Code("");
+  }
+
+  function resetScenarioPlaybackState() {
+    setScenarioInitialState(null);
+    setCurrentScenarioStep(0);
+    setScenarioStateHistory([]);
+    setScenarioViewMode("start");
+    setScenarioExecutingStep(null);
+  }
+
+  function loadScenarioStepIntoEditor(step) {
+    const normalizedStep = normalizeScenarioStep(step);
+    setSelectedScenarioStepId(normalizedStep.id);
+    setScenarioStepType(normalizedStep.type);
+
+    if (normalizedStep.type === SCENARIO_STEP_MOVE) {
+      setScenarioUnitCode(normalizedStep.payload.unitCode || "");
+      setScenarioFromPathId(normalizedStep.payload.fromPathId || "");
+      setScenarioFromIndex(
+        Number.isFinite(normalizedStep.payload.fromIndex) ? String(normalizedStep.payload.fromIndex) : ""
+      );
+      setScenarioToPathId(normalizedStep.payload.toPathId || "");
+      setScenarioToIndex(
+        Number.isFinite(normalizedStep.payload.toIndex) ? String(normalizedStep.payload.toIndex) : ""
+      );
+      setScenarioLinkObject1Code("");
+      setScenarioLinkObject2Code("");
+      return;
+    }
+
+    const [object1Code = "", object2Code = ""] = normalizedStep.payload.unitCodes || [];
+    setScenarioUnitCode("");
+    setScenarioFromPathId("");
+    setScenarioFromIndex("");
+    setScenarioToPathId("");
+    setScenarioToIndex("");
+    setScenarioLinkObject1Code(object1Code);
+    setScenarioLinkObject2Code(object2Code);
+  }
+
+  function buildDraftScenarioStep(stepId = crypto.randomUUID()) {
     const type = normalizeScenarioStepType(scenarioStepType);
     if (type === SCENARIO_STEP_MOVE) {
       const unitCode = normalizeUnitCode(scenarioUnitCode);
@@ -2013,7 +2079,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       }
 
       return normalizeScenarioStep({
-        id: crypto.randomUUID(),
+        id: stepId,
         type: SCENARIO_STEP_MOVE,
         payload: {
           unitCode,
@@ -2025,19 +2091,17 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       });
     }
 
-    const selectedCodes = selectedVehicleIds
-      .map((id) => normalizeUnitCode(vehicleCodeById.get(id)))
-      .filter(Boolean)
-      .slice(0, 2);
-    if (selectedCodes.length < 2) {
-      setMovementHint("Для сцепки/расцепки выбери два объекта на схеме.");
+    const object1Code = normalizeUnitCode(scenarioLinkObject1Code);
+    const object2Code = normalizeUnitCode(scenarioLinkObject2Code);
+    if (!object1Code || !object2Code) {
+      setMovementHint("Для сцепки/расцепки укажи два объекта.");
       return null;
     }
     return normalizeScenarioStep({
-      id: crypto.randomUUID(),
+      id: stepId,
       type,
       payload: {
-        unitCodes: selectedCodes,
+        unitCodes: [object1Code, object2Code],
       },
     });
   }
@@ -2047,31 +2111,47 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     if (!step) {
       return;
     }
-    setScenarioSteps((prev) => [...prev, step]);
-    setScenarioInitialState(null);
-    setCurrentScenarioStep(0);
-    setScenarioStateHistory([]);
-    setScenarioViewMode("start");
-    setScenarioExecutingStep(null);
-    setMovementHint("Шаг добавлен в сценарий.");
+    setScenarioSteps((prev) => {
+      if (!selectedScenarioStepId) {
+        return [...prev, step];
+      }
+      const selectedIndex = prev.findIndex((item) => item.id === selectedScenarioStepId);
+      if (selectedIndex < 0) {
+        return [...prev, step];
+      }
+      return [...prev.slice(0, selectedIndex + 1), step, ...prev.slice(selectedIndex + 1)];
+    });
+    resetScenarioPlaybackState();
+    setSelectedScenarioStepId(step.id);
+    setMovementHint(selectedScenarioStepId ? "Шаг вставлен после выбранного." : "Шаг добавлен в конец сценария.");
+  }
+
+  function saveScenarioStepEdits() {
+    if (!selectedScenarioStepId) {
+      setMovementHint("Сначала выбери шаг для редактирования.");
+      return;
+    }
+    const step = buildDraftScenarioStep(selectedScenarioStepId);
+    if (!step) {
+      return;
+    }
+    setScenarioSteps((prev) => prev.map((item) => (item.id === selectedScenarioStepId ? step : item)));
+    resetScenarioPlaybackState();
+    setMovementHint("Изменения шага сохранены.");
   }
 
   function removeScenarioStep(stepId) {
     setScenarioSteps((prev) => prev.filter((step) => step.id !== stepId));
-    setScenarioInitialState(null);
-    setCurrentScenarioStep(0);
-    setScenarioStateHistory([]);
-    setScenarioViewMode("start");
-    setScenarioExecutingStep(null);
+    if (selectedScenarioStepId === stepId) {
+      resetScenarioEditorState(scenarioStepType);
+    }
+    resetScenarioPlaybackState();
   }
 
   function clearScenarioSteps() {
     setScenarioSteps([]);
-    setScenarioInitialState(null);
-    setCurrentScenarioStep(0);
-    setScenarioStateHistory([]);
-    setScenarioViewMode("start");
-    setScenarioExecutingStep(null);
+    resetScenarioEditorState(scenarioStepType);
+    resetScenarioPlaybackState();
   }
 
   function cloneLayoutState(state) {
@@ -3625,6 +3705,14 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                 <option value={SCENARIO_STEP_COUPLE}>сцепка</option>
                 <option value={SCENARIO_STEP_DECOUPLE}>расцепка</option>
               </select>
+              <p className="counter">
+                Режим формы: {selectedScenarioStepId ? "Редактирование шага" : "Добавление шага"}
+              </p>
+              <p className="counter">
+                {selectedScenarioStepId
+                  ? "Новый шаг будет вставлен сразу после выбранного."
+                  : "Если шаг не выбран, новый шаг добавится в конец сценария."}
+              </p>
               {scenarioStepType === SCENARIO_STEP_MOVE ? (
                 <>
                   <input
@@ -3671,10 +3759,39 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                   />
                 </>
               ) : (
-                <p className="counter">Выбери на схеме 2 объекта и добавь шаг.</p>
+                <>
+                  <input
+                    className="toolInput"
+                    value={scenarioLinkObject1Code}
+                    onChange={(event) => setScenarioLinkObject1Code(event.target.value)}
+                    placeholder="Объект 1 (л1, в1)"
+                  />
+                  <input
+                    className="toolInput"
+                    value={scenarioLinkObject2Code}
+                    onChange={(event) => setScenarioLinkObject2Code(event.target.value)}
+                    placeholder="Объект 2 (л1, в1)"
+                  />
+                  <p className="counter">Можно ввести коды вручную или сначала выбрать 2 объекта на схеме.</p>
+                </>
               )}
               <button type="button" className="toolButton" onClick={addScenarioStep}>
-                Добавить шаг
+                {selectedScenarioStepId ? "Добавить шаг после выбранного" : "Добавить шаг"}
+              </button>
+              <button
+                type="button"
+                className="toolButton"
+                onClick={saveScenarioStepEdits}
+                disabled={!selectedScenarioStepId}
+              >
+                Сохранить изменения шага
+              </button>
+              <button
+                type="button"
+                className="toolButton"
+                onClick={() => resetScenarioEditorState(scenarioStepType)}
+              >
+                Сбросить выбор шага
               </button>
               <button type="button" className="toolButton" onClick={clearScenarioSteps}>
                 Очистить шаги
@@ -3713,7 +3830,9 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                   {scenarioSteps.map((step, index) => (
                     <div
                       key={step.id}
-                      className={`scenarioStepRow ${index === scenarioActiveStepIndex ? "current" : ""}`}
+                      className={`scenarioStepRow ${(index === scenarioActiveStepIndex || step.id === selectedScenarioStepId) ? "current" : ""}`}
+                      onClick={() => loadScenarioStepIntoEditor(step)}
+                      style={{ cursor: "pointer" }}
                     >
                       <span className="scenarioStepText">
                         {formatScenarioStepText(
@@ -3725,7 +3844,10 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                       <button
                         type="button"
                         className="scenarioStepRemove"
-                        onClick={() => removeScenarioStep(step.id)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          removeScenarioStep(step.id);
+                        }}
                       >
                         x
                       </button>
