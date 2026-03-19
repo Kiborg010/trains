@@ -384,8 +384,8 @@ func TestBuildLowLevelScenarioStepsFromHeuristicOperationsForWholeScenario(t *te
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(steps) != 13 {
-		t.Fatalf("expected 13 low-level steps for three operations with final transfer left coupled on main track, got %d", len(steps))
+	if len(steps) != 12 {
+		t.Fatalf("expected 12 low-level steps for three operations with direct final transfer left coupled on main track, got %d", len(steps))
 	}
 	for _, step := range steps {
 		if step.StepType == "move_group" {
@@ -396,26 +396,20 @@ func TestBuildLowLevelScenarioStepsFromHeuristicOperationsForWholeScenario(t *te
 	// Проверяем финальную пятёрку шагов для transfer_formation_to_main:
 	// подход, сцепка локомотива, достройка цепочки состава, перенос, расцепка.
 	last := steps[10:]
-	if len(last) != 3 {
-		t.Fatalf("expected 3 steps in final operation without final decouple, got %d", len(last))
+	if len(last) != 2 {
+		t.Fatalf("expected 2 steps in final operation without no-op approach or final decouple, got %d", len(last))
 	}
-	if last[0].StepType != "move_loco" || last[1].StepType != "couple" || last[2].StepType != "move_loco" {
+	if last[0].StepType != "couple" || last[1].StepType != "move_loco" {
 		t.Fatalf("unexpected final operation shape: %+v", last)
 	}
-	if last[0].FromTrackID == nil || *last[0].FromTrackID != "lead-2" {
-		t.Fatalf("expected final approach to start from formation track, got %+v", last[0].FromTrackID)
+	if last[0].Object2ID == nil || *last[0].Object2ID != "w4" {
+		t.Fatalf("expected final couple to use the boundary wagon of the whole formation, got %+v", last[0].Object2ID)
 	}
-	if last[0].ToIndex == nil || *last[0].ToIndex != 0 {
-		t.Fatalf("expected final approach to start from the locomotive-side edge of the formation, got %+v", last[0].ToIndex)
+	if last[1].ToTrackID == nil || *last[1].ToTrackID != "main-1" {
+		t.Fatalf("expected final transfer to main track, got %+v", last[1].ToTrackID)
 	}
-	if last[1].Object2ID == nil || *last[1].Object2ID != "w4" {
-		t.Fatalf("expected final couple to use the boundary wagon of the whole formation, got %+v", last[1].Object2ID)
-	}
-	if last[2].ToTrackID == nil || *last[2].ToTrackID != "main-1" {
-		t.Fatalf("expected final transfer to main track, got %+v", last[2].ToTrackID)
-	}
-	if last[2].ToIndex == nil || *last[2].ToIndex != 1 {
-		t.Fatalf("expected final transfer to leave locomotive on first inner main-track node, got %+v", last[2].ToIndex)
+	if last[1].ToIndex == nil || *last[1].ToIndex != 1 {
+		t.Fatalf("expected final transfer to leave locomotive on first inner main-track node, got %+v", last[1].ToIndex)
 	}
 }
 
@@ -592,6 +586,61 @@ func TestBuildLowLevelScenarioStepsPreservesRealSourceIndicesBetweenOperations(t
 	}
 	if secondApproach.ToIndex == nil || *secondApproach.ToIndex != 3 {
 		t.Fatalf("expected second approach to use real free slot next to remaining wagon at index 2, got %+v", secondApproach.ToIndex)
+	}
+}
+
+func TestBuildLowLevelScenarioStepsTransferFormationToMainUsesDirectFinalSequence(t *testing.T) {
+	scheme := normalized.Scheme{
+		SchemeID: 40,
+		Tracks: []normalized.Track{
+			{TrackID: "formation", Type: "lead", Capacity: 8, StorageAllowed: true},
+			{TrackID: "main", Type: "main", Capacity: 10, StorageAllowed: false},
+		},
+		Wagons: []normalized.Wagon{
+			{WagonID: "w1", Color: "blue", TrackID: "formation", TrackIndex: 1},
+			{WagonID: "w2", Color: "blue", TrackID: "formation", TrackIndex: 2},
+			{WagonID: "w3", Color: "blue", TrackID: "formation", TrackIndex: 3},
+		},
+		Locomotives: []normalized.Locomotive{
+			{LocoID: "l1", TrackID: "formation", TrackIndex: 0},
+		},
+		Couplings: []normalized.Coupling{
+			{CouplingID: "c1", Object1ID: "w1", Object2ID: "w2"},
+			{CouplingID: "c2", Object1ID: "w2", Object2ID: "w3"},
+		},
+	}
+
+	steps, err := BuildLowLevelScenarioStepsFromHeuristicOperations(
+		"nsc-final-direct",
+		scheme,
+		[]HeuristicOperation{
+			{
+				OperationType:      HeuristicOperationTransferFormationToMain,
+				SourceTrackID:      "formation",
+				DestinationTrackID: "main",
+				WagonCount:         3,
+				FormationTrackID:   "formation",
+				MainTrackID:        "main",
+			},
+		},
+		scheme.Locomotives[0],
+		scheme.Wagons,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(steps) != 2 {
+		t.Fatalf("expected direct final sequence of couple + move without no-op approach or destination join, got %d steps", len(steps))
+	}
+	if steps[0].StepType != "couple" || steps[0].Object2ID == nil || *steps[0].Object2ID != "w1" {
+		t.Fatalf("expected final transfer to couple the locomotive directly to the current boundary wagon w1, got %+v", steps[0])
+	}
+	if steps[1].StepType != "move_loco" || steps[1].ToTrackID == nil || *steps[1].ToTrackID != "main" {
+		t.Fatalf("expected final transfer to move the whole consist directly onto the main track, got %+v", steps[1])
+	}
+	if steps[1].ToIndex == nil || *steps[1].ToIndex != 1 {
+		t.Fatalf("expected final main-track placement to leave the locomotive on the first inner main slot, got %+v", steps[1].ToIndex)
 	}
 }
 

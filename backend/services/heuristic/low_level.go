@@ -189,17 +189,19 @@ func BuildLowLevelScenarioStepsFromHeuristicOperations(
 
 		// Первый шаг skeleton-а: локомотив подъезжает к тому концу пути,
 		// откуда должна быть забрана вся группа операции.
-		steps = append(steps, buildMoveLocoScenarioStep(
-			scenarioID,
-			stepOrder,
-			state.Locomotive.LocoID,
-			state.Locomotive.TrackID,
-			state.Locomotive.TrackIndex,
-			operation.SourceTrackID,
-			selection.ApproachIndex,
-			buildLowLevelStepPayload("approach", operation, selection.Wagons),
-		))
-		stepOrder++
+		if state.Locomotive.TrackID != operation.SourceTrackID || state.Locomotive.TrackIndex != selection.ApproachIndex {
+			steps = append(steps, buildMoveLocoScenarioStep(
+				scenarioID,
+				stepOrder,
+				state.Locomotive.LocoID,
+				state.Locomotive.TrackID,
+				state.Locomotive.TrackIndex,
+				operation.SourceTrackID,
+				selection.ApproachIndex,
+				buildLowLevelStepPayload("approach", operation, selection.Wagons),
+			))
+			stepOrder++
+		}
 
 		// Второй шаг: локомотив сцепляется именно с крайним вагоном группы,
 		// доступным со стороны operation.SourceSide.
@@ -271,6 +273,9 @@ func BuildLowLevelScenarioStepsFromHeuristicOperations(
 			}
 		}
 		for _, leg := range transferLegs {
+			if leg.FromTrackID == leg.ToTrackID && leg.FromIndex == leg.ToIndex {
+				continue
+			}
 			steps = append(steps, buildMoveLocoScenarioStep(
 				scenarioID,
 				stepOrder,
@@ -708,6 +713,11 @@ func selectOperationGroup(state *lowLevelBuilderState, operation HeuristicOperat
 	}
 
 	side := strings.TrimSpace(operation.SourceSide)
+	if operation.OperationType == HeuristicOperationTransferFormationToMain {
+		if resolvedSide, ok := resolveTransferFormationToMainSourceSide(state, sourceTrack, wagons); ok {
+			side = resolvedSide
+		}
+	}
 	if side == "" {
 		resolvedSide, err := resolveImplicitSourceSide(sourceTrack, wagons)
 		if err != nil {
@@ -765,6 +775,27 @@ func selectOperationGroup(state *lowLevelBuilderState, operation HeuristicOperat
 		ApproachIndex:        approachIndex,
 		NormalizedSourceSide: side,
 	}, nil
+}
+
+func resolveTransferFormationToMainSourceSide(
+	state *lowLevelBuilderState,
+	sourceTrack normalized.Track,
+	wagons []normalized.Wagon,
+) (string, bool) {
+	if len(wagons) == 0 {
+		return "", false
+	}
+	firstIndex := wagons[0].TrackIndex
+	lastIndex := wagons[len(wagons)-1].TrackIndex
+	if state.Locomotive.TrackID == sourceTrack.TrackID {
+		switch state.Locomotive.TrackIndex {
+		case firstIndex - 1:
+			return "start", true
+		case lastIndex + 1:
+			return "end", true
+		}
+	}
+	return "", false
 }
 
 // resolveImplicitSourceSide выбирает сторону подхода для операций,
