@@ -1154,6 +1154,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const movementRunIdRef = useRef(0);
   const skipAutoResolvePassesRef = useRef(0);
   const scenarioStopRequestedRef = useRef(false);
+  const scenarioStepEditorRef = useRef(null);
   const sidebarResizeActiveRef = useRef(false);
   const vehicleColorMemoryRef = useRef(new Map());
 
@@ -1193,6 +1194,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [scenarioLinkObject2Code, setScenarioLinkObject2Code] = useState("");
   const [scenarioStepType, setScenarioStepType] = useState(SCENARIO_STEP_MOVE);
   const [scenarioSteps, setScenarioSteps] = useState([]);
+  const [selectedScenarioListStepId, setSelectedScenarioListStepId] = useState("");
   const [selectedScenarioStepId, setSelectedScenarioStepId] = useState("");
   const [scenarioInitialState, setScenarioInitialState] = useState(null);
   const [scenarioLayoutId, setScenarioLayoutId] = useState("");
@@ -1216,6 +1218,11 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [heuristicDraftError, setHeuristicDraftError] = useState("");
   const [isGeneratingHeuristicDraft, setIsGeneratingHeuristicDraft] = useState(false);
   const [isHeuristicSectionCollapsed, setIsHeuristicSectionCollapsed] = useState(false);
+  const [isScenarioSectionCollapsed, setIsScenarioSectionCollapsed] = useState(false);
+  const [isScenarioStepEditorCollapsed, setIsScenarioStepEditorCollapsed] = useState(false);
+  const [isScenarioPlaybackSectionCollapsed, setIsScenarioPlaybackSectionCollapsed] = useState(false);
+  const [isScenarioStepNavigationCollapsed, setIsScenarioStepNavigationCollapsed] = useState(false);
+  const [isScenarioStepsSectionCollapsed, setIsScenarioStepsSectionCollapsed] = useState(false);
 
   useEffect(() => {
     function handlePointerMove(event) {
@@ -1750,6 +1757,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     stopMovement(true);
     scenarioStopRequestedRef.current = false;
     resetScenarioEditorState(scenarioStepType);
+    setSelectedScenarioListStepId("");
     setScenarioName(scenarioDetails?.scenario?.name || "Сценарий");
     setScenarioLayoutId(schemeId == null || schemeId === "" ? "" : String(schemeId));
     const loadedSteps = remapScenarioStepsToCurrentSegments(
@@ -2025,6 +2033,11 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     setScenarioLinkObject2Code("");
   }
 
+  function resetScenarioSelectionState() {
+    setSelectedScenarioListStepId("");
+    setSelectedScenarioStepId("");
+  }
+
   function resetScenarioPlaybackState() {
     setScenarioInitialState(null);
     setCurrentScenarioStep(0);
@@ -2035,6 +2048,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
   function loadScenarioStepIntoEditor(step) {
     const normalizedStep = normalizeScenarioStep(step);
+    setSelectedScenarioListStepId(normalizedStep.id);
     setSelectedScenarioStepId(normalizedStep.id);
     setScenarioStepType(normalizedStep.type);
 
@@ -2061,6 +2075,18 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     setScenarioToIndex("");
     setScenarioLinkObject1Code(object1Code);
     setScenarioLinkObject2Code(object2Code);
+  }
+
+  function handleSelectScenarioStep(stepId) {
+    if (selectedScenarioStepId && selectedScenarioStepId !== stepId) {
+      resetScenarioEditorState(scenarioStepType);
+    }
+    setSelectedScenarioListStepId(stepId);
+  }
+
+  function handleEditScenarioStep(step) {
+    loadScenarioStepIntoEditor(step);
+    scenarioStepEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function buildDraftScenarioStep(stepId = crypto.randomUUID()) {
@@ -2110,19 +2136,21 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     if (!step) {
       return;
     }
+    const anchorStepId = selectedScenarioListStepId || selectedScenarioStepId;
     setScenarioSteps((prev) => {
-      if (!selectedScenarioStepId) {
+      if (!anchorStepId) {
         return [...prev, step];
       }
-      const selectedIndex = prev.findIndex((item) => item.id === selectedScenarioStepId);
+      const selectedIndex = prev.findIndex((item) => item.id === anchorStepId);
       if (selectedIndex < 0) {
         return [...prev, step];
       }
       return [...prev.slice(0, selectedIndex + 1), step, ...prev.slice(selectedIndex + 1)];
     });
     resetScenarioPlaybackState();
+    setSelectedScenarioListStepId(step.id);
     setSelectedScenarioStepId(step.id);
-    setMovementHint(selectedScenarioStepId ? "Шаг вставлен после выбранного." : "Шаг добавлен в конец сценария.");
+    setMovementHint(anchorStepId ? "Шаг вставлен после выбранного." : "Шаг добавлен в конец сценария.");
   }
 
   function saveScenarioStepEdits() {
@@ -2141,6 +2169,9 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
   function removeScenarioStep(stepId) {
     setScenarioSteps((prev) => prev.filter((step) => step.id !== stepId));
+    if (selectedScenarioListStepId === stepId) {
+      setSelectedScenarioListStepId("");
+    }
     if (selectedScenarioStepId === stepId) {
       resetScenarioEditorState(scenarioStepType);
     }
@@ -2149,6 +2180,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
   function clearScenarioSteps() {
     setScenarioSteps([]);
+    resetScenarioSelectionState();
     resetScenarioEditorState(scenarioStepType);
     resetScenarioPlaybackState();
   }
@@ -2512,15 +2544,201 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     }
   }
 
-  function stopScenarioPlayback() {
-    scenarioStopRequestedRef.current = true;
-    stopMovement(false);
-    setScenarioExecutingStep(null);
-    setScenarioViewMode("paused");
-    setMovementHint("Выполнение сценария остановлено.");
+  async function showScenarioStepById(stepId) {
+    if (isMoving) {
+      stopMovement(false);
+    }
+
+    if (!stepId) {
+      setMovementHint("Сначала выбери шаг в списке.");
+      return;
+    }
+
+    if (selectedScenarioStepId && selectedScenarioStepId !== stepId) {
+      resetScenarioEditorState(scenarioStepType);
+    }
+    setSelectedScenarioListStepId(stepId);
+
+    const steps = remapScenarioStepsToCurrentSegments(scenarioSteps, segments)
+      .map((step) => normalizeScenarioStep(step))
+      .filter(Boolean);
+    if (!steps.length) {
+      setMovementHint("Сценарий не содержит шагов.");
+      return;
+    }
+
+    const targetIndex = steps.findIndex((step) => step.id === stepId);
+    if (targetIndex < 0) {
+      setMovementHint("Выбранный шаг не найден.");
+      return;
+    }
+
+    try {
+      const cachedEntry = scenarioStateHistory[targetIndex];
+      if (cachedEntry?.afterState) {
+        applyLayoutSnapshot(cachedEntry.afterState);
+        setCurrentScenarioStep(targetIndex + 1);
+        setScenarioExecutingStep(null);
+        setScenarioViewMode("step");
+        setMovementHint(`Показано состояние после шага ${targetIndex + 1}/${steps.length}.`);
+        return;
+      }
+
+      const layoutStartState = scenarioInitialState || (await loadScenarioStartLayoutState());
+      const historyDraft = [];
+      let workingVehicles = (layoutStartState.vehicles || []).map((vehicle) => ({ ...vehicle }));
+      let workingCouplings = (layoutStartState.couplings || []).map((coupling) => ({ ...coupling }));
+
+      for (let index = 0; index <= targetIndex; index += 1) {
+        const step = steps[index];
+        const beforeState = cloneLayoutState({
+          segments: layoutStartState.segments || segments,
+          vehicles: workingVehicles,
+          couplings: workingCouplings,
+        });
+
+        const result = await executeSingleScenarioStep(
+          step,
+          index,
+          steps.length,
+          beforeState.vehicles.map((vehicle) => ({ ...vehicle })),
+          beforeState.couplings.map((coupling) => ({ ...coupling })),
+          false
+        );
+
+        const afterState = cloneLayoutState({
+          segments: beforeState.segments,
+          vehicles: result.vehicles || [],
+          couplings: result.couplings || [],
+        });
+
+        historyDraft.push({
+          beforeState,
+          afterState,
+          stepType: step.type,
+          timeline: result.timeline || [],
+        });
+
+        workingVehicles = afterState.vehicles.map((vehicle) => ({ ...vehicle }));
+        workingCouplings = afterState.couplings.map((coupling) => ({ ...coupling }));
+      }
+
+      setScenarioInitialState(layoutStartState);
+      setScenarioStateHistory(historyDraft);
+      setCurrentScenarioStep(targetIndex + 1);
+      setScenarioExecutingStep(null);
+      setScenarioViewMode("step");
+      applyLayoutSnapshot(historyDraft[targetIndex].afterState);
+      setMovementHint(`Показано состояние после шага ${targetIndex + 1}/${steps.length}.`);
+    } catch (error) {
+      setScenarioExecutingStep(null);
+      setMovementHint(error.message || "Не удалось перейти к выбранному шагу.");
+    }
   }
 
-  async function runSimpleScenario() {
+  async function handleShowSelectedScenarioStep() {
+    if (!selectedScenarioListStepId) {
+      setMovementHint("Сначала выбери шаг в списке.");
+      return;
+    }
+
+    const steps = remapScenarioStepsToCurrentSegments(scenarioSteps, segments)
+      .map((step) => normalizeScenarioStep(step))
+      .filter(Boolean);
+    if (!steps.length) {
+      setMovementHint("Сценарий не содержит шагов.");
+      return;
+    }
+
+    const targetIndex = steps.findIndex((step) => step.id === selectedScenarioListStepId);
+    if (targetIndex < 0) {
+      setMovementHint("Выбранный шаг не найден.");
+      return;
+    }
+
+    if (targetIndex + 1 <= currentScenarioStep) {
+      await showScenarioStepById(selectedScenarioListStepId);
+      return;
+    }
+
+    if (isMoving) {
+      return;
+    }
+
+    scenarioStopRequestedRef.current = false;
+    setScenarioViewMode("play");
+
+    let workingVehicles = vehicles.map((vehicle) => ({ ...vehicle }));
+    let workingCouplings = couplings.map((coupling) => ({ ...coupling }));
+    const historyDraft = [...scenarioStateHistory.slice(0, currentScenarioStep)];
+
+    try {
+      for (let index = currentScenarioStep; index <= targetIndex; index += 1) {
+        if (scenarioStopRequestedRef.current) {
+          setScenarioStateHistory(historyDraft.filter(Boolean));
+          setScenarioExecutingStep(null);
+          setScenarioViewMode("paused");
+          setMovementHint("Переход к выбранному шагу остановлен.");
+          return;
+        }
+
+        setScenarioExecutingStep(index);
+        const step = steps[index];
+        const beforeState = cloneLayoutState({
+          segments,
+          vehicles: workingVehicles,
+          couplings: workingCouplings,
+        });
+
+        const result = await executeSingleScenarioStep(
+          step,
+          index,
+          steps.length,
+          beforeState.vehicles.map((vehicle) => ({ ...vehicle })),
+          beforeState.couplings.map((coupling) => ({ ...coupling })),
+          true
+        );
+
+        const afterState = cloneLayoutState({
+          segments: beforeState.segments,
+          vehicles: result.vehicles || [],
+          couplings: result.couplings || [],
+        });
+
+        historyDraft[index] = {
+          beforeState,
+          afterState,
+          stepType: step.type,
+          timeline: result.timeline || [],
+        };
+
+        workingVehicles = afterState.vehicles.map((vehicle) => ({ ...vehicle }));
+        workingCouplings = afterState.couplings.map((coupling) => ({ ...coupling }));
+        setScenarioStateHistory(historyDraft.slice(0, index + 1));
+        applyLayoutSnapshot(afterState);
+        setCurrentScenarioStep(index + 1);
+      }
+
+      setScenarioExecutingStep(null);
+      setScenarioViewMode(targetIndex + 1 >= steps.length ? "final" : "step");
+      setMovementHint(`Показано состояние после шага ${targetIndex + 1}/${steps.length}.`);
+    } catch (error) {
+      setScenarioExecutingStep(null);
+      setScenarioViewMode("paused");
+      setMovementHint(error.message || "Не удалось перейти к выбранному шагу.");
+    }
+  }
+
+  function stopScenarioPlayback() {
+    scenarioStopRequestedRef.current = true;
+    setMovementHint("Дальнейшее выполнение сценария будет остановлено после текущего шага.");
+  }
+
+  async function handleShowFullScenario() {
+    await runSimpleScenario(true);
+  }
+
+  async function runSimpleScenario(restartFromStart = false) {
     if (isMoving) {
       return;
     }
@@ -2538,29 +2756,39 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         setMovementHint("Добавь хотя бы один корректный шаг сценария.");
         return;
       }
-      const startState =
-        scenarioInitialState ||
-        cloneLayoutState({
-          segments,
-          vehicles,
-          couplings,
-        });
+      const startState = restartFromStart
+        ? await loadScenarioStartLayoutState()
+        : scenarioInitialState ||
+          cloneLayoutState({
+            segments,
+            vehicles,
+            couplings,
+          });
       setScenarioInitialState(startState);
       scenarioStopRequestedRef.current = false;
       setScenarioViewMode("play");
-      setScenarioExecutingStep(0);
+      const startIndex = restartFromStart ? 0 : currentScenarioStep;
+      setScenarioExecutingStep(startIndex);
 
-      let workingVehicles = vehicles.map((vehicle) => ({ ...vehicle }));
-      let workingCouplings = couplings.map((coupling) => ({ ...coupling }));
+      if (restartFromStart) {
+        applyLayoutSnapshot(startState);
+        setCurrentScenarioStep(0);
+        setScenarioStateHistory([]);
+      }
+
+      let workingVehicles = (restartFromStart ? startState.vehicles : vehicles).map((vehicle) => ({ ...vehicle }));
+      let workingCouplings = (restartFromStart ? startState.couplings : couplings).map((coupling) => ({ ...coupling }));
       let lastLocomotiveId = null;
       let lastTargetPathId = null;
       let lastTargetIndex = null;
-      const historyDraft = [...scenarioStateHistory.slice(0, currentScenarioStep)];
-      if (currentScenarioStep === 0) {
+      const historyDraft = restartFromStart
+        ? []
+        : [...scenarioStateHistory.slice(0, currentScenarioStep)];
+      if (restartFromStart || currentScenarioStep === 0) {
         historyDraft.length = 0;
       }
 
-      for (let index = 0; index < steps.length; index += 1) {
+      for (let index = startIndex; index < steps.length; index += 1) {
         if (scenarioStopRequestedRef.current) {
           setScenarioStateHistory(historyDraft.filter(Boolean));
           setScenarioExecutingStep(null);
@@ -3579,56 +3807,70 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
           {activePanel === "scenario" && (
             <div className="tools">
-              <input
-                className="toolInput"
-                value={scenarioName}
-                onChange={(event) => setScenarioName(event.target.value)}
-                placeholder="Название сценария"
-              />
-              <select
-                className="toolInput"
-                value={selectedScenarioId}
-                onChange={(event) => setSelectedScenarioId(event.target.value)}
-              >
-                <option value="">Выбери сценарий</option>
-                {savedScenarios.map((scenario) => (
-                  <option key={scenario.scenario_id} value={String(scenario.scenario_id)}>
-                    {scenario.name || `Сценарий ${scenario.scenario_id}`}
-                  </option>
-                ))}
-              </select>
-              <button type="button" className="toolButton" onClick={handleSaveScenario}>
-                Сохранить сценарий
-              </button>
-              <button type="button" className="toolButton" onClick={handleLoadScenario}>
-                Загрузить сценарий
-              </button>
-              <button type="button" className="toolButton" onClick={handleDeleteScenario}>
-                Удалить сценарий
-              </button>
-              <div
-                className="scenarioSteps"
-                style={{
-                  marginTop: 8,
-                  border: "1px solid #334155",
-                  borderRadius: 10,
-                  padding: 10,
-                  background: "#111827",
-                }}
-              >
-                <div className="scenarioStepRow">
-                  <span className="scenarioStepText">Эвристический сценарий</span>
+              <section className="toolSection">
+                <div className="toolSectionHeader toolSectionHeaderCollapsible">
+                  <span>Сценарии</span>
                   <button
                     type="button"
-                    className="toolButton"
-                    style={{ padding: "6px 10px", fontSize: 12 }}
-                    onClick={() => setIsHeuristicSectionCollapsed((value) => !value)}
+                    className="toolSectionToggle"
+                    onClick={() => setIsScenarioSectionCollapsed((value) => !value)}
+                    aria-label={isScenarioSectionCollapsed ? "Развернуть раздел сценариев" : "Свернуть раздел сценариев"}
+                    title={isScenarioSectionCollapsed ? "Развернуть" : "Свернуть"}
                   >
-                    {isHeuristicSectionCollapsed ? "Развернуть" : "Свернуть"}
+                    {isScenarioSectionCollapsed ? "▾" : "▴"}
+                  </button>
+                </div>
+                {!isScenarioSectionCollapsed && (
+                  <div className="toolSectionBody">
+                    <input
+                      className="toolInput"
+                      value={scenarioName}
+                      onChange={(event) => setScenarioName(event.target.value)}
+                      placeholder="Название сценария"
+                    />
+                    <select
+                      className="toolInput"
+                      value={selectedScenarioId}
+                      onChange={(event) => setSelectedScenarioId(event.target.value)}
+                    >
+                      <option value="">Выбери сценарий</option>
+                      {savedScenarios.map((scenario) => (
+                        <option key={scenario.scenario_id} value={String(scenario.scenario_id)}>
+                          {scenario.name || `Сценарий ${scenario.scenario_id}`}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="button" className="toolButton" onClick={handleSaveScenario}>
+                      Сохранить сценарий
+                    </button>
+                    <button type="button" className="toolButton" onClick={handleLoadScenario}>
+                      Загрузить сценарий
+                    </button>
+                    <button type="button" className="toolButton" onClick={handleDeleteScenario}>
+                      Удалить сценарий
+                    </button>
+                  </div>
+                )}
+              </section>
+              <section className="toolSection">
+                <div className="toolSectionHeader toolSectionHeaderCollapsible" style={{ paddingBottom: 0 }}>
+                  <span>Эвристический сценарий</span>
+                  <button
+                    type="button"
+                    className="toolSectionToggle"
+                    onClick={() => setIsHeuristicSectionCollapsed((value) => !value)}
+                    aria-label={
+                      isHeuristicSectionCollapsed
+                        ? "Развернуть эвристический сценарий"
+                        : "Свернуть эвристический сценарий"
+                    }
+                    title={isHeuristicSectionCollapsed ? "Развернуть" : "Свернуть"}
+                  >
+                    {isHeuristicSectionCollapsed ? "▾" : "▴"}
                   </button>
                 </div>
                 {!isHeuristicSectionCollapsed && (
-                  <>
+                  <div className="toolSectionBody">
                     <p className="counter">
                       Схема: {selectedLayoutId || scenarioLayoutId || "-"}
                     </p>
@@ -3697,176 +3939,283 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                         ))}
                       </div>
                     ) : null}
-                    {heuristicDraftResult?.created_scenario_id ? (
-                      <p className="counter">
-                        Открыт обычный сценарий: {heuristicDraftResult.created_scenario_id}
-                      </p>
-                    ) : null}
-                  </>
+                  </div>
                 )}
-              </div>
-              <select
-                className="toolInput"
-                value={scenarioStepType}
-                onChange={(event) => setScenarioStepType(normalizeScenarioStepType(event.target.value))}
-              >
-                <option value={SCENARIO_STEP_MOVE}>движение</option>
-                <option value={SCENARIO_STEP_COUPLE}>сцепка</option>
-                <option value={SCENARIO_STEP_DECOUPLE}>расцепка</option>
-              </select>
-              <p className="counter">
-                Режим формы: {selectedScenarioStepId ? "Редактирование шага" : "Добавление шага"}
-              </p>
-              <p className="counter">
-                {selectedScenarioStepId
-                  ? "Новый шаг будет вставлен сразу после выбранного."
-                  : "Если шаг не выбран, новый шаг добавится в конец сценария."}
-              </p>
-              {scenarioStepType === SCENARIO_STEP_MOVE ? (
-                <>
-                  <input
-                    className="toolInput"
-                    value={scenarioUnitCode}
-                    onChange={(event) => setScenarioUnitCode(event.target.value)}
-                    placeholder="Номер объекта (л1, в1)"
-                  />
-                  <select
-                    className="toolInput"
-                    value={scenarioFromPathId}
-                    onChange={(event) => setScenarioFromPathId(event.target.value)}
+              </section>
+              <section className="toolSection" ref={scenarioStepEditorRef}>
+                <div className="toolSectionHeader toolSectionHeaderCollapsible">
+                  <span>Добавление / изменение шагов</span>
+                  <button
+                    type="button"
+                    className="toolSectionToggle"
+                    onClick={() => setIsScenarioStepEditorCollapsed((value) => !value)}
+                    aria-label={
+                      isScenarioStepEditorCollapsed
+                        ? "Развернуть блок редактирования шагов"
+                        : "Свернуть блок редактирования шагов"
+                    }
+                    title={isScenarioStepEditorCollapsed ? "Развернуть" : "Свернуть"}
                   >
-                    <option value="">Откуда путь</option>
-                    {pathOptions.map((path) => (
-                      <option key={`from-${path.value}`} value={path.value}>
-                        Путь {path.label}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    className="toolInput"
-                    value={scenarioFromIndex}
-                    onChange={(event) => setScenarioFromIndex(event.target.value)}
-                    placeholder="Откуда индекс"
-                  />
-                  <select
-                    className="toolInput"
-                    value={scenarioToPathId}
-                    onChange={(event) => setScenarioToPathId(event.target.value)}
-                  >
-                    <option value="">Куда путь</option>
-                    {pathOptions.map((path) => (
-                      <option key={`to-${path.value}`} value={path.value}>
-                        Путь {path.label}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    className="toolInput"
-                    value={scenarioToIndex}
-                    onChange={(event) => setScenarioToIndex(event.target.value)}
-                    placeholder="Куда индекс"
-                  />
-                </>
-              ) : (
-                <>
-                  <input
-                    className="toolInput"
-                    value={scenarioLinkObject1Code}
-                    onChange={(event) => setScenarioLinkObject1Code(event.target.value)}
-                    placeholder="Объект 1 (л1, в1)"
-                  />
-                  <input
-                    className="toolInput"
-                    value={scenarioLinkObject2Code}
-                    onChange={(event) => setScenarioLinkObject2Code(event.target.value)}
-                    placeholder="Объект 2 (л1, в1)"
-                  />
-                  <p className="counter">Можно ввести коды вручную или сначала выбрать 2 объекта на схеме.</p>
-                </>
-              )}
-              <button type="button" className="toolButton" onClick={addScenarioStep}>
-                {selectedScenarioStepId ? "Добавить шаг после выбранного" : "Добавить шаг"}
-              </button>
-              <button
-                type="button"
-                className="toolButton"
-                onClick={saveScenarioStepEdits}
-                disabled={!selectedScenarioStepId}
-              >
-                Сохранить изменения шага
-              </button>
-              <button
-                type="button"
-                className="toolButton"
-                onClick={() => resetScenarioEditorState(scenarioStepType)}
-              >
-                Сбросить выбор шага
-              </button>
-              <button type="button" className="toolButton" onClick={clearScenarioSteps}>
-                Очистить шаги
-              </button>
-              <button type="button" className="toolButton" onClick={handleShowScenarioStart}>
-                Показать старт
-              </button>
-              <button type="button" className="toolButton" onClick={handlePrevScenarioStep}>
-                Предыдущий шаг
-              </button>
-              <button type="button" className="toolButton" onClick={handleNextScenarioStep}>
-                Следующий шаг
-              </button>
-              <button type="button" className="toolButton" onClick={handleShowScenarioFinal}>
-                Показать финал
-              </button>
-              <button
-                type="button"
-                className="toolButton"
-                onClick={scenarioViewMode === "play" ? stopScenarioPlayback : runSimpleScenario}
-              >
-                {scenarioViewMode === "play" ? "Стоп" : "Выполнить шаги"}
-              </button>
-              <p className="counter">
-                Текущий шаг:{" "}
-                {scenarioViewMode === "play" && scenarioExecutingStep != null
-                  ? `${scenarioExecutingStep + 1}/${scenarioSteps.length}`
-                  : `${scenarioStepDisplay}/${scenarioSteps.length}`}
-              </p>
-              <p className="counter">{movementHint || "-"}</p>
-              {scenarioSteps.length > 0 && (
-                <div className="scenarioSteps">
-                  <div className={`scenarioStepRow ${isScenarioStartHighlighted ? "current" : ""}`}>
-                    <span className="scenarioStepText">Старт</span>
-                  </div>
-                  {scenarioSteps.map((step, index) => (
-                    <div
-                      key={step.id}
-                      className={`scenarioStepRow ${(index === scenarioActiveStepIndex || step.id === selectedScenarioStepId) ? "current" : ""}`}
-                      onClick={() => loadScenarioStepIntoEditor(step)}
-                      style={{ cursor: "pointer" }}
-                    >
-                      <span className="scenarioStepText">
-                        {formatScenarioStepText(
-                          normalizeScenarioStep(step),
-                          index,
-                          segmentDisplayNameById
-                        )}
-                      </span>
-                      <button
-                        type="button"
-                        className="scenarioStepRemove"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          removeScenarioStep(step.id);
-                        }}
-                      >
-                        x
-                      </button>
-                    </div>
-                  ))}
-                  <div className={`scenarioStepRow ${isScenarioFinalHighlighted ? "current" : ""}`}>
-                    <span className="scenarioStepText">Финал</span>
-                  </div>
+                    {isScenarioStepEditorCollapsed ? "▾" : "▴"}
+                  </button>
                 </div>
-              )}
+                {!isScenarioStepEditorCollapsed && <div className="toolSectionBody">
+                  <div className="scenarioStepEditor">
+                    <select
+                      className="toolInput"
+                      value={scenarioStepType}
+                      onChange={(event) => setScenarioStepType(normalizeScenarioStepType(event.target.value))}
+                    >
+                      <option value={SCENARIO_STEP_MOVE}>движение</option>
+                      <option value={SCENARIO_STEP_COUPLE}>сцепка</option>
+                      <option value={SCENARIO_STEP_DECOUPLE}>расцепка</option>
+                    </select>
+                    {scenarioStepType === SCENARIO_STEP_MOVE ? (
+                      <>
+                        <input
+                          className="toolInput"
+                          value={scenarioUnitCode}
+                          onChange={(event) => setScenarioUnitCode(event.target.value)}
+                          placeholder="Номер объекта (л1, в1)"
+                        />
+                        <select
+                          className="toolInput"
+                          value={scenarioFromPathId}
+                          onChange={(event) => setScenarioFromPathId(event.target.value)}
+                        >
+                          <option value="">Откуда путь</option>
+                          {pathOptions.map((path) => (
+                            <option key={`from-${path.value}`} value={path.value}>
+                              Путь {path.label}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          className="toolInput"
+                          value={scenarioFromIndex}
+                          onChange={(event) => setScenarioFromIndex(event.target.value)}
+                          placeholder="Откуда индекс"
+                        />
+                        <select
+                          className="toolInput"
+                          value={scenarioToPathId}
+                          onChange={(event) => setScenarioToPathId(event.target.value)}
+                        >
+                          <option value="">Куда путь</option>
+                          {pathOptions.map((path) => (
+                            <option key={`to-${path.value}`} value={path.value}>
+                              Путь {path.label}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          className="toolInput"
+                          value={scenarioToIndex}
+                          onChange={(event) => setScenarioToIndex(event.target.value)}
+                          placeholder="Куда индекс"
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <input
+                          className="toolInput"
+                          value={scenarioLinkObject1Code}
+                          onChange={(event) => setScenarioLinkObject1Code(event.target.value)}
+                          placeholder="Объект 1 (л1, в1)"
+                        />
+                        <input
+                          className="toolInput"
+                          value={scenarioLinkObject2Code}
+                          onChange={(event) => setScenarioLinkObject2Code(event.target.value)}
+                          placeholder="Объект 2 (л1, в1)"
+                        />
+                        <p className="counter">Можно ввести коды вручную или сначала выбрать 2 объекта на схеме.</p>
+                      </>
+                    )}
+                  </div>
+                  <button type="button" className="toolButton" onClick={addScenarioStep}>
+                    Добавить шаг
+                  </button>
+                  <button
+                    type="button"
+                    className="toolButton"
+                    onClick={saveScenarioStepEdits}
+                    disabled={!selectedScenarioStepId}
+                  >
+                    Сохранить изменения шага
+                  </button>
+                  <button
+                    type="button"
+                    className="toolButton"
+                    onClick={() => resetScenarioEditorState(scenarioStepType)}
+                  >
+                    {selectedScenarioStepId ? "Отменить изменение шага" : "Очистить форму шага"}
+                  </button>
+                  <button
+                    type="button"
+                    className="toolButton toolButtonDanger"
+                    onClick={clearScenarioSteps}
+                  >
+                    Удалить все шаги
+                  </button>
+                </div>}
+              </section>
+              <section className="toolSection">
+                <div className="toolSectionHeader toolSectionHeaderCollapsible">
+                  <span>Просмотр сценария</span>
+                  <button
+                    type="button"
+                    className="toolSectionToggle"
+                    onClick={() => setIsScenarioPlaybackSectionCollapsed((value) => !value)}
+                    aria-label={
+                      isScenarioPlaybackSectionCollapsed
+                        ? "Развернуть блок просмотра сценария"
+                        : "Свернуть блок просмотра сценария"
+                    }
+                    title={isScenarioPlaybackSectionCollapsed ? "Развернуть" : "Свернуть"}
+                  >
+                    {isScenarioPlaybackSectionCollapsed ? "▾" : "▴"}
+                  </button>
+                </div>
+                {!isScenarioPlaybackSectionCollapsed && (
+                  <div className="toolSectionBody">
+                    <button type="button" className="toolButton" onClick={handleShowFullScenario}>
+                      Показать сценарий полностью
+                    </button>
+                    <button
+                      type="button"
+                      className="toolButton"
+                      onClick={handleShowSelectedScenarioStep}
+                      disabled={!selectedScenarioListStepId}
+                    >
+                      Перейти к выбранному шагу
+                    </button>
+                    <button type="button" className="toolButton" onClick={handleShowScenarioStart}>
+                      Показать старт
+                    </button>
+                    <button type="button" className="toolButton" onClick={handleShowScenarioFinal}>
+                      Показать финал
+                    </button>
+                  </div>
+                )}
+              </section>
+
+              <section className="toolSection scenarioPinnedSection">
+                <div className="toolSectionHeader toolSectionHeaderCollapsible">
+                  <span>Пошаговый просмотр</span>
+                  <button
+                    type="button"
+                    className="toolSectionToggle"
+                    onClick={() => setIsScenarioStepNavigationCollapsed((value) => !value)}
+                    aria-label={
+                      isScenarioStepNavigationCollapsed
+                        ? "Развернуть блок пошагового просмотра"
+                        : "Свернуть блок пошагового просмотра"
+                    }
+                    title={isScenarioStepNavigationCollapsed ? "Развернуть" : "Свернуть"}
+                  >
+                    {isScenarioStepNavigationCollapsed ? "▾" : "▴"}
+                  </button>
+                </div>
+                {!isScenarioStepNavigationCollapsed && (
+                  <div className="toolSectionBody">
+                    <button type="button" className="toolButton" onClick={handlePrevScenarioStep}>
+                      Предыдущий шаг
+                    </button>
+                    <button type="button" className="toolButton" onClick={handleNextScenarioStep}>
+                      Следующий шаг
+                    </button>
+                    <button type="button" className="toolButton toolButtonDanger" onClick={stopScenarioPlayback}>
+                      Стоп
+                    </button>
+                  </div>
+                )}
+              </section>
+              <section className="toolSection">
+                <div className="toolSectionHeader toolSectionHeaderCollapsible">
+                  <span>Шаги сценария</span>
+                  <button
+                    type="button"
+                    className="toolSectionToggle"
+                    onClick={() => setIsScenarioStepsSectionCollapsed((value) => !value)}
+                    aria-label={
+                      isScenarioStepsSectionCollapsed
+                        ? "Развернуть шаги сценария"
+                        : "Свернуть шаги сценария"
+                    }
+                    title={isScenarioStepsSectionCollapsed ? "Развернуть" : "Свернуть"}
+                  >
+                    {isScenarioStepsSectionCollapsed ? "▾" : "▴"}
+                  </button>
+                </div>
+                {!isScenarioStepsSectionCollapsed && <div className="toolSectionBody">
+                  <p className="counter">
+                    Текущий шаг:{" "}
+                    {scenarioViewMode === "play" && scenarioExecutingStep != null
+                      ? `${scenarioExecutingStep + 1}/${scenarioSteps.length}`
+                      : `${scenarioStepDisplay}/${scenarioSteps.length}`}
+                  </p>
+                  {scenarioSteps.length > 0 && (
+                    <div className="scenarioSteps">
+                      <div
+                        className={`scenarioStepRow ${isScenarioStartHighlighted ? "current" : ""}`}
+                        onDoubleClick={handleShowScenarioStart}
+                        style={{ cursor: "pointer" }}
+                      >
+                        <span className="scenarioStepText">Старт</span>
+                      </div>
+                      {scenarioSteps.map((step, index) => (
+                        <div
+                          key={step.id}
+                          className={`scenarioStepRow ${index === scenarioActiveStepIndex ? "current" : ""} ${step.id === selectedScenarioListStepId ? "selected" : ""}`}
+                          onClick={() => handleSelectScenarioStep(step.id)}
+                          onDoubleClick={() => showScenarioStepById(step.id)}
+                          style={{ cursor: "pointer" }}
+                        >
+                          <span className="scenarioStepText">
+                            {formatScenarioStepText(
+                              normalizeScenarioStep(step),
+                              index,
+                              segmentDisplayNameById
+                            )}
+                          </span>
+                          <div className="scenarioStepActions">
+                            <button
+                              type="button"
+                              className="scenarioStepEdit"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleEditScenarioStep(step);
+                              }}
+                              title="Редактировать шаг"
+                            >
+                              ✎
+                            </button>
+                            <button
+                              type="button"
+                              className="scenarioStepRemove"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                removeScenarioStep(step.id);
+                              }}
+                              title="Удалить шаг"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      <div
+                        className={`scenarioStepRow ${isScenarioFinalHighlighted ? "current" : ""}`}
+                        onDoubleClick={handleShowScenarioFinal}
+                        style={{ cursor: "pointer" }}
+                      >
+                        <span className="scenarioStepText">Финал</span>
+                      </div>
+                    </div>
+                  )}
+                </div>}
+              </section>
             </div>
           )}
 
