@@ -1223,6 +1223,11 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [isScenarioPlaybackSectionCollapsed, setIsScenarioPlaybackSectionCollapsed] = useState(false);
   const [isScenarioStepNavigationCollapsed, setIsScenarioStepNavigationCollapsed] = useState(false);
   const [isScenarioStepsSectionCollapsed, setIsScenarioStepsSectionCollapsed] = useState(false);
+  const [isLayoutSchemesSectionCollapsed, setIsLayoutSchemesSectionCollapsed] = useState(false);
+  const [isLayoutAddSectionCollapsed, setIsLayoutAddSectionCollapsed] = useState(false);
+  const [isLayoutObjectsSectionCollapsed, setIsLayoutObjectsSectionCollapsed] = useState(false);
+  const [isCouplingActionsSectionCollapsed, setIsCouplingActionsSectionCollapsed] = useState(false);
+  const [isMovementActionsSectionCollapsed, setIsMovementActionsSectionCollapsed] = useState(false);
 
   useEffect(() => {
     function handlePointerMove(event) {
@@ -3656,152 +3661,227 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
           {activePanel === "maneuvers" && (
             <div className="tools">
               <section className="toolSection">
-                <div className="toolSectionHeader">Схемы</div>
-                <div className="toolSectionBody">
-                  <input
-                    className="toolInput"
-                    value={layoutName}
-                    onChange={(event) => setLayoutName(event.target.value)}
-                    placeholder="Название схемы"
-                  />
-                  <select
-                    className="toolInput"
-                    value={selectedLayoutId}
-                    onChange={(event) => setSelectedLayoutId(event.target.value)}
+                <div className="toolSectionHeader toolSectionHeaderCollapsible">
+                  <span>Схемы</span>
+                  <button
+                    type="button"
+                    className="toolSectionToggle"
+                    onClick={() => setIsLayoutSchemesSectionCollapsed((value) => !value)}
+                    aria-label={isLayoutSchemesSectionCollapsed ? "Развернуть блок схем" : "Свернуть блок схем"}
+                    title={isLayoutSchemesSectionCollapsed ? "Развернуть" : "Свернуть"}
                   >
-                    <option value="">Выбери схему</option>
-                    {savedLayouts.map((layout) => (
-                      <option key={layout.scheme_id} value={String(layout.scheme_id)}>
-                        {layout.name || `Схема ${layout.scheme_id}`}
-                      </option>
-                    ))}
-                  </select>
-                  <button type="button" className="toolButton" onClick={handleLoadLayout}>
-                    Загрузить схему
-                  </button>
-                  <button type="button" className="toolButton" onClick={handleSaveLayout}>
-                    Сохранить схему
-                  </button>
-                  <button type="button" className="toolButton toolButtonDanger" onClick={handleDeleteLayout}>
-                    Удалить схему
+                    {isLayoutSchemesSectionCollapsed ? "▾" : "▴"}
                   </button>
                 </div>
+                {!isLayoutSchemesSectionCollapsed && (
+                  <div className="toolSectionBody">
+                    <input
+                      className="toolInput"
+                      value={layoutName}
+                      onChange={(event) => setLayoutName(event.target.value)}
+                      placeholder="Название схемы"
+                    />
+                    <select
+                      className="toolInput"
+                      value={selectedLayoutId}
+                      onChange={(event) => setSelectedLayoutId(event.target.value)}
+                    >
+                      <option value="">Выбери схему</option>
+                      {savedLayouts.map((layout) => (
+                        <option key={layout.scheme_id} value={String(layout.scheme_id)}>
+                          {layout.name || `Схема ${layout.scheme_id}`}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="button" className="toolButton" onClick={handleLoadLayout}>
+                      Загрузить схему
+                    </button>
+                    <button type="button" className="toolButton" onClick={handleSaveLayout}>
+                      Сохранить схему
+                    </button>
+                    <button type="button" className="toolButton toolButtonDanger" onClick={handleDeleteLayout}>
+                      Удалить схему
+                    </button>
+                  </div>
+                )}
               </section>
 
               <section className="toolSection">
-                <div className="toolSectionHeader">Добавление</div>
-                <div className="toolSectionBody">
+                <div className="toolSectionHeader toolSectionHeaderCollapsible">
+                  <span>Добавление</span>
                   <button
                     type="button"
-                    className={`toolButton ${mode === "drawTrack" ? "active" : ""}`}
-                    onClick={() => switchMode("drawTrack")}
+                    className="toolSectionToggle"
+                    onClick={() => setIsLayoutAddSectionCollapsed((value) => !value)}
+                    aria-label={isLayoutAddSectionCollapsed ? "Развернуть блок добавления" : "Свернуть блок добавления"}
+                    title={isLayoutAddSectionCollapsed ? "Развернуть" : "Свернуть"}
                   >
-                    Добавление пути
+                    {isLayoutAddSectionCollapsed ? "▾" : "▴"}
                   </button>
-                  <button
-                    type="button"
-                    className={`toolButton ${mode === "placeWagon" ? "active" : ""}`}
-                    onClick={() => switchMode("placeWagon")}
-                  >
-                    Добавление вагонов
-                  </button>
-                  <button
-                    type="button"
-                    className={`toolButton ${mode === "placeLocomotive" ? "active" : ""}`}
-                    onClick={() => switchMode("placeLocomotive")}
-                  >
-                    Добавление локомотивов
-                  </button>
-                  <div className="paintModeBlock">
+                </div>
+                {!isLayoutAddSectionCollapsed && (
+                  <div className="toolSectionBody">
                     <button
                       type="button"
-                      className={`toolButton ${mode === "paintWagon" ? "active" : ""}`}
-                      onClick={() => switchMode("paintWagon")}
+                      className={`toolButton ${mode === "drawTrack" ? "active" : ""}`}
+                      onClick={() => switchMode("drawTrack")}
                     >
-                      Покраска
+                      Добавление пути
                     </button>
-                    <div className="colorPaletteRow">
-                      {WAGON_COLOR_PALETTE.map((color) => (
-                        <button
-                          key={color}
-                          type="button"
-                          className={`colorSwatch ${wagonPaintColor === color ? "active" : ""}`}
-                          onClick={() => setWagonPaintColor(color)}
-                          title={color}
-                          style={{ background: color }}
-                        />
-                      ))}
+                    <button
+                      type="button"
+                      className={`toolButton ${mode === "placeWagon" ? "active" : ""}`}
+                      onClick={() => switchMode("placeWagon")}
+                    >
+                      Добавление вагонов
+                    </button>
+                    <button
+                      type="button"
+                      className={`toolButton ${mode === "placeLocomotive" ? "active" : ""}`}
+                      onClick={() => switchMode("placeLocomotive")}
+                    >
+                      Добавление локомотивов
+                    </button>
+                    <div className="paintModeBlock">
+                      <button
+                        type="button"
+                        className={`toolButton ${mode === "paintWagon" ? "active" : ""}`}
+                        onClick={() => switchMode("paintWagon")}
+                      >
+                        Покраска
+                      </button>
+                      <div className="colorPaletteRow">
+                        {WAGON_COLOR_PALETTE.map((color) => (
+                          <button
+                            key={color}
+                            type="button"
+                            className={`colorSwatch ${wagonPaintColor === color ? "active" : ""}`}
+                            onClick={() => setWagonPaintColor(color)}
+                            title={color}
+                            style={{ background: color }}
+                          />
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
               </section>
 
               <section className="toolSection">
-                <div className="toolSectionHeader">Работа с объектами</div>
-                <div className="toolSectionBody">
+                <div className="toolSectionHeader toolSectionHeaderCollapsible">
+                  <span>Работа с объектами</span>
                   <button
                     type="button"
-                    className={`toolButton ${mode === "edit" ? "active" : ""}`}
-                    onClick={() => switchMode("edit")}
+                    className="toolSectionToggle"
+                    onClick={() => setIsLayoutObjectsSectionCollapsed((value) => !value)}
+                    aria-label={isLayoutObjectsSectionCollapsed ? "Развернуть блок работы с объектами" : "Свернуть блок работы с объектами"}
+                    title={isLayoutObjectsSectionCollapsed ? "Развернуть" : "Свернуть"}
                   >
-                    Редактирование
-                  </button>
-                  <select
-                    className="toolInput"
-                    value={selectedSegmentsType}
-                    onChange={(event) => handleSelectedSegmentsTypeChange(event.target.value)}
-                    disabled={selectedSegmentIds.length === 0}
-                  >
-                    <option value="">Тип выбранных путей</option>
-                    {PATH_TYPE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  <button type="button" className="toolButton toolButtonDanger" onClick={deleteSelectedSegments}>
-                    Удалить выбранные пути
-                  </button>
-                  <button type="button" className="toolButton toolButtonDanger" onClick={deleteSelectedVehicles}>
-                    Удалить выбранные составы
-                  </button>
-                  <button type="button" className="toolButton toolButtonDanger" onClick={deleteSelectedAll}>
-                    Удалить всё выбранное
-                  </button>
-                  <button type="button" className="toolButton toolButtonDanger" onClick={clearLayout}>
-                    Очистить всё
+                    {isLayoutObjectsSectionCollapsed ? "▾" : "▴"}
                   </button>
                 </div>
+                {!isLayoutObjectsSectionCollapsed && (
+                  <div className="toolSectionBody">
+                    <button
+                      type="button"
+                      className={`toolButton ${mode === "edit" ? "active" : ""}`}
+                      onClick={() => switchMode("edit")}
+                    >
+                      Редактирование
+                    </button>
+                    <select
+                      className="toolInput"
+                      value={selectedSegmentsType}
+                      onChange={(event) => handleSelectedSegmentsTypeChange(event.target.value)}
+                      disabled={selectedSegmentIds.length === 0}
+                    >
+                      <option value="">Тип выбранных путей</option>
+                      {PATH_TYPE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="button" className="toolButton toolButtonDanger" onClick={deleteSelectedSegments}>
+                      Удалить выбранные пути
+                    </button>
+                    <button type="button" className="toolButton toolButtonDanger" onClick={deleteSelectedVehicles}>
+                      Удалить выбранные составы
+                    </button>
+                    <button type="button" className="toolButton toolButtonDanger" onClick={deleteSelectedAll}>
+                      Удалить всё выбранное
+                    </button>
+                    <button type="button" className="toolButton toolButtonDanger" onClick={clearLayout}>
+                      Очистить всё
+                    </button>
+                  </div>
+                )}
               </section>
             </div>
           )}
 
           {activePanel === "coupling" && (
             <div className="tools">
-              <button type="button" className="toolButton" onClick={coupleSelectedVehicles}>
-                Сцепить выбранные
-              </button>
-              <button type="button" className="toolButton" onClick={decoupleSelectedVehicles}>
-                Расцепить выбранные
-              </button>
+              <section className="toolSection">
+                <div className="toolSectionHeader toolSectionHeaderCollapsible">
+                  <span>Сцепка</span>
+                  <button
+                    type="button"
+                    className="toolSectionToggle"
+                    onClick={() => setIsCouplingActionsSectionCollapsed((value) => !value)}
+                    aria-label={isCouplingActionsSectionCollapsed ? "Развернуть блок сцепки" : "Свернуть блок сцепки"}
+                    title={isCouplingActionsSectionCollapsed ? "Развернуть" : "Свернуть"}
+                  >
+                    {isCouplingActionsSectionCollapsed ? "▾" : "▴"}
+                  </button>
+                </div>
+                {!isCouplingActionsSectionCollapsed && (
+                  <div className="toolSectionBody">
+                    <button type="button" className="toolButton" onClick={coupleSelectedVehicles}>
+                      Сцепить выбранные
+                    </button>
+                    <button type="button" className="toolButton" onClick={decoupleSelectedVehicles}>
+                      Расцепить выбранные
+                    </button>
+                  </div>
+                )}
+              </section>
             </div>
           )}
 
           {activePanel === "movement" && (
             <div className="tools">
-              <button
-                type="button"
-                className={`toolButton ${mode === "move" ? "active" : ""}`}
-                onClick={() => switchMode("move")}
-              >
-                Режим движения
-              </button>
-              <button type="button" className="toolButton" onClick={startLocomotiveMovement}>
-                Старт движения
-              </button>
-              <button type="button" className="toolButton toolButtonDanger" onClick={() => stopMovement(false)}>
-                Стоп
-              </button>
+              <section className="toolSection">
+                <div className="toolSectionHeader toolSectionHeaderCollapsible">
+                  <span>Движение</span>
+                  <button
+                    type="button"
+                    className="toolSectionToggle"
+                    onClick={() => setIsMovementActionsSectionCollapsed((value) => !value)}
+                    aria-label={isMovementActionsSectionCollapsed ? "Развернуть блок движения" : "Свернуть блок движения"}
+                    title={isMovementActionsSectionCollapsed ? "Развернуть" : "Свернуть"}
+                  >
+                    {isMovementActionsSectionCollapsed ? "▾" : "▴"}
+                  </button>
+                </div>
+                {!isMovementActionsSectionCollapsed && (
+                  <div className="toolSectionBody">
+                    <button
+                      type="button"
+                      className={`toolButton ${mode === "move" ? "active" : ""}`}
+                      onClick={() => switchMode("move")}
+                    >
+                      Режим движения
+                    </button>
+                    <button type="button" className="toolButton" onClick={startLocomotiveMovement}>
+                      Старт движения
+                    </button>
+                    <button type="button" className="toolButton toolButtonDanger" onClick={() => stopMovement(false)}>
+                      Стоп
+                    </button>
+                  </div>
+                )}
+              </section>
             </div>
           )}
 
