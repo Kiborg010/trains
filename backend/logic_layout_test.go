@@ -91,7 +91,7 @@ func TestPlaceVehicleTreatsSharedEndpointAsOccupied(t *testing.T) {
 			{ID: "l1", Type: "locomotive", PathID: "22", PathIndex: 3, X: 96, Y: 0},
 		},
 	})
-	if err == nil || err.Error() != "Target slot is occupied." {
+	if err == nil || err.Error() != "Целевой слот занят." {
 		t.Fatalf("expected shared endpoint occupancy to block placement, got %v", err)
 	}
 }

@@ -91,16 +91,16 @@ func VerifyJWT(tokenString string, secretKey string) (*Claims, error) {
 	}
 
 	if !token.Valid {
-		return nil, errors.New("invalid token")
+		return nil, errors.New("недействительный токен")
 	}
 
 	return claims, nil
 }
 
 var (
-	ErrUserNotFound    = errors.New("user not found")
-	ErrInvalidPassword = errors.New("invalid password")
-	ErrUserExists      = errors.New("user already exists")
-	ErrUnauthorized    = errors.New("unauthorized")
-	ErrInvalidToken    = errors.New("invalid token")
+	ErrUserNotFound    = errors.New("пользователь не найден")
+	ErrInvalidPassword = errors.New("неверный пароль")
+	ErrUserExists      = errors.New("пользователь уже существует")
+	ErrUnauthorized    = errors.New("доступ запрещён")
+	ErrInvalidToken    = errors.New("недействительный токен")
 )

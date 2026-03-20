@@ -169,7 +169,7 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 func userIDFromContext(r *http.Request) (int, error) {
 	userID, ok := r.Context().Value("userID").(int)
 	if !ok || userID <= 0 {
-		return 0, errors.New("unauthorized")
+		return 0, errors.New("доступ запрещён")
 	}
 	return userID, nil
 }

@@ -124,30 +124,30 @@ func EvaluateDraftScenarioStepCost(problem FixedClassProblem, step DraftScenario
 	}
 
 	if step.SourceTrackID == "" {
-		cost.Reasons = append(cost.Reasons, "source track id is required")
+		cost.Reasons = append(cost.Reasons, "нужно указать идентификатор исходного пути")
 		return cost
 	}
 	if step.DestinationTrackID == "" {
-		cost.Reasons = append(cost.Reasons, "destination track id is required")
+		cost.Reasons = append(cost.Reasons, "нужно указать идентификатор пути назначения")
 		return cost
 	}
 	if step.WagonCount <= 0 {
-		cost.Reasons = append(cost.Reasons, "wagon count must be positive")
+		cost.Reasons = append(cost.Reasons, "количество вагонов должно быть положительным")
 		return cost
 	}
 	if _, ok := problem.TracksByID[step.SourceTrackID]; !ok {
-		cost.Reasons = append(cost.Reasons, fmt.Sprintf("source track %s was not found", step.SourceTrackID))
+		cost.Reasons = append(cost.Reasons, fmt.Sprintf("исходный путь %s не найден", step.SourceTrackID))
 		return cost
 	}
 	if _, ok := problem.TracksByID[step.DestinationTrackID]; !ok {
-		cost.Reasons = append(cost.Reasons, fmt.Sprintf("destination track %s was not found", step.DestinationTrackID))
+		cost.Reasons = append(cost.Reasons, fmt.Sprintf("путь назначения %s не найден", step.DestinationTrackID))
 		return cost
 	}
 
 	route, switchCrossCount, routeFound := findShortestTrackRoute(problem, step.SourceTrackID, step.DestinationTrackID)
 	if !routeFound {
 		cost.Reasons = append(cost.Reasons, fmt.Sprintf(
-			"route was not found between %s and %s using track_connections",
+			"не найден маршрут между %s и %s по track_connections",
 			step.SourceTrackID,
 			step.DestinationTrackID,
 		))
@@ -159,7 +159,7 @@ func EvaluateDraftScenarioStepCost(problem FixedClassProblem, step DraftScenario
 
 	if switchCrossCount > 0 {
 		cost.Reasons = append(cost.Reasons,
-			"the wagon group must traverse the switch route as a whole; partial split inside one draft step is not allowed",
+			"группа вагонов должна проходить стрелочный маршрут целиком; частичное разделение внутри одного draft-шага не допускается",
 		)
 	}
 

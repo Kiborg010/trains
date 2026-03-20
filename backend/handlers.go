@@ -11,7 +11,7 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -23,7 +23,7 @@ func validateCouplingHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -31,7 +31,7 @@ func validateCouplingHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, ValidateCouplingResponse{
 			OK:      false,
-			Message: "invalid json",
+			Message: "некорректный JSON",
 		})
 		return
 	}
@@ -57,7 +57,7 @@ func placeVehicleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -65,7 +65,7 @@ func placeVehicleHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, PlaceVehicleResponse{
 			OK:      false,
-			Message: "invalid json",
+			Message: "некорректный JSON",
 		})
 		return
 	}
@@ -90,7 +90,7 @@ func resolveVehiclesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -98,7 +98,7 @@ func resolveVehiclesHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, ResolveVehiclesResponse{
 			OK:      false,
-			Message: "invalid json",
+			Message: "некорректный JSON",
 		})
 		return
 	}
@@ -127,7 +127,7 @@ func layoutApplyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -135,7 +135,7 @@ func layoutApplyHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, LayoutOperationResponse{
 			OK:      false,
-			Message: "invalid json",
+			Message: "некорректный JSON",
 		})
 		return
 	}

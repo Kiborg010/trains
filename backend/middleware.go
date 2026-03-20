@@ -11,20 +11,20 @@ func authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			http.Error(w, "missing authorization header", http.StatusUnauthorized)
+			http.Error(w, "отсутствует заголовок авторизации", http.StatusUnauthorized)
 			return
 		}
 
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || parts[0] != "Bearer" {
-			http.Error(w, "invalid authorization header", http.StatusUnauthorized)
+			http.Error(w, "некорректный заголовок авторизации", http.StatusUnauthorized)
 			return
 		}
 
 		tokenString := parts[1]
 		claims, err := VerifyJWT(tokenString, jwtSecret)
 		if err != nil {
-			http.Error(w, "invalid token", http.StatusUnauthorized)
+			http.Error(w, "некорректный токен", http.StatusUnauthorized)
 			return
 		}
 

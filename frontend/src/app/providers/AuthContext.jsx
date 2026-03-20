@@ -40,7 +40,7 @@ export function AuthProvider({ children }) {
         });
 
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+          throw new Error(`Ошибка HTTP ${response.status}`);
         }
 
         const data = await response.json();

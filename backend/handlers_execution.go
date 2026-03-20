@@ -8,7 +8,7 @@ import (
 
 func runNormalizedScenarioHandler(w http.ResponseWriter, r *http.Request, userID int, scenarioID string) {
 	if _, err := appStore.GetNormalizedScenario(scenarioID, userID); err != nil {
-		http.Error(w, "scenario not found", http.StatusNotFound)
+		http.Error(w, "сценарий не найден", http.StatusNotFound)
 		return
 	}
 
@@ -16,7 +16,7 @@ func runNormalizedScenarioHandler(w http.ResponseWriter, r *http.Request, userID
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, RunScenarioResponse{
 			OK:      false,
-			Message: "failed to start execution",
+			Message: "не удалось запустить выполнение",
 		})
 		return
 	}
@@ -25,7 +25,7 @@ func runNormalizedScenarioHandler(w http.ResponseWriter, r *http.Request, userID
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, RunScenarioResponse{
 			OK:      false,
-			Message: "failed to load execution",
+			Message: "не удалось загрузить выполнение",
 		})
 		return
 	}
@@ -44,14 +44,14 @@ func executionByIDHandler(w http.ResponseWriter, r *http.Request) {
 
 	userID, err := userIDFromContext(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		http.Error(w, "требуется авторизация", http.StatusUnauthorized)
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/executions/")
 	path = strings.Trim(path, "/")
 	if path == "" {
-		http.Error(w, "execution id required", http.StatusBadRequest)
+		http.Error(w, "нужно указать идентификатор выполнения", http.StatusBadRequest)
 		return
 	}
 	parts := strings.Split(path, "/")
@@ -60,7 +60,7 @@ func executionByIDHandler(w http.ResponseWriter, r *http.Request) {
 	if len(parts) == 1 && r.Method == http.MethodGet {
 		execution, err := appStore.GetExecution(executionID, userID)
 		if err != nil {
-			http.Error(w, "execution not found", http.StatusNotFound)
+			http.Error(w, "выполнение не найдено", http.StatusNotFound)
 			return
 		}
 		writeJSON(w, http.StatusOK, execution)
@@ -72,19 +72,19 @@ func executionByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Error(w, "not found", http.StatusNotFound)
+	http.Error(w, "не найдено", http.StatusNotFound)
 }
 
 func stepExecutionHandler(w http.ResponseWriter, r *http.Request, userID int, executionID string) {
 	execution, err := appStore.GetExecution(executionID, userID)
 	if err != nil {
-		http.Error(w, "execution not found", http.StatusNotFound)
+		http.Error(w, "выполнение не найдено", http.StatusNotFound)
 		return
 	}
 	if execution.Status != "running" {
 		writeJSON(w, http.StatusOK, StepExecutionResponse{
 			OK:        false,
-			Message:   "execution is not running",
+			Message:   "выполнение сейчас не запущено",
 			Execution: *execution,
 		})
 		return
@@ -92,7 +92,7 @@ func stepExecutionHandler(w http.ResponseWriter, r *http.Request, userID int, ex
 
 	runtime, err := buildExecutionRuntimeFromNormalized(appStore, userID, execution.ScenarioID)
 	if err != nil {
-		http.Error(w, "scenario not found", http.StatusNotFound)
+		http.Error(w, "сценарий не найден", http.StatusNotFound)
 		return
 	}
 	if execution.CurrentStep >= len(runtime.Steps) {
@@ -101,7 +101,7 @@ func stepExecutionHandler(w http.ResponseWriter, r *http.Request, userID int, ex
 		_ = appStore.UpdateExecution(executionID, userID, *execution)
 		writeJSON(w, http.StatusOK, StepExecutionResponse{
 			OK:        true,
-			Message:   "execution completed",
+			Message:   "выполнение завершено",
 			Execution: *execution,
 		})
 		return
@@ -132,7 +132,7 @@ func stepExecutionHandler(w http.ResponseWriter, r *http.Request, userID int, ex
 	if err := appStore.UpdateExecution(executionID, userID, *execution); err != nil {
 		writeJSON(w, http.StatusInternalServerError, StepExecutionResponse{
 			OK:        false,
-			Message:   "failed to persist execution state",
+			Message:   "не удалось сохранить состояние выполнения",
 			Execution: *execution,
 		})
 		return
@@ -140,7 +140,7 @@ func stepExecutionHandler(w http.ResponseWriter, r *http.Request, userID int, ex
 
 	writeJSON(w, http.StatusOK, StepExecutionResponse{
 		OK:        true,
-		Message:   "step applied",
+		Message:   "шаг выполнен",
 		Execution: *execution,
 	})
 }

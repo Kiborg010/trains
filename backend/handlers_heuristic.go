@@ -12,13 +12,13 @@ func normalizedHeuristicGenerateHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
 	userID, ok := r.Context().Value("userID").(int)
 	if !ok || userID == 0 {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		http.Error(w, "требуется авторизация", http.StatusUnauthorized)
 		return
 	}
 
@@ -26,7 +26,7 @@ func normalizedHeuristicGenerateHandler(w http.ResponseWriter, r *http.Request) 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, DraftHeuristicScenarioResponse{
 			OK:      false,
-			Message: "invalid heuristic request payload",
+			Message: "некорректный запрос на генерацию эвристического сценария",
 		})
 		return
 	}
@@ -49,13 +49,13 @@ func normalizedHeuristicGenerateAndSaveHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
 	userID, ok := r.Context().Value("userID").(int)
 	if !ok || userID == 0 {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		http.Error(w, "требуется авторизация", http.StatusUnauthorized)
 		return
 	}
 
@@ -63,7 +63,7 @@ func normalizedHeuristicGenerateAndSaveHandler(w http.ResponseWriter, r *http.Re
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, SaveDraftHeuristicScenarioResponse{
 			OK:      false,
-			Message: "invalid heuristic save request payload",
+			Message: "некорректный запрос на сохранение эвристического сценария",
 		})
 		return
 	}
@@ -86,13 +86,13 @@ func normalizedHeuristicGenerateFullScenarioHandler(w http.ResponseWriter, r *ht
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
 	userID, ok := r.Context().Value("userID").(int)
 	if !ok || userID == 0 {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		http.Error(w, "требуется авторизация", http.StatusUnauthorized)
 		return
 	}
 
@@ -100,7 +100,7 @@ func normalizedHeuristicGenerateFullScenarioHandler(w http.ResponseWriter, r *ht
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, GenerateFullHeuristicScenarioResponse{
 			OK:      false,
-			Message: "invalid full heuristic scenario request payload",
+			Message: "некорректный запрос на полный эвристический сценарий",
 		})
 		return
 	}
@@ -123,13 +123,13 @@ func normalizedHeuristicScenariosHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
 	userID, ok := r.Context().Value("userID").(int)
 	if !ok || userID == 0 {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		http.Error(w, "требуется авторизация", http.StatusUnauthorized)
 		return
 	}
 
@@ -151,13 +151,13 @@ func normalizedHeuristicScenarioByIDHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
 	userID, ok := r.Context().Value("userID").(int)
 	if !ok || userID == 0 {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		http.Error(w, "требуется авторизация", http.StatusUnauthorized)
 		return
 	}
 
@@ -166,7 +166,7 @@ func normalizedHeuristicScenarioByIDHandler(w http.ResponseWriter, r *http.Reque
 	if id == "" || id == r.URL.Path {
 		writeJSON(w, http.StatusBadRequest, GetHeuristicScenarioResponse{
 			OK:      false,
-			Message: "heuristic scenario id is required",
+			Message: "нужно указать идентификатор эвристического сценария",
 		})
 		return
 	}
@@ -189,13 +189,13 @@ func normalizedHeuristicSaveAsScenarioHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
 	userID, ok := r.Context().Value("userID").(int)
 	if !ok || userID == 0 {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		http.Error(w, "требуется авторизация", http.StatusUnauthorized)
 		return
 	}
 
@@ -203,7 +203,7 @@ func normalizedHeuristicSaveAsScenarioHandler(w http.ResponseWriter, r *http.Req
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, SaveHeuristicAsScenarioResponse{
 			OK:      false,
-			Message: "invalid save-as-scenario request payload",
+			Message: "некорректный запрос на сохранение как обычного сценария",
 		})
 		return
 	}

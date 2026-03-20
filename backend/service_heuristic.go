@@ -28,28 +28,28 @@ func GenerateDraftHeuristicScenario(userID int, req GenerateDraftHeuristicScenar
 func loadNormalizedSchemeForHeuristic(userID int, schemeID int) (normalizedSchemeDTO, error) {
 	scheme, err := appStore.GetNormalizedScheme(schemeID, userID)
 	if err != nil {
-		return normalizedSchemeDTO{}, fmt.Errorf("failed to load normalized scheme: %w", err)
+		return normalizedSchemeDTO{}, fmt.Errorf("не удалось загрузить нормализованную схему: %w", err)
 	}
 
 	tracks, err := appStore.ListTracksByScheme(userID, schemeID)
 	if err != nil {
-		return normalizedSchemeDTO{}, fmt.Errorf("failed to load tracks: %w", err)
+		return normalizedSchemeDTO{}, fmt.Errorf("не удалось загрузить пути: %w", err)
 	}
 	connections, err := appStore.ListTrackConnectionsByScheme(userID, schemeID)
 	if err != nil {
-		return normalizedSchemeDTO{}, fmt.Errorf("failed to load track connections: %w", err)
+		return normalizedSchemeDTO{}, fmt.Errorf("не удалось загрузить соединения путей: %w", err)
 	}
 	wagons, err := appStore.ListWagonsByScheme(userID, schemeID)
 	if err != nil {
-		return normalizedSchemeDTO{}, fmt.Errorf("failed to load wagons: %w", err)
+		return normalizedSchemeDTO{}, fmt.Errorf("не удалось загрузить вагоны: %w", err)
 	}
 	locomotives, err := appStore.ListLocomotivesByScheme(userID, schemeID)
 	if err != nil {
-		return normalizedSchemeDTO{}, fmt.Errorf("failed to load locomotives: %w", err)
+		return normalizedSchemeDTO{}, fmt.Errorf("не удалось загрузить локомотивы: %w", err)
 	}
 	couplings, err := appStore.ListNormalizedCouplingsByScheme(userID, schemeID)
 	if err != nil {
-		return normalizedSchemeDTO{}, fmt.Errorf("failed to load couplings: %w", err)
+		return normalizedSchemeDTO{}, fmt.Errorf("не удалось загрузить сцепки: %w", err)
 	}
 
 	return normalizedSchemeDTO{
@@ -83,13 +83,13 @@ func runDraftHeuristicPipeline(userID int, req GenerateDraftHeuristicScenarioReq
 
 	targetColor := strings.TrimSpace(req.TargetColor)
 	if req.SchemeID <= 0 {
-		return draftHeuristicPipelineResult{}, fmt.Errorf("scheme_id is required")
+		return draftHeuristicPipelineResult{}, fmt.Errorf("нужно указать scheme_id")
 	}
 	if targetColor == "" {
-		return draftHeuristicPipelineResult{}, fmt.Errorf("target_color is required")
+		return draftHeuristicPipelineResult{}, fmt.Errorf("нужно указать target_color")
 	}
 	if req.RequiredTargetCount <= 0 {
-		return draftHeuristicPipelineResult{}, fmt.Errorf("required_target_count must be positive")
+		return draftHeuristicPipelineResult{}, fmt.Errorf("required_target_count должен быть положительным")
 	}
 
 	scheme, err := loadNormalizedSchemeForHeuristic(userID, req.SchemeID)
@@ -118,7 +118,7 @@ func runDraftHeuristicPipeline(userID int, req GenerateDraftHeuristicScenarioReq
 		req.FormationTrackID,
 	)
 	if err != nil {
-		return draftHeuristicPipelineResult{}, fmt.Errorf("failed to build fixed-class problem: %w", err)
+		return draftHeuristicPipelineResult{}, fmt.Errorf("не удалось построить fixed-class задачу: %w", err)
 	}
 
 	planningState := heuristicservice.BuildFixedClassPlanningState(problem, req.RequiredTargetCount)
@@ -171,7 +171,7 @@ func GenerateAndSaveDraftHeuristicScenario(userID int, req GenerateAndSaveDraftH
 
 	metricsJSON, err := json.Marshal(toDraftScenarioMetricsDTO(pipeline.Metrics))
 	if err != nil {
-		return SaveDraftHeuristicScenarioResponse{}, fmt.Errorf("failed to encode heuristic metrics: %w", err)
+		return SaveDraftHeuristicScenarioResponse{}, fmt.Errorf("не удалось закодировать метрики эвристики: %w", err)
 	}
 
 	stored := normalized.HeuristicScenario{
@@ -190,12 +190,12 @@ func GenerateAndSaveDraftHeuristicScenario(userID int, req GenerateAndSaveDraftH
 
 	id, err := appStore.CreateHeuristicScenario(userID, stored)
 	if err != nil {
-		return SaveDraftHeuristicScenarioResponse{}, fmt.Errorf("failed to save heuristic draft: %w", err)
+		return SaveDraftHeuristicScenarioResponse{}, fmt.Errorf("не удалось сохранить эвристический черновик: %w", err)
 	}
 
 	saved, err := appStore.GetHeuristicScenario(id, userID)
 	if err != nil {
-		return SaveDraftHeuristicScenarioResponse{}, fmt.Errorf("failed to load saved heuristic draft: %w", err)
+		return SaveDraftHeuristicScenarioResponse{}, fmt.Errorf("не удалось загрузить сохранённый эвристический черновик: %w", err)
 	}
 
 	dto := toHeuristicScenarioDTO(*saved)
@@ -253,16 +253,16 @@ func BuildScenarioStepsFromDraftScenario(scenarioID string, scheme normalized.Sc
 func SaveHeuristicDraftAsScenario(userID int, req SaveHeuristicAsScenarioRequest) (SaveHeuristicAsScenarioResponse, error) {
 	heuristicScenarioID := strings.TrimSpace(req.HeuristicScenarioID)
 	if heuristicScenarioID == "" {
-		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("heuristic_scenario_id is required")
+		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("нужно указать heuristic_scenario_id")
 	}
 
 	draft, err := appStore.GetHeuristicScenario(heuristicScenarioID, userID)
 	if err != nil {
-		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("failed to load heuristic draft: %w", err)
+		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("не удалось загрузить эвристический черновик: %w", err)
 	}
 	scheme, err := loadNormalizedSchemeForHeuristic(userID, draft.SchemeID)
 	if err != nil {
-		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("failed to load normalized scheme for low-level conversion: %w", err)
+		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("не удалось загрузить нормализованную схему для low-level конвертации: %w", err)
 	}
 
 	name := strings.TrimSpace(req.Name)
@@ -281,7 +281,7 @@ func SaveHeuristicDraftAsScenario(userID int, req SaveHeuristicAsScenarioRequest
 
 	scenarioID, err := appStore.CreateNormalizedScenario(userID, scenario)
 	if err != nil {
-		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("failed to create standard scenario: %w", err)
+		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("не удалось создать обычный сценарий: %w", err)
 	}
 
 	steps, err := BuildScenarioStepsFromDraftScenario(scenarioID, scheme, *draft)
@@ -290,12 +290,12 @@ func SaveHeuristicDraftAsScenario(userID int, req SaveHeuristicAsScenarioRequest
 	}
 
 	if err := appStore.CreateScenarioSteps(userID, scenarioID, steps); err != nil {
-		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("failed to save standard scenario steps: %w", err)
+		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("не удалось сохранить шаги обычного сценария: %w", err)
 	}
 
 	saved, err := appStore.GetNormalizedScenario(scenarioID, userID)
 	if err != nil {
-		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("failed to load created standard scenario: %w", err)
+		return SaveHeuristicAsScenarioResponse{}, fmt.Errorf("не удалось загрузить созданный обычный сценарий: %w", err)
 	}
 
 	return SaveHeuristicAsScenarioResponse{
@@ -330,7 +330,7 @@ func GenerateFullHeuristicScenario(userID int, req GenerateFullHeuristicScenario
 
 	heuristicScenarioID := strings.TrimSpace(savedDraftResp.SavedHeuristicScenarioID)
 	if heuristicScenarioID == "" {
-		return GenerateFullHeuristicScenarioResponse{}, fmt.Errorf("failed to save heuristic scenario")
+		return GenerateFullHeuristicScenarioResponse{}, fmt.Errorf("не удалось сохранить эвристический сценарий")
 	}
 
 	saveAsScenarioResp, err := SaveHeuristicDraftAsScenario(userID, SaveHeuristicAsScenarioRequest{
@@ -379,7 +379,7 @@ func storedHeuristicStepsToOperations(steps []normalized.HeuristicScenarioStep) 
 		case string(heuristicservice.HeuristicOperationTransferFormationToMain):
 			operationType = heuristicservice.HeuristicOperationTransferFormationToMain
 		default:
-			return nil, fmt.Errorf("unsupported heuristic step type %q", step.StepType)
+			return nil, fmt.Errorf("неподдерживаемый тип эвристического шага %q", step.StepType)
 		}
 
 		result = append(result, heuristicservice.HeuristicOperation{
@@ -399,7 +399,7 @@ func storedHeuristicStepsToOperations(steps []normalized.HeuristicScenarioStep) 
 
 func selectInitialHeuristicLocomotive(items []normalized.Locomotive) (normalized.Locomotive, error) {
 	if len(items) == 0 {
-		return normalized.Locomotive{}, fmt.Errorf("at least one locomotive is required to build low-level scenario steps")
+		return normalized.Locomotive{}, fmt.Errorf("для построения low-level шагов сценария нужен хотя бы один локомотив")
 	}
 
 	locomotives := append([]normalized.Locomotive{}, items...)

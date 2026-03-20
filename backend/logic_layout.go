@@ -12,7 +12,7 @@ func applyScenarioStep(state RuntimeState, step normalized.ScenarioStep) (Runtim
 	switch step.StepType {
 	case "move_loco":
 		if step.Object1ID == nil || step.ToTrackID == nil || step.ToIndex == nil {
-			return state, "", errors.New("move_loco requires object1_id, to_track_id and to_index")
+			return state, "", errors.New("для move_loco нужны object1_id, to_track_id и to_index")
 		}
 		plan, err := buildMovementPlan(PlanMovementRequest{
 			GridSize:             32,
@@ -27,7 +27,7 @@ func applyScenarioStep(state RuntimeState, step normalized.ScenarioStep) (Runtim
 			return state, "", err
 		}
 		if len(plan.Timeline) == 0 {
-			return state, "", errors.New("movement timeline is empty")
+			return state, "", errors.New("таймлайн движения пуст")
 		}
 		lastStep := plan.Timeline[len(plan.Timeline)-1]
 		posByID := map[string]Position{}
@@ -69,7 +69,7 @@ func applyScenarioStep(state RuntimeState, step normalized.ScenarioStep) (Runtim
 
 	case "couple":
 		if step.Object1ID == nil || step.Object2ID == nil {
-			return state, "", errors.New("couple requires object1_id and object2_id")
+			return state, "", errors.New("для сцепки нужны object1_id и object2_id")
 		}
 		next, _, err := applyLayoutOperation(LayoutOperationRequest{
 			GridSize: 32,
@@ -87,7 +87,7 @@ func applyScenarioStep(state RuntimeState, step normalized.ScenarioStep) (Runtim
 
 	case "decouple":
 		if step.Object1ID == nil || step.Object2ID == nil {
-			return state, "", errors.New("decouple requires object1_id and object2_id")
+			return state, "", errors.New("для расцепки нужны object1_id и object2_id")
 		}
 		next, _, err := applyLayoutOperation(LayoutOperationRequest{
 			GridSize: 32,
@@ -104,7 +104,7 @@ func applyScenarioStep(state RuntimeState, step normalized.ScenarioStep) (Runtim
 		return next, "decouple applied", nil
 
 	default:
-		return state, "", errors.New("unsupported scenario step type")
+		return state, "", errors.New("неподдерживаемый тип шага сценария")
 	}
 }
 
@@ -114,10 +114,10 @@ func applyLayoutOperation(req LayoutOperationRequest) (RuntimeState, string, err
 	switch req.Action {
 	case "add_segment":
 		if req.From == nil || req.To == nil {
-			return state, "", errors.New("from/to are required")
+			return state, "", errors.New("нужно указать from и to")
 		}
 		if req.From.X == req.To.X && req.From.Y == req.To.Y {
-			return state, "", errors.New("segment length must be non-zero")
+			return state, "", errors.New("длина сегмента не должна быть нулевой")
 		}
 		state.Segments = append(state.Segments, Segment{
 			ID:   nextPathID(state.Segments),
@@ -228,7 +228,7 @@ func applyLayoutOperation(req LayoutOperationRequest) (RuntimeState, string, err
 
 	case "couple":
 		if len(req.SelectedVehicleIDs) < 2 {
-			return state, "", errors.New("select two vehicles")
+			return state, "", errors.New("выбери два состава")
 		}
 		validateResp, err := validateCouplingInternal(ValidateCouplingRequest{
 			GridSize:           req.GridSize,
@@ -254,7 +254,7 @@ func applyLayoutOperation(req LayoutOperationRequest) (RuntimeState, string, err
 
 	case "decouple":
 		if len(req.SelectedVehicleIDs) < 2 {
-			return state, "", errors.New("select two vehicles")
+			return state, "", errors.New("выбери два состава")
 		}
 		a := req.SelectedVehicleIDs[len(req.SelectedVehicleIDs)-2]
 		b := req.SelectedVehicleIDs[len(req.SelectedVehicleIDs)-1]
@@ -270,19 +270,19 @@ func applyLayoutOperation(req LayoutOperationRequest) (RuntimeState, string, err
 		return state, "", nil
 
 	default:
-		return state, "", errors.New("unknown action")
+		return state, "", errors.New("неизвестное действие")
 	}
 }
 
 func placeVehicleInternal(req PlaceVehicleRequest) (PlaceVehicleResponse, error) {
 	if req.VehicleType != "wagon" && req.VehicleType != "locomotive" {
-		return PlaceVehicleResponse{}, errors.New("Vehicle type must be wagon or locomotive.")
+		return PlaceVehicleResponse{}, errors.New("Тип объекта должен быть wagon или locomotive.")
 	}
 
 	pathSlots := collectPathSlots(req.Segments, req.GridSize)
 	target, ok := findPathSlot(pathSlots, req.TargetPathID, req.TargetIndex)
 	if !ok {
-		return PlaceVehicleResponse{}, errors.New("Target slot is not on rail.")
+		return PlaceVehicleResponse{}, errors.New("Целевой слот находится вне пути.")
 	}
 
 	occupied := map[string]struct{}{}
@@ -294,7 +294,7 @@ func placeVehicleInternal(req PlaceVehicleRequest) (PlaceVehicleResponse, error)
 		occupied[slotID(v.X, v.Y)] = struct{}{}
 	}
 	if _, exists := occupied[pathSlotOccupancyKey(pathSlots, target.PathID, target.Index)]; exists {
-		return PlaceVehicleResponse{}, errors.New("Target slot is occupied.")
+		return PlaceVehicleResponse{}, errors.New("Целевой слот занят.")
 	}
 
 	vehicle := Vehicle{
@@ -315,7 +315,7 @@ func placeVehicleInternal(req PlaceVehicleRequest) (PlaceVehicleResponse, error)
 
 func validateCouplingInternal(req ValidateCouplingRequest) (ValidateCouplingResponse, error) {
 	if len(req.SelectedVehicleIDs) < 2 {
-		return ValidateCouplingResponse{OK: false, Message: "Select two vehicles."}, nil
+		return ValidateCouplingResponse{OK: false, Message: "Выберите два состава."}, nil
 	}
 
 	pathSlots := collectPathSlots(req.Segments, req.GridSize)
@@ -327,7 +327,7 @@ func validateCouplingInternal(req ValidateCouplingRequest) (ValidateCouplingResp
 	a := req.SelectedVehicleIDs[len(req.SelectedVehicleIDs)-2]
 	b := req.SelectedVehicleIDs[len(req.SelectedVehicleIDs)-1]
 	if a == b {
-		return ValidateCouplingResponse{OK: false, Message: "Cannot couple a vehicle with itself."}, nil
+		return ValidateCouplingResponse{OK: false, Message: "Нельзя сцепить состав с самим собой."}, nil
 	}
 
 	vehicleByID := make(map[string]Vehicle, len(req.Vehicles))
@@ -338,7 +338,7 @@ func validateCouplingInternal(req ValidateCouplingRequest) (ValidateCouplingResp
 	va, okA := vehicleByID[a]
 	vb, okB := vehicleByID[b]
 	if !okA || !okB {
-		return ValidateCouplingResponse{OK: false, Message: "Selected vehicles were not found."}, nil
+		return ValidateCouplingResponse{OK: false, Message: "Выбранные составы не найдены."}, nil
 	}
 
 	existing := make(map[string]struct{}, len(req.Couplings))
@@ -346,12 +346,12 @@ func validateCouplingInternal(req ValidateCouplingRequest) (ValidateCouplingResp
 		existing[pairKey(c.A, c.B)] = struct{}{}
 	}
 	if _, exists := existing[pairKey(a, b)]; exists {
-		return ValidateCouplingResponse{OK: false, Message: "These vehicles are already coupled."}, nil
+		return ValidateCouplingResponse{OK: false, Message: "Эти составы уже сцеплены."}, nil
 	}
 
 	slotAdj := buildSlotAdjacency(req.Segments, req.GridSize)
 	if !areVehiclesAdjacentOnLayout(pathSlots, slotAdj, va, vb) {
-		return ValidateCouplingResponse{OK: false, Message: "Coupling is allowed only for adjacent slots."}, nil
+		return ValidateCouplingResponse{OK: false, Message: "Сцепка возможна только для соседних звеньев."}, nil
 	}
 
 	return ValidateCouplingResponse{OK: true}, nil
@@ -363,7 +363,7 @@ func resolveVehicles(req ResolveVehiclesRequest) ([]Vehicle, error) {
 	}
 	pathSlots := collectPathSlots(req.Segments, req.GridSize)
 	if len(pathSlots) == 0 {
-		return nil, errors.New("No rail slots available.")
+		return nil, errors.New("Нет доступных железнодорожных слотов.")
 	}
 
 	movedSet := map[string]struct{}{}
@@ -401,7 +401,7 @@ func resolveVehicles(req ResolveVehiclesRequest) ([]Vehicle, error) {
 
 		nearest := findNearestPathSlot(Point{X: v.X, Y: v.Y}, pathSlots, blocked)
 		if nearest == nil {
-			return nil, errors.New("Cannot place moved vehicles on free rail slots.")
+			return nil, errors.New("Не удалось разместить перемещённые составы на свободных железнодорожных слотах.")
 		}
 
 		resolved := Vehicle{
@@ -428,7 +428,7 @@ func resolveVehicles(req ResolveVehiclesRequest) ([]Vehicle, error) {
 				continue
 			}
 			if !areVehiclesAdjacentOnLayout(pathSlots, slotAdj, va, vb) {
-				return nil, errors.New("Coupled vehicles must stay on adjacent slots.")
+				return nil, errors.New("Сцепленные составы должны оставаться на соседних слотах.")
 			}
 		}
 	}

@@ -14,11 +14,11 @@ type NormalizedExecutionRuntime struct {
 func buildExecutionRuntimeFromNormalized(store Store, userID int, scenarioID string) (*NormalizedExecutionRuntime, error) {
 	scenario, err := store.GetNormalizedScenario(scenarioID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load normalized scenario: %w", err)
+		return nil, fmt.Errorf("не удалось загрузить нормализованный сценарий: %w", err)
 	}
 	scheme, err := store.GetNormalizedScheme(scenario.SchemeID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load normalized scheme: %w", err)
+		return nil, fmt.Errorf("не удалось загрузить нормализованную схему: %w", err)
 	}
 
 	state := RuntimeState{

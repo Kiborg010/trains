@@ -15,10 +15,10 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 	}
 
 	if req.SelectedLocomotiveID == "" {
-		return fail("Select locomotive.")
+		return fail("Выберите локомотив.")
 	}
 	if strings.TrimSpace(req.TargetPathID) == "" {
-		return fail("Select target path.")
+		return fail("Выберите целевой путь.")
 	}
 
 	trackConnections := req.TrackConnections
@@ -28,7 +28,7 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 
 	pathSlots := collectPathSlotsWithConnections(req.Segments, req.GridSize, trackConnections)
 	if len(pathSlots) == 0 {
-		return fail("No rail slots available.")
+		return fail("На путях нет доступных звеньев.")
 	}
 
 	targetSegmentFound := false
@@ -42,11 +42,11 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 		break
 	}
 	if !targetSegmentFound {
-		return fail(fmt.Sprintf("Target path was not found: %s.", req.TargetPathID))
+		return fail(fmt.Sprintf("Целевой путь не найден: %s.", req.TargetPathID))
 	}
 	if req.TargetIndex < 0 || req.TargetIndex >= targetCapacity {
 		return fail(fmt.Sprintf(
-			"Target index is outside path capacity: track_id=%s index=%d capacity=%d.",
+			"Целевой индекс выходит за пределы вместимости пути: track_id=%s index=%d capacity=%d.",
 			req.TargetPathID,
 			req.TargetIndex,
 			targetCapacity,
@@ -55,7 +55,7 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 
 	if _, ok := findPathSlot(pathSlots, req.TargetPathID, req.TargetIndex); !ok {
 		return fail(fmt.Sprintf(
-			"Target slot is unavailable: track_id=%s index=%d.",
+			"Целевое звено недоступно: track_id=%s index=%d.",
 			req.TargetPathID,
 			req.TargetIndex,
 		))
@@ -71,7 +71,7 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 
 	locomotive, exists := vehicleByID[req.SelectedLocomotiveID]
 	if !exists || locomotive.Type != "locomotive" {
-		return fail("Selected unit is not a locomotive.")
+		return fail("Выбранный состав не является локомотивом.")
 	}
 
 	slots := collectRailSlotsWithConnections(req.Segments, req.GridSize, trackConnections)
@@ -90,11 +90,11 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 	for _, id := range trainOrder {
 		v, ok := vehicleByID[id]
 		if !ok {
-			return fail("Train contains unknown vehicle.")
+			return fail("В составе есть неизвестный объект.")
 		}
 		nearest := findNearestSlot(Point{X: v.X, Y: v.Y}, slots)
 		if nearest == nil {
-			return fail("No rail slots available.")
+			return fail("На путях нет доступных звеньев.")
 		}
 		currentSlotByVehicleID[id] = nearest.ID
 	}
@@ -108,7 +108,7 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 		a := initialSlots[i]
 		b := initialSlots[i+1]
 		if _, ok := slotAdj[a][b]; !ok {
-			return fail("Coupled train must stand on adjacent slots.")
+			return fail("Сцепленный состав должен стоять на соседних звеньях.")
 		}
 	}
 
@@ -229,7 +229,7 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 			trackPath,
 			pathErr,
 		)
-		return fail("Path was not found.")
+		return fail("Маршрут не найден.")
 	}
 
 	currentLocoToTail := make([]string, 0, len(trainOrder))
@@ -265,7 +265,7 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 			)
 			return PlanMovementResponse{
 				OK:          true,
-				Message:     "Movement started.",
+				Message:     "Движение началось.",
 				Timeline:    twoPhaseTimeline,
 				CellsPassed: len(twoPhaseTimeline),
 			}, nil
@@ -356,7 +356,7 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 			if routeSelectionReason != "" {
 				log.Printf("[movement] last target-track decision: %s", routeSelectionReason)
 			}
-			return fail("Movement is blocked: not enough free slots.")
+			return fail("Движение заблокировано: недостаточно свободных звеньев.")
 		}
 
 		timeline = append(timeline, stepPositions)
@@ -364,7 +364,7 @@ func buildMovementPlan(req PlanMovementRequest) (PlanMovementResponse, error) {
 
 	return PlanMovementResponse{
 		OK:          true,
-		Message:     "Movement started.",
+		Message:     "Движение началось.",
 		Timeline:    timeline,
 		CellsPassed: len(timeline),
 	}, nil
@@ -539,7 +539,7 @@ func chooseSingleLocomotiveRouteAndTarget(
 
 	if len(candidates) == 0 {
 		return nil, nil, 0, "", fmt.Errorf(
-			"Target track is blocked: no reachable free slot on track_id=%s requested_index=%d occupied_indices=%v.",
+			"Целевой путь заблокирован: нет доступного свободного звена на track_id=%s requested_index=%d occupied_indices=%v.",
 			targetTrackID,
 			requestedIndex,
 			occupiedIndices,
@@ -667,7 +667,7 @@ func resolveSingleLocomotiveTargetIndex(
 
 	if len(reachableIndices) == 0 {
 		return 0, "", fmt.Errorf(
-			"Target track is blocked: no reachable free slot on track_id=%s requested_index=%d occupied_indices=%v.",
+			"Целевой путь заблокирован: нет доступного свободного звена на track_id=%s requested_index=%d occupied_indices=%v.",
 			targetTrackID,
 			requestedIndex,
 			occupiedIndices,
@@ -850,7 +850,7 @@ func minimalOuterPulloutIndex(
 		}
 	}
 	if targetSegment == nil {
-		return 0, fmt.Errorf("track %s was not found", trackID)
+		return 0, fmt.Errorf("путь %s не найден", trackID)
 	}
 	points := getSegmentSlots(*targetSegment, gridSize)
 	if len(points) == 0 {
@@ -871,7 +871,7 @@ func minimalOuterPulloutIndex(
 		}
 		return idx, nil
 	default:
-		return 0, fmt.Errorf("unsupported external side %q for track %s", externalSide, trackID)
+		return 0, fmt.Errorf("для пути %s не поддерживается внешняя сторона %q", trackID, externalSide)
 	}
 }
 
@@ -1078,10 +1078,10 @@ func trackSideIndex(segments []Segment, gridSize float64, trackID, side string) 
 		case "end":
 			return len(points) - 1, nil
 		default:
-			return 0, fmt.Errorf("unsupported side %q for track %s", side, trackID)
+			return 0, fmt.Errorf("для пути %s не поддерживается сторона %q", trackID, side)
 		}
 	}
-	return 0, fmt.Errorf("track %s not found", trackID)
+	return 0, fmt.Errorf("путь %s не найден", trackID)
 }
 
 func minInt(a, b int) int {
@@ -1133,7 +1133,7 @@ func buildTrainOrder(locomotiveID string, vehicles []Vehicle, couplings []Coupli
 			}
 		}
 		if degree > 2 {
-			return nil, errors.New("Only linear train order is supported.")
+			return nil, errors.New("Поддерживается только линейный порядок состава.")
 		}
 	}
 
@@ -1144,7 +1144,7 @@ func buildTrainOrder(locomotiveID string, vehicles []Vehicle, couplings []Coupli
 		}
 	}
 	if locoDegree > 1 {
-		return nil, errors.New("Locomotive must be at train head.")
+		return nil, errors.New("Локомотив должен находиться в голове состава.")
 	}
 
 	endpoints := make([]string, 0, 2)
@@ -1168,7 +1168,7 @@ func buildTrainOrder(locomotiveID string, vehicles []Vehicle, couplings []Coupli
 		}
 	}
 	if tail == "" {
-		return nil, errors.New("Locomotive must be at train head.")
+		return nil, errors.New("Локомотив должен находиться в голове состава.")
 	}
 
 	orderTailToLoco := []string{}
@@ -1193,7 +1193,7 @@ func buildTrainOrder(locomotiveID string, vehicles []Vehicle, couplings []Coupli
 	}
 
 	if len(orderTailToLoco) == 0 || orderTailToLoco[len(orderTailToLoco)-1] != locomotiveID {
-		return nil, errors.New("Locomotive must be at train head.")
+		return nil, errors.New("Локомотив должен находиться в голове состава.")
 	}
 
 	return reverseStrings(orderTailToLoco), nil
@@ -1483,7 +1483,7 @@ func buildSlotPathFromTrackRoute(
 		case "end":
 			return len(points) - 1, nil
 		default:
-			return 0, fmt.Errorf("unsupported side %q for track %s", side, trackID)
+			return 0, fmt.Errorf("для пути %s не поддерживается сторона %q", trackID, side)
 		}
 	}
 
@@ -1608,7 +1608,7 @@ func extendPathForBackwardPush(path []string, adjacency map[string]map[string]st
 			}
 		}
 		if len(candidates) == 0 {
-			return nil, errors.New("Not enough space after target for backward push.")
+			return nil, errors.New("За целевой точкой недостаточно места для обратного толкания.")
 		}
 
 		next := candidates[0]

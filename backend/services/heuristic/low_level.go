@@ -154,13 +154,13 @@ func BuildLowLevelScenarioStepsFromHeuristicOperations(
 	currentWagons []normalized.Wagon,
 ) ([]normalized.ScenarioStep, error) {
 	if scenarioID == "" {
-		return nil, fmt.Errorf("scenario id is required")
+		return nil, fmt.Errorf("нужно указать идентификатор сценария")
 	}
 	if len(operations) == 0 {
 		return []normalized.ScenarioStep{}, nil
 	}
 	if currentLocomotive.LocoID == "" {
-		return nil, fmt.Errorf("current locomotive is required for low-level skeleton builder")
+		return nil, fmt.Errorf("для low-level builder нужен текущий локомотив")
 	}
 
 	state := newLowLevelBuilderState(scheme, currentLocomotive, currentWagons)
@@ -713,7 +713,7 @@ func (plan lowLevelDestinationJoinPlan) finalTargetIndex(defaultIndex int) int {
 func selectOperationGroup(state *lowLevelBuilderState, operation HeuristicOperation) (lowLevelGroupSelection, error) {
 	sourceTrack, ok := state.TracksByID[operation.SourceTrackID]
 	if !ok {
-		return lowLevelGroupSelection{}, fmt.Errorf("source track %s was not found in scheme", operation.SourceTrackID)
+		return lowLevelGroupSelection{}, fmt.Errorf("исходный путь %s не найден в схеме", operation.SourceTrackID)
 	}
 
 	wagons := cloneAndSortWagons(state.WagonsByTrack[sourceTrack.TrackID])
@@ -933,7 +933,7 @@ func reserveDestinationPlacement(
 ) (lowLevelDestinationPlacement, error) {
 	destinationTrack, ok := state.TracksByID[operation.DestinationTrackID]
 	if !ok {
-		return lowLevelDestinationPlacement{}, fmt.Errorf("destination track %s was not found in scheme", operation.DestinationTrackID)
+		return lowLevelDestinationPlacement{}, fmt.Errorf("путь назначения %s не найден в схеме", operation.DestinationTrackID)
 	}
 
 	existing := cloneAndSortWagons(state.WagonsByTrack[destinationTrack.TrackID])

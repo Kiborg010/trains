@@ -144,7 +144,7 @@ func (s *PostgresStore) DeleteHeuristicScenario(userID int, heuristicScenarioID 
 		return err
 	}
 	if rows == 0 {
-		return fmt.Errorf("heuristic scenario not found")
+		return fmt.Errorf("эвристический сценарий не найден")
 	}
 	return nil
 }
@@ -153,12 +153,12 @@ func (s *PostgresStore) CreateHeuristicScenarioSteps(userID int, heuristicScenar
 	var ownerID int
 	if err := s.db.QueryRow(`SELECT user_id FROM heuristic_scenarios WHERE heuristic_scenario_id = $1`, heuristicScenarioID).Scan(&ownerID); err != nil {
 		if err == sql.ErrNoRows {
-			return fmt.Errorf("heuristic scenario not found")
+			return fmt.Errorf("эвристический сценарий не найден")
 		}
 		return err
 	}
 	if ownerID != userID {
-		return fmt.Errorf("heuristic scenario not found")
+		return fmt.Errorf("эвристический сценарий не найден")
 	}
 
 	if _, err := s.db.Exec(`DELETE FROM heuristic_scenario_steps WHERE heuristic_scenario_id = $1`, heuristicScenarioID); err != nil {

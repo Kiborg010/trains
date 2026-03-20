@@ -11,7 +11,7 @@ func planMovementHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -19,7 +19,7 @@ func planMovementHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, PlanMovementResponse{
 			OK:      false,
-			Message: "invalid json",
+			Message: "некорректный JSON",
 		})
 		return
 	}

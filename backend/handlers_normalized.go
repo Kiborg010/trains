@@ -16,13 +16,13 @@ func normalizedSchemesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
 	userID, err := userIDFromContext(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		http.Error(w, "требуется авторизация", http.StatusUnauthorized)
 		return
 	}
 
@@ -35,7 +35,7 @@ func normalizedSchemesHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, ListNormalizedSchemesResponse{
 			OK:      false,
-			Message: fmt.Sprintf("failed to list normalized schemes: %v", err),
+			Message: fmt.Sprintf("не удалось получить список схем: %v", err),
 		})
 		return
 	}
@@ -52,27 +52,27 @@ func normalizedSchemeByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodPut && r.Method != http.MethodDelete {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
 	userID, err := userIDFromContext(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		http.Error(w, "требуется авторизация", http.StatusUnauthorized)
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/normalized/schemes/")
 	path = strings.Trim(path, "/")
 	if path == "" {
-		http.Error(w, "scheme id required", http.StatusBadRequest)
+		http.Error(w, "нужно указать идентификатор схемы", http.StatusBadRequest)
 		return
 	}
 
 	parts := strings.Split(path, "/")
 	schemeID, err := strconv.Atoi(parts[0])
 	if err != nil {
-		http.Error(w, "invalid scheme id", http.StatusBadRequest)
+		http.Error(w, "некорректный идентификатор схемы", http.StatusBadRequest)
 		return
 	}
 
@@ -81,7 +81,7 @@ func normalizedSchemeByIDHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeJSON(w, http.StatusNotFound, GetNormalizedSchemeResponse{
 				OK:      false,
-				Message: fmt.Sprintf("normalized scheme not found: %v", err),
+				Message: fmt.Sprintf("схема не найдена: %v", err),
 			})
 			return
 		}
@@ -115,14 +115,14 @@ func normalizedSchemeByIDHandler(w http.ResponseWriter, r *http.Request) {
 
 	if len(parts) == 2 && parts[1] == "details" {
 		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 			return
 		}
 		writeNormalizedSchemeDetails(w, userID, schemeID)
 		return
 	}
 
-	http.Error(w, "not found", http.StatusNotFound)
+	http.Error(w, "не найдено", http.StatusNotFound)
 }
 
 func normalizedScenariosHandler(w http.ResponseWriter, r *http.Request) {
@@ -131,13 +131,13 @@ func normalizedScenariosHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
 	userID, err := userIDFromContext(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		http.Error(w, "требуется авторизация", http.StatusUnauthorized)
 		return
 	}
 
@@ -150,7 +150,7 @@ func normalizedScenariosHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, ListNormalizedScenariosResponse{
 			OK:      false,
-			Message: fmt.Sprintf("failed to list normalized scenarios: %v", err),
+			Message: fmt.Sprintf("не удалось получить список сценариев: %v", err),
 		})
 		return
 	}
@@ -167,20 +167,20 @@ func normalizedScenarioByIDHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodPut && r.Method != http.MethodDelete {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
 	userID, err := userIDFromContext(r)
 	if err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		http.Error(w, "требуется авторизация", http.StatusUnauthorized)
 		return
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/normalized/scenarios/")
 	path = strings.Trim(path, "/")
 	if path == "" {
-		http.Error(w, "scenario id required", http.StatusBadRequest)
+		http.Error(w, "нужно указать идентификатор сценария", http.StatusBadRequest)
 		return
 	}
 
@@ -192,7 +192,7 @@ func normalizedScenarioByIDHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeJSON(w, http.StatusNotFound, GetNormalizedScenarioResponse{
 				OK:      false,
-				Message: fmt.Sprintf("normalized scenario not found: %v", err),
+				Message: fmt.Sprintf("сценарий не найден: %v", err),
 			})
 			return
 		}
@@ -226,14 +226,14 @@ func normalizedScenarioByIDHandler(w http.ResponseWriter, r *http.Request) {
 
 	if len(parts) == 2 && parts[1] == "steps" {
 		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 			return
 		}
 		steps, err := appStore.ListScenarioStepsByScenario(userID, scenarioID)
 		if err != nil {
 			writeJSON(w, http.StatusNotFound, ListScenarioStepsResponse{
 				OK:      false,
-				Message: fmt.Sprintf("normalized scenario steps not found: %v", err),
+				Message: fmt.Sprintf("шаги сценария не найдены: %v", err),
 			})
 			return
 		}
@@ -246,7 +246,7 @@ func normalizedScenarioByIDHandler(w http.ResponseWriter, r *http.Request) {
 
 	if len(parts) == 2 && parts[1] == "details" {
 		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 			return
 		}
 		writeNormalizedScenarioDetails(w, userID, scenarioID)
@@ -255,14 +255,14 @@ func normalizedScenarioByIDHandler(w http.ResponseWriter, r *http.Request) {
 
 	if len(parts) == 2 && parts[1] == "run" {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 			return
 		}
 		runNormalizedScenarioHandler(w, r, userID, scenarioID)
 		return
 	}
 
-	http.Error(w, "not found", http.StatusNotFound)
+	http.Error(w, "не найдено", http.StatusNotFound)
 }
 
 func writeNormalizedSchemeDetails(w http.ResponseWriter, userID int, schemeID int) {
@@ -270,7 +270,7 @@ func writeNormalizedSchemeDetails(w http.ResponseWriter, userID int, schemeID in
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, SchemeDetailsResponse{
 			OK:      false,
-			Message: fmt.Sprintf("normalized scheme not found: %v", err),
+			Message: fmt.Sprintf("схема не найдена: %v", err),
 		})
 		return
 	}
@@ -279,7 +279,7 @@ func writeNormalizedSchemeDetails(w http.ResponseWriter, userID int, schemeID in
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, SchemeDetailsResponse{
 			OK:      false,
-			Message: fmt.Sprintf("failed to load tracks: %v", err),
+			Message: fmt.Sprintf("не удалось загрузить пути: %v", err),
 		})
 		return
 	}
@@ -287,7 +287,7 @@ func writeNormalizedSchemeDetails(w http.ResponseWriter, userID int, schemeID in
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, SchemeDetailsResponse{
 			OK:      false,
-			Message: fmt.Sprintf("failed to load track connections: %v", err),
+			Message: fmt.Sprintf("не удалось загрузить соединения путей: %v", err),
 		})
 		return
 	}
@@ -295,7 +295,7 @@ func writeNormalizedSchemeDetails(w http.ResponseWriter, userID int, schemeID in
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, SchemeDetailsResponse{
 			OK:      false,
-			Message: fmt.Sprintf("failed to load wagons: %v", err),
+			Message: fmt.Sprintf("не удалось загрузить вагоны: %v", err),
 		})
 		return
 	}
@@ -303,7 +303,7 @@ func writeNormalizedSchemeDetails(w http.ResponseWriter, userID int, schemeID in
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, SchemeDetailsResponse{
 			OK:      false,
-			Message: fmt.Sprintf("failed to load locomotives: %v", err),
+			Message: fmt.Sprintf("не удалось загрузить локомотивы: %v", err),
 		})
 		return
 	}
@@ -311,7 +311,7 @@ func writeNormalizedSchemeDetails(w http.ResponseWriter, userID int, schemeID in
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, SchemeDetailsResponse{
 			OK:      false,
-			Message: fmt.Sprintf("failed to load couplings: %v", err),
+			Message: fmt.Sprintf("не удалось загрузить сцепки: %v", err),
 		})
 		return
 	}
@@ -333,7 +333,7 @@ func writeNormalizedScenarioDetails(w http.ResponseWriter, userID int, scenarioI
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, ScenarioDetailsResponse{
 			OK:      false,
-			Message: fmt.Sprintf("normalized scenario not found: %v", err),
+			Message: fmt.Sprintf("сценарий не найден: %v", err),
 		})
 		return
 	}
@@ -341,7 +341,7 @@ func writeNormalizedScenarioDetails(w http.ResponseWriter, userID int, scenarioI
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, ScenarioDetailsResponse{
 			OK:      false,
-			Message: fmt.Sprintf("failed to load scenario steps: %v", err),
+			Message: fmt.Sprintf("не удалось загрузить шаги сценария: %v", err),
 		})
 		return
 	}
@@ -357,7 +357,7 @@ func writeNormalizedScenarioDetails(w http.ResponseWriter, userID int, scenarioI
 func handleCreateNormalizedScheme(w http.ResponseWriter, r *http.Request, userID int) {
 	var req UpsertNormalizedSchemeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, SchemeDetailsResponse{OK: false, Message: "invalid normalized scheme payload"})
+		writeJSON(w, http.StatusBadRequest, SchemeDetailsResponse{OK: false, Message: "некорректные данные схемы"})
 		return
 	}
 
@@ -369,7 +369,7 @@ func handleCreateNormalizedScheme(w http.ResponseWriter, r *http.Request, userID
 
 	schemeID, err := appStore.CreateNormalizedScheme(userID, scheme)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, SchemeDetailsResponse{OK: false, Message: fmt.Sprintf("failed to create normalized scheme: %v", err)})
+		writeJSON(w, http.StatusInternalServerError, SchemeDetailsResponse{OK: false, Message: fmt.Sprintf("не удалось создать схему: %v", err)})
 		return
 	}
 
@@ -379,7 +379,7 @@ func handleCreateNormalizedScheme(w http.ResponseWriter, r *http.Request, userID
 func handleUpdateNormalizedScheme(w http.ResponseWriter, r *http.Request, userID int, schemeID int) {
 	var req UpsertNormalizedSchemeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, SchemeDetailsResponse{OK: false, Message: "invalid normalized scheme payload"})
+		writeJSON(w, http.StatusBadRequest, SchemeDetailsResponse{OK: false, Message: "некорректные данные схемы"})
 		return
 	}
 
@@ -390,7 +390,7 @@ func handleUpdateNormalizedScheme(w http.ResponseWriter, r *http.Request, userID
 	}
 
 	if err := appStore.UpdateNormalizedScheme(userID, scheme); err != nil {
-		writeJSON(w, http.StatusNotFound, SchemeDetailsResponse{OK: false, Message: fmt.Sprintf("failed to update normalized scheme: %v", err)})
+		writeJSON(w, http.StatusNotFound, SchemeDetailsResponse{OK: false, Message: fmt.Sprintf("не удалось обновить схему: %v", err)})
 		return
 	}
 
@@ -400,7 +400,7 @@ func handleUpdateNormalizedScheme(w http.ResponseWriter, r *http.Request, userID
 func handleCreateNormalizedScenario(w http.ResponseWriter, r *http.Request, userID int) {
 	var req UpsertNormalizedScenarioRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, ScenarioDetailsResponse{OK: false, Message: "invalid normalized scenario payload"})
+		writeJSON(w, http.StatusBadRequest, ScenarioDetailsResponse{OK: false, Message: "некорректные данные сценария"})
 		return
 	}
 
@@ -412,7 +412,7 @@ func handleCreateNormalizedScenario(w http.ResponseWriter, r *http.Request, user
 
 	scenarioID, err := appStore.CreateNormalizedScenario(userID, scenario)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, ScenarioDetailsResponse{OK: false, Message: fmt.Sprintf("failed to create normalized scenario: %v", err)})
+		writeJSON(w, http.StatusInternalServerError, ScenarioDetailsResponse{OK: false, Message: fmt.Sprintf("не удалось создать сценарий: %v", err)})
 		return
 	}
 
@@ -422,7 +422,7 @@ func handleCreateNormalizedScenario(w http.ResponseWriter, r *http.Request, user
 func handleUpdateNormalizedScenario(w http.ResponseWriter, r *http.Request, userID int, scenarioID string) {
 	var req UpsertNormalizedScenarioRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, ScenarioDetailsResponse{OK: false, Message: "invalid normalized scenario payload"})
+		writeJSON(w, http.StatusBadRequest, ScenarioDetailsResponse{OK: false, Message: "некорректные данные сценария"})
 		return
 	}
 
@@ -433,7 +433,7 @@ func handleUpdateNormalizedScenario(w http.ResponseWriter, r *http.Request, user
 	}
 
 	if err := appStore.UpdateNormalizedScenario(userID, scenario); err != nil {
-		writeJSON(w, http.StatusNotFound, ScenarioDetailsResponse{OK: false, Message: fmt.Sprintf("failed to update normalized scenario: %v", err)})
+		writeJSON(w, http.StatusNotFound, ScenarioDetailsResponse{OK: false, Message: fmt.Sprintf("не удалось обновить сценарий: %v", err)})
 		return
 	}
 
@@ -443,10 +443,10 @@ func handleUpdateNormalizedScenario(w http.ResponseWriter, r *http.Request, user
 func normalizedSchemeFromRequest(schemeID int, req UpsertNormalizedSchemeRequest) (normalized.Scheme, error) {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return normalized.Scheme{}, fmt.Errorf("scheme name is required")
+		return normalized.Scheme{}, fmt.Errorf("нужно указать название схемы")
 	}
 	if len(req.Tracks) == 0 {
-		return normalized.Scheme{}, fmt.Errorf("scheme must contain at least one track")
+		return normalized.Scheme{}, fmt.Errorf("схема должна содержать хотя бы один путь")
 	}
 
 	return normalized.Scheme{
@@ -463,10 +463,10 @@ func normalizedSchemeFromRequest(schemeID int, req UpsertNormalizedSchemeRequest
 func normalizedScenarioFromRequest(scenarioID string, req UpsertNormalizedScenarioRequest) (normalized.Scenario, error) {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
-		return normalized.Scenario{}, fmt.Errorf("scenario name is required")
+		return normalized.Scenario{}, fmt.Errorf("нужно указать название сценария")
 	}
 	if req.SchemeID <= 0 {
-		return normalized.Scenario{}, fmt.Errorf("scenario scheme_id is required")
+		return normalized.Scenario{}, fmt.Errorf("для сценария требуется scheme_id")
 	}
 
 	steps := dtoToScenarioSteps(req.ScenarioSteps)

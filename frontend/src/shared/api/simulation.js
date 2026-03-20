@@ -66,7 +66,7 @@ async function getJSON(path) {
 }
 
 async function buildHTTPError(response, path) {
-  let message = `HTTP ${response.status} (${path})`;
+  let message = `Ошибка HTTP ${response.status} (${path})`;
 
   try {
     const contentType = response.headers.get("content-type") || "";

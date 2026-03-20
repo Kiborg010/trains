@@ -158,7 +158,7 @@ func BuildFixedClassProblem(scheme normalized.Scheme, targetColor string, format
 	// из-за строк, отличающихся только пробелами.
 	targetColor = strings.TrimSpace(targetColor)
 	if targetColor == "" {
-		return FixedClassProblem{}, fmt.Errorf("target color is required")
+		return FixedClassProblem{}, fmt.Errorf("нужно указать целевой цвет")
 	}
 
 	// Разделяем пути по смысловым ролям. Эвристика работает не с произвольными
@@ -195,10 +195,10 @@ func BuildFixedClassProblem(scheme normalized.Scheme, targetColor string, format
 	// Любое отклонение лучше отклонять сразу, чем получать неочевидное
 	// поведение позже на этапе планирования.
 	if len(mainTracks) != 1 {
-		return FixedClassProblem{}, fmt.Errorf("expected exactly 1 main track, got %d", len(mainTracks))
+		return FixedClassProblem{}, fmt.Errorf("ожидался ровно 1 главный путь, получено %d", len(mainTracks))
 	}
 	if len(bypassTracks) != 1 {
-		return FixedClassProblem{}, fmt.Errorf("expected exactly 1 bypass track, got %d", len(bypassTracks))
+		return FixedClassProblem{}, fmt.Errorf("ожидался ровно 1 обходной путь, получено %d", len(bypassTracks))
 	}
 	if err := validateTrackCountInRange("sorting", len(sortingTracks), minSortingTrackCount, maxSortingTrackCount); err != nil {
 		return FixedClassProblem{}, err
@@ -213,19 +213,19 @@ func BuildFixedClassProblem(scheme normalized.Scheme, targetColor string, format
 	// Если эти флаги неверные, дальнейшие предположения о планировании
 	// становятся невалидными, поэтому завершаемся сразу.
 	if mainTrack.StorageAllowed {
-		return FixedClassProblem{}, fmt.Errorf("main track %s must not allow storage", mainTrack.TrackID)
+		return FixedClassProblem{}, fmt.Errorf("главный путь %s не должен допускать хранение", mainTrack.TrackID)
 	}
 	if bypassTrack.StorageAllowed {
-		return FixedClassProblem{}, fmt.Errorf("bypass track %s must not allow storage", bypassTrack.TrackID)
+		return FixedClassProblem{}, fmt.Errorf("обходной путь %s не должен допускать хранение", bypassTrack.TrackID)
 	}
 	for _, track := range sortingTracks {
 		if !track.StorageAllowed {
-			return FixedClassProblem{}, fmt.Errorf("sorting track %s must allow storage", track.TrackID)
+			return FixedClassProblem{}, fmt.Errorf("сортировочный путь %s должен допускать хранение", track.TrackID)
 		}
 	}
 	for _, track := range leadTracks {
 		if !track.StorageAllowed {
-			return FixedClassProblem{}, fmt.Errorf("lead track %s must allow storage", track.TrackID)
+			return FixedClassProblem{}, fmt.Errorf("вытяжной путь %s должен допускать хранение", track.TrackID)
 		}
 	}
 
@@ -255,7 +255,7 @@ func BuildFixedClassProblem(scheme normalized.Scheme, targetColor string, format
 		// обрабатывать "бесцветные" вагоны.
 		color := strings.TrimSpace(wagon.Color)
 		if color == "" {
-			return FixedClassProblem{}, fmt.Errorf("wagon %s has empty color", wagon.WagonID)
+			return FixedClassProblem{}, fmt.Errorf("у вагона %s не указан цвет", wagon.WagonID)
 		}
 		wagonsByTrack[wagon.TrackID] = append(wagonsByTrack[wagon.TrackID], wagon)
 		if color == targetColor {
@@ -269,7 +269,7 @@ func BuildFixedClassProblem(scheme normalized.Scheme, targetColor string, format
 	// допускается максимум два цвета и при этом хотя бы один target-вагон.
 	// Иначе планировать просто нечего.
 	if len(targetWagons) == 0 {
-		return FixedClassProblem{}, fmt.Errorf("no wagons of target color %q found", targetColor)
+		return FixedClassProblem{}, fmt.Errorf("вагоны целевого цвета %q не найдены", targetColor)
 	}
 
 	// Сортируем вагоны на каждом пути по TrackIndex, чтобы в следующих этапах
@@ -474,7 +474,7 @@ func CheckFixedClassFeasibility(scheme normalized.Scheme, targetColor string, re
 //   - такие policy-решения принадлежат selectFormationAndBufferTracks
 func chooseLeadTracks(leadTracks []normalized.Track, formationTrackID string) (normalized.Track, normalized.Track, error) {
 	if len(leadTracks) < minLeadTrackCount {
-		return normalized.Track{}, normalized.Track{}, fmt.Errorf("at least %d lead tracks are required", minLeadTrackCount)
+		return normalized.Track{}, normalized.Track{}, fmt.Errorf("нужно минимум %d вытяжных пути", minLeadTrackCount)
 	}
 	// Пустой выбор означает:
 	// "использовать детерминированный порядок по умолчанию".
@@ -488,11 +488,11 @@ func chooseLeadTracks(leadTracks []normalized.Track, formationTrackID string) (n
 		}
 		bufferTrack, ok := chooseBufferTrack(leadTracks, formationTrackID, nil)
 		if !ok {
-			return normalized.Track{}, normalized.Track{}, fmt.Errorf("buffer track was not found")
+			return normalized.Track{}, normalized.Track{}, fmt.Errorf("буферный путь не найден")
 		}
 		return track, bufferTrack, nil
 	}
-	return normalized.Track{}, normalized.Track{}, fmt.Errorf("formation track %s is not one of the lead tracks", formationTrackID)
+	return normalized.Track{}, normalized.Track{}, fmt.Errorf("путь формирования %s не относится к вытяжным путям", formationTrackID)
 }
 
 // sortTracks сортирует пути по TrackID, чтобы все последующие решения были
@@ -550,7 +550,7 @@ func selectFormationAndBufferTracks(
 		}
 		bufferTrack, ok := chooseBufferTrack(leadTracks, formationTrack.TrackID, occupiedByTrack)
 		if !ok {
-			return normalized.Track{}, normalized.Track{}, []string{"buffer track was not found"}
+			return normalized.Track{}, normalized.Track{}, []string{"буферный путь не найден"}
 		}
 		if formationTrack.Capacity < requiredTargetCount {
 			reasons = append(reasons, fmt.Sprintf(
@@ -596,7 +596,7 @@ func selectFormationAndBufferTracks(
 	formationTrack := candidates[0]
 	bufferTrack, ok := chooseBufferTrack(leadTracks, formationTrack.TrackID, occupiedByTrack)
 	if !ok {
-		return normalized.Track{}, normalized.Track{}, []string{"buffer track was not found"}
+		return normalized.Track{}, normalized.Track{}, []string{"буферный путь не найден"}
 	}
 
 	return formationTrack, bufferTrack, nil
@@ -605,9 +605,9 @@ func selectFormationAndBufferTracks(
 func validateTrackCountInRange(trackKind string, count int, min int, max int) error {
 	switch {
 	case count < min:
-		return fmt.Errorf("expected at least %d %s tracks, got %d", min, trackKind, count)
+		return fmt.Errorf("ожидалось минимум %d путей типа %s, получено %d", min, trackKind, count)
 	case count > max:
-		return fmt.Errorf("expected at most %d %s tracks, got %d", max, trackKind, count)
+		return fmt.Errorf("ожидалось максимум %d путей типа %s, получено %d", max, trackKind, count)
 	default:
 		return nil
 	}

@@ -581,10 +581,10 @@ func TestFixedClassTrackCountValidationRange(t *testing.T) {
 		leadCount     int
 		expectedError string
 	}{
-		{name: "sorting below minimum", sortingCount: 1, leadCount: 2, expectedError: "expected at least 2 sorting tracks"},
-		{name: "lead below minimum", sortingCount: 2, leadCount: 1, expectedError: "expected at least 2 lead tracks"},
-		{name: "sorting above maximum", sortingCount: 11, leadCount: 2, expectedError: "expected at most 10 sorting tracks"},
-		{name: "lead above maximum", sortingCount: 2, leadCount: 11, expectedError: "expected at most 10 lead tracks"},
+		{name: "sorting below minimum", sortingCount: 1, leadCount: 2, expectedError: "ожидалось минимум 2 путей типа sorting"},
+		{name: "lead below minimum", sortingCount: 2, leadCount: 1, expectedError: "ожидалось минимум 2 путей типа lead"},
+		{name: "sorting above maximum", sortingCount: 11, leadCount: 2, expectedError: "ожидалось максимум 10 путей типа sorting"},
+		{name: "lead above maximum", sortingCount: 2, leadCount: 11, expectedError: "ожидалось максимум 10 путей типа lead"},
 	}
 
 	for _, tc := range testCases {

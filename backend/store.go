@@ -164,7 +164,7 @@ func (s *InMemoryStore) GetExecution(id string, userID int) (*Execution, error) 
 
 	execution, ok := s.executionsByID[id]
 	if !ok || execution.UserID != userID {
-		return nil, fmt.Errorf("execution not found")
+		return nil, fmt.Errorf("выполнение не найдено")
 	}
 	return &execution, nil
 }
@@ -175,7 +175,7 @@ func (s *InMemoryStore) UpdateExecution(id string, userID int, execution Executi
 
 	existing, ok := s.executionsByID[id]
 	if !ok || existing.UserID != userID {
-		return fmt.Errorf("execution not found")
+		return fmt.Errorf("выполнение не найдено")
 	}
 	execution.ID = id
 	execution.UserID = userID
@@ -294,7 +294,7 @@ func (s *PostgresStore) SaveExecution(userID int, scenarioID string) (string, er
 func (s *PostgresStore) GetExecution(id string, userID int) (*Execution, error) {
 	executionID, err := strconv.Atoi(id)
 	if err != nil {
-		return nil, fmt.Errorf("invalid execution id")
+		return nil, fmt.Errorf("некорректный идентификатор выполнения")
 	}
 
 	var execution Execution
@@ -305,7 +305,7 @@ func (s *PostgresStore) GetExecution(id string, userID int) (*Execution, error) 
 		executionID, userID,
 	).Scan(&execution.ID, &execution.UserID, &execution.ScenarioID, &execution.Status, &execution.CurrentStep, &stateJSON, &logJSON)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("execution not found")
+		return nil, fmt.Errorf("выполнение не найдено")
 	}
 	if err != nil {
 		return nil, err
@@ -323,7 +323,7 @@ func (s *PostgresStore) GetExecution(id string, userID int) (*Execution, error) 
 func (s *PostgresStore) UpdateExecution(id string, userID int, execution Execution) error {
 	executionID, err := strconv.Atoi(id)
 	if err != nil {
-		return fmt.Errorf("invalid execution id")
+		return fmt.Errorf("некорректный идентификатор выполнения")
 	}
 
 	stateJSON, err := json.Marshal(execution.State)
@@ -347,7 +347,7 @@ func (s *PostgresStore) UpdateExecution(id string, userID int, execution Executi
 		return err
 	}
 	if rows == 0 {
-		return fmt.Errorf("execution not found")
+		return fmt.Errorf("выполнение не найдено")
 	}
 	return nil
 }

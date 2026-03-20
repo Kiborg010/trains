@@ -1542,7 +1542,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     });
 
     if (!response.ok) {
-      throw new Error(response.message || "Layout action failed.");
+      throw new Error(response.message || "Не удалось выполнить действие с расстановкой.");
     }
 
     const nextState = response.state || {};
@@ -2973,7 +2973,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     } catch (error) {
       setScenarioExecutingStep(null);
       setScenarioViewMode("paused");
-      setMovementHint(error.message || "Ошибка связи с backend.");
+      setMovementHint(error.message || "Ошибка связи с сервером.");
     }
   }
 
@@ -3215,7 +3215,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
           strictCouplings: true,
         });
       } catch (error) {
-        setMovementHint(error.message || "Backend connection error.");
+        setMovementHint(error.message || "Ошибка связи с сервером.");
         setVehicles((prev) =>
           prev.map((vehicle) => {
             const origin = originMap.get(vehicle.id);
@@ -3382,7 +3382,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         targetIndex: slot.index,
       });
     } catch (error) {
-      setMovementHint(error.message || "Backend connection error.");
+      setMovementHint(error.message || "Ошибка связи с сервером.");
     }
   }
 
@@ -3444,7 +3444,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     try {
       await executeMovement(selectedLocomotiveId);
     } catch (error) {
-      setMovementHint(error.message || "Ошибка связи с backend.");
+      setMovementHint(error.message || "Ошибка связи с сервером.");
     }
   }
   function startVehicleDrag(event, vehicleId) {
@@ -3484,7 +3484,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       });
       setMovementHint("Сцепка выполнена.");
     } catch (error) {
-      setMovementHint(error.message || "Ошибка связи с backend.");
+      setMovementHint(error.message || "Ошибка связи с сервером.");
     }
   }
 
@@ -3496,7 +3496,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       await applyLayoutAction("decouple", { selectedVehicleIds });
       setMovementHint("Расцепка выполнена.");
     } catch (error) {
-      setMovementHint(error.message || "Ошибка связи с backend.");
+      setMovementHint(error.message || "Ошибка связи с сервером.");
     }
   }
 
@@ -3505,7 +3505,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     try {
       await applyLayoutAction("clear");
     } catch (error) {
-      setMovementHint(error.message || "Ошибка связи с backend.");
+      setMovementHint(error.message || "Ошибка связи с сервером.");
     }
     setStartPoint(null);
     setSelectedSegmentIds([]);
@@ -3525,7 +3525,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       setDragState(null);
       setSelectionBox(null);
     } catch (error) {
-      setMovementHint(error.message || "Ошибка связи с backend.");
+      setMovementHint(error.message || "Ошибка связи с сервером.");
     }
   }
 
@@ -3537,7 +3537,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       await applyLayoutAction("delete_vehicles", { ids: selectedVehicleIds });
       setSelectedVehicleIds([]);
     } catch (error) {
-      setMovementHint(error.message || "Ошибка связи с backend.");
+      setMovementHint(error.message || "Ошибка связи с сервером.");
     }
   }
 

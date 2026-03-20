@@ -26,7 +26,7 @@ func (s *InMemoryStore) GetNormalizedScheme(schemeID int, userID int) (*normaliz
 
 	scheme, ok := s.schemesByID[schemeID]
 	if !ok {
-		return nil, fmt.Errorf("scheme not found")
+		return nil, fmt.Errorf("схема не найдена")
 	}
 	copy := cloneNormalizedScheme(scheme)
 	return &copy, nil
@@ -60,7 +60,7 @@ func (s *InMemoryStore) DeleteNormalizedScheme(userID int, schemeID int) error {
 	defer s.mu.Unlock()
 
 	if _, ok := s.schemesByID[schemeID]; !ok {
-		return fmt.Errorf("scheme not found")
+		return fmt.Errorf("схема не найдена")
 	}
 	delete(s.schemesByID, schemeID)
 
@@ -185,7 +185,7 @@ func (s *InMemoryStore) GetNormalizedScenario(id string, userID int) (*normalize
 
 	scenario, ok := s.normalizedScenariosByID[id]
 	if !ok {
-		return nil, fmt.Errorf("scenario not found")
+		return nil, fmt.Errorf("сценарий не найден")
 	}
 	copy := normalized.Scenario{
 		ScenarioID:                scenario.ScenarioID,
@@ -219,7 +219,7 @@ func (s *InMemoryStore) UpdateNormalizedScenario(userID int, scenario normalized
 	defer s.mu.Unlock()
 
 	if _, ok := s.normalizedScenariosByID[scenario.ScenarioID]; !ok {
-		return fmt.Errorf("scenario not found")
+		return fmt.Errorf("сценарий не найден")
 	}
 	s.normalizedScenariosByID[scenario.ScenarioID] = normalized.Scenario{
 		ScenarioID:                scenario.ScenarioID,
@@ -236,7 +236,7 @@ func (s *InMemoryStore) DeleteNormalizedScenario(userID int, scenarioID string) 
 	defer s.mu.Unlock()
 
 	if _, ok := s.normalizedScenariosByID[scenarioID]; !ok {
-		return fmt.Errorf("scenario not found")
+		return fmt.Errorf("сценарий не найден")
 	}
 	if heuristicScenarioID := s.normalizedScenariosByID[scenarioID].SourceHeuristicScenarioID; heuristicScenarioID != nil && *heuristicScenarioID != "" {
 		delete(s.heuristicScenariosByID, *heuristicScenarioID)
@@ -251,7 +251,7 @@ func (s *InMemoryStore) CreateScenarioSteps(userID int, scenarioID string, steps
 
 	scenario, ok := s.normalizedScenariosByID[scenarioID]
 	if !ok {
-		return fmt.Errorf("scenario not found")
+		return fmt.Errorf("сценарий не найден")
 	}
 	scenario.Steps = cloneScenarioSteps(withScenarioIDForSteps(scenarioID, steps))
 	s.normalizedScenariosByID[scenarioID] = scenario
@@ -288,7 +288,7 @@ func (s *InMemoryStore) GetHeuristicScenario(id string, userID int) (*normalized
 
 	scenario, ok := s.heuristicScenariosByID[id]
 	if !ok {
-		return nil, fmt.Errorf("heuristic scenario not found")
+		return nil, fmt.Errorf("эвристический сценарий не найден")
 	}
 	copyScenario := cloneHeuristicScenario(scenario)
 	return &copyScenario, nil
@@ -312,7 +312,7 @@ func (s *InMemoryStore) DeleteHeuristicScenario(userID int, heuristicScenarioID 
 	defer s.mu.Unlock()
 
 	if _, ok := s.heuristicScenariosByID[heuristicScenarioID]; !ok {
-		return fmt.Errorf("heuristic scenario not found")
+		return fmt.Errorf("эвристический сценарий не найден")
 	}
 	delete(s.heuristicScenariosByID, heuristicScenarioID)
 	return nil
@@ -324,7 +324,7 @@ func (s *InMemoryStore) CreateHeuristicScenarioSteps(userID int, heuristicScenar
 
 	scenario, ok := s.heuristicScenariosByID[heuristicScenarioID]
 	if !ok {
-		return fmt.Errorf("heuristic scenario not found")
+		return fmt.Errorf("эвристический сценарий не найден")
 	}
 	scenario.Steps = cloneHeuristicScenarioSteps(withHeuristicScenarioIDForSteps(heuristicScenarioID, steps))
 	s.heuristicScenariosByID[heuristicScenarioID] = cloneHeuristicScenario(scenario)
@@ -345,7 +345,7 @@ func (s *InMemoryStore) updateSchemePart(schemeID int, updater func(*normalized.
 
 	scheme, ok := s.schemesByID[schemeID]
 	if !ok {
-		return fmt.Errorf("scheme not found")
+		return fmt.Errorf("схема не найдена")
 	}
 	updater(&scheme)
 	s.schemesByID[schemeID] = cloneNormalizedScheme(scheme)
@@ -418,7 +418,7 @@ func (s *PostgresStore) UpdateNormalizedScheme(userID int, scheme normalized.Sch
 		return err
 	}
 	if rows == 0 {
-		return fmt.Errorf("scheme not found")
+		return fmt.Errorf("схема не найдена")
 	}
 	assignSchemeID(&scheme)
 	return s.replaceNormalizedSchemeData(scheme.SchemeID, scheme)
@@ -434,7 +434,7 @@ func (s *PostgresStore) DeleteNormalizedScheme(userID int, schemeID int) error {
 		return err
 	}
 	if rows == 0 {
-		return fmt.Errorf("scheme not found")
+		return fmt.Errorf("схема не найдена")
 	}
 	return nil
 }
@@ -694,7 +694,7 @@ func (s *PostgresStore) UpdateNormalizedScenario(userID int, scenario normalized
 		return err
 	}
 	if rows == 0 {
-		return fmt.Errorf("scenario not found")
+		return fmt.Errorf("сценарий не найден")
 	}
 
 	if _, err := tx.Exec(`DELETE FROM scenario_steps WHERE scenario_id = $1`, scenario.ScenarioID); err != nil {
@@ -721,7 +721,7 @@ func (s *PostgresStore) DeleteNormalizedScenario(userID int, scenarioID string) 
 		scenarioID,
 		userID,
 	).Scan(&sourceHeuristicScenarioID); err != nil {
-		return fmt.Errorf("scenario not found")
+		return fmt.Errorf("сценарий не найден")
 	}
 
 	result, err := s.db.Exec(`DELETE FROM scenarios WHERE scenario_id = $1 AND user_id = $2`, scenarioID, userID)
@@ -733,7 +733,7 @@ func (s *PostgresStore) DeleteNormalizedScenario(userID int, scenarioID string) 
 		return err
 	}
 	if rows == 0 {
-		return fmt.Errorf("scenario not found")
+		return fmt.Errorf("сценарий не найден")
 	}
 	if sourceHeuristicScenarioID != nil && *sourceHeuristicScenarioID != "" {
 		if err := s.DeleteHeuristicScenario(userID, *sourceHeuristicScenarioID); err != nil {

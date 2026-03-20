@@ -467,7 +467,7 @@ func TestBuildMovementPlanRejectsTargetTrackWhenNoReachableFreeSlotExists(t *tes
 	if err == nil {
 		t.Fatal("expected clear rejection when target track has no reachable free slots")
 	}
-	if err.Error() != "Target track is blocked: no reachable free slot on track_id=2 requested_index=2 occupied_indices=[0 1 2]." {
+	if err.Error() != "Целевой путь заблокирован: нет доступного свободного звена на track_id=2 requested_index=2 occupied_indices=[0 1 2]." {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

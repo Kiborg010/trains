@@ -12,7 +12,7 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -20,7 +20,7 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, RegisterResponse{
 			OK:    false,
-			Error: "invalid json",
+			Error: "некорректный JSON",
 		})
 		return
 	}
@@ -31,7 +31,7 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	if email == "" || password == "" {
 		writeJSON(w, http.StatusBadRequest, RegisterResponse{
 			OK:    false,
-			Error: "email and password are required",
+			Error: "нужно указать электронную почту и пароль",
 		})
 		return
 	}
@@ -39,7 +39,7 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	if len(password) < 6 {
 		writeJSON(w, http.StatusBadRequest, RegisterResponse{
 			OK:    false,
-			Error: "password must be at least 6 characters",
+			Error: "пароль должен содержать минимум 6 символов",
 		})
 		return
 	}
@@ -48,7 +48,7 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, RegisterResponse{
 			OK:    false,
-			Error: "failed to process password",
+			Error: "не удалось обработать пароль",
 		})
 		return
 	}
@@ -58,13 +58,13 @@ func registerHandler(w http.ResponseWriter, r *http.Request) {
 		if err == ErrUserExists {
 			writeJSON(w, http.StatusConflict, RegisterResponse{
 				OK:    false,
-				Error: "user with this email already exists",
+				Error: "пользователь с такой электронной почтой уже существует",
 			})
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, RegisterResponse{
 			OK:    false,
-			Error: "failed to create user",
+			Error: "не удалось создать пользователя",
 		})
 		return
 	}
@@ -81,7 +81,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -89,7 +89,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, AuthResponse{
 			OK:    false,
-			Error: "invalid json",
+			Error: "некорректный JSON",
 		})
 		return
 	}
@@ -100,7 +100,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	if email == "" || password == "" {
 		writeJSON(w, http.StatusBadRequest, AuthResponse{
 			OK:    false,
-			Error: "email and password are required",
+			Error: "нужно указать электронную почту и пароль",
 		})
 		return
 	}
@@ -110,13 +110,13 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		if err == ErrUserNotFound {
 			writeJSON(w, http.StatusUnauthorized, AuthResponse{
 				OK:    false,
-				Error: "invalid credentials",
+				Error: "неверная электронная почта или пароль",
 			})
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, AuthResponse{
 			OK:    false,
-			Error: "failed to authenticate",
+			Error: "не удалось выполнить вход",
 		})
 		return
 	}
@@ -124,7 +124,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	if !VerifyPassword(user.PasswordHash, password) {
 		writeJSON(w, http.StatusUnauthorized, AuthResponse{
 			OK:    false,
-			Error: "invalid credentials",
+			Error: "неверная электронная почта или пароль",
 		})
 		return
 	}
@@ -133,7 +133,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, AuthResponse{
 			OK:    false,
-			Error: "failed to generate token",
+			Error: "не удалось создать токен",
 		})
 		return
 	}
@@ -152,7 +152,7 @@ func meHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "метод не поддерживается", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -160,7 +160,7 @@ func meHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{
 			"ok":    "false",
-			"error": "unauthorized",
+			"error": "требуется авторизация",
 		})
 		return
 	}
@@ -169,7 +169,7 @@ func meHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{
 			"ok":    "false",
-			"error": "user not found",
+			"error": "пользователь не найден",
 		})
 		return
 	}
