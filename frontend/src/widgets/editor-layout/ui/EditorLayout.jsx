@@ -81,6 +81,9 @@ const CANVAS_THEME_COLORS = {
     gridMinor: "#d8e2ee",
     gridMajor: "#b6c7db",
     pathLabel: "#0f172a",
+    pathLabelBackdrop: "rgba(255, 255, 255, 0.92)",
+    pathLabelBorder: "rgba(148, 163, 184, 0.65)",
+    pathLabelLeader: "rgba(100, 116, 139, 0.55)",
     emptySlot: "#cbd5e1",
     occupiedSlot: "#94a3b8",
     node: "#cbd5e1",
@@ -92,6 +95,9 @@ const CANVAS_THEME_COLORS = {
     gridMinor: "#223045",
     gridMajor: "#314760",
     pathLabel: "#e2e8f0",
+    pathLabelBackdrop: "rgba(15, 23, 42, 0.92)",
+    pathLabelBorder: "rgba(71, 85, 105, 0.9)",
+    pathLabelLeader: "rgba(148, 163, 184, 0.45)",
     emptySlot: "#475569",
     occupiedSlot: "#94a3b8",
     node: "#64748b",
@@ -148,6 +154,30 @@ function buildGridLines(start, end, step) {
     lines.push(roundGridValue(value));
   }
   return lines;
+}
+
+function getSegmentLabelPosition(segment, distance = 30) {
+  const midpointX = (segment.from.x + segment.to.x) / 2;
+  const midpointY = (segment.from.y + segment.to.y) / 2;
+  const dx = segment.to.x - segment.from.x;
+  const dy = segment.to.y - segment.from.y;
+  const length = Math.hypot(dx, dy);
+
+  if (!Number.isFinite(length) || length === 0) {
+    return { x: midpointX, y: midpointY - distance };
+  }
+
+  let normalX = -dy / length;
+  let normalY = dx / length;
+  if (normalY > 0) {
+    normalX = -normalX;
+    normalY = -normalY;
+  }
+
+  return {
+    x: midpointX + normalX * distance,
+    y: midpointY + normalY * distance,
+  };
 }
 
 function normalizeRect(start, end) {
@@ -4585,7 +4615,10 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
             {segments.map((segment) => {
               const pathName = getPathDisplayName(segment.id, segmentDisplayNameById);
               const midpointX = (segment.from.x + segment.to.x) / 2;
-              const midpointY = (segment.from.y + segment.to.y) / 2 - 24;
+              const midpointY = (segment.from.y + segment.to.y) / 2;
+              const labelPosition = getSegmentLabelPosition(segment, 30);
+              const labelWidth = Math.max(26, pathName.length * 10 + 14);
+              const labelHeight = 22;
               return (
                 <g key={segment.id}>
                   <line
@@ -4618,9 +4651,31 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                       Путь {pathName} ({PATH_TYPE_LABELS[normalizePathType(segment.type)]})
                     </title>
                   </line>
+                  <line
+                    x1={midpointX}
+                    y1={midpointY}
+                    x2={labelPosition.x}
+                    y2={labelPosition.y}
+                    stroke={canvasColors.pathLabelLeader}
+                    strokeWidth="1"
+                    vectorEffect="non-scaling-stroke"
+                    pointerEvents="none"
+                  />
+                  <rect
+                    x={labelPosition.x - labelWidth / 2}
+                    y={labelPosition.y - labelHeight / 2}
+                    width={labelWidth}
+                    height={labelHeight}
+                    rx="7"
+                    fill={canvasColors.pathLabelBackdrop}
+                    stroke={canvasColors.pathLabelBorder}
+                    strokeWidth="1"
+                    pointerEvents="none"
+                  />
                   <text
-                    x={midpointX}
-                    y={midpointY}
+                    x={labelPosition.x}
+                    y={labelPosition.y}
+                    dy="0.35em"
                     fill={canvasColors.pathLabel}
                     fontSize="14"
                     fontWeight="700"
