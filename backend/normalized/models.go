@@ -68,6 +68,14 @@ type Scenario struct {
 	Steps                     []ScenarioStep `json:"steps,omitempty"`
 }
 
+type ScenarioMetrics struct {
+	ScenarioID           string `json:"scenario_id"`
+	TotalLocoDistance    int    `json:"total_loco_distance"`
+	TotalCouples         int    `json:"total_couples"`
+	TotalDecouples       int    `json:"total_decouples"`
+	TotalSwitchCrossings int    `json:"total_switch_crossings"`
+}
+
 type ScenarioStep struct {
 	StepID      string          `json:"step_id"`
 	ScenarioID  string          `json:"scenario_id"`

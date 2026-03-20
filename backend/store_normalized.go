@@ -241,6 +241,7 @@ func (s *InMemoryStore) DeleteNormalizedScenario(userID int, scenarioID string) 
 	if heuristicScenarioID := s.normalizedScenariosByID[scenarioID].SourceHeuristicScenarioID; heuristicScenarioID != nil && *heuristicScenarioID != "" {
 		delete(s.heuristicScenariosByID, *heuristicScenarioID)
 	}
+	delete(s.scenarioMetricsByID, scenarioID)
 	delete(s.normalizedScenariosByID, scenarioID)
 	return nil
 }
@@ -268,6 +269,33 @@ func (s *InMemoryStore) ListScenarioStepsByScenario(userID int, scenarioID strin
 		return nil, err
 	}
 	return cloneScenarioSteps(scenario.Steps), nil
+}
+
+func (s *InMemoryStore) GetScenarioMetrics(userID int, scenarioID string) (*normalized.ScenarioMetrics, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.normalizedScenariosByID[scenarioID]; !ok {
+		return nil, fmt.Errorf("сценарий не найден")
+	}
+	metrics, ok := s.scenarioMetricsByID[scenarioID]
+	if !ok {
+		return nil, fmt.Errorf("метрики сценария не найдены")
+	}
+	copy := metrics
+	return &copy, nil
+}
+
+func (s *InMemoryStore) SaveScenarioMetrics(scenarioID string, metrics normalized.ScenarioMetrics) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.normalizedScenariosByID[scenarioID]; !ok {
+		return fmt.Errorf("сценарий не найден")
+	}
+	metrics.ScenarioID = scenarioID
+	s.scenarioMetricsByID[scenarioID] = metrics
+	return nil
 }
 
 func (s *InMemoryStore) CreateHeuristicScenario(userID int, scenario normalized.HeuristicScenario) (string, error) {
@@ -802,6 +830,40 @@ func (s *PostgresStore) ListScenarioStepsByScenario(userID int, scenarioID strin
 		result = append(result, step)
 	}
 	return result, rows.Err()
+}
+
+func (s *PostgresStore) GetScenarioMetrics(userID int, scenarioID string) (*normalized.ScenarioMetrics, error) {
+	var metrics normalized.ScenarioMetrics
+	if err := s.db.QueryRow(`
+		SELECT m.scenario_id, m.total_loco_distance, m.total_couples, m.total_decouples, m.total_switch_crossings
+		FROM scenario_metrics m
+		JOIN scenarios s ON s.scenario_id = m.scenario_id
+		WHERE m.scenario_id = $1 AND s.user_id = $2
+	`, scenarioID, userID).Scan(
+		&metrics.ScenarioID,
+		&metrics.TotalLocoDistance,
+		&metrics.TotalCouples,
+		&metrics.TotalDecouples,
+		&metrics.TotalSwitchCrossings,
+	); err != nil {
+		return nil, err
+	}
+	return &metrics, nil
+}
+
+func (s *PostgresStore) SaveScenarioMetrics(scenarioID string, metrics normalized.ScenarioMetrics) error {
+	_, err := s.db.Exec(`
+		INSERT INTO scenario_metrics (
+			scenario_id, total_loco_distance, total_couples, total_decouples, total_switch_crossings, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (scenario_id) DO UPDATE SET
+			total_loco_distance = EXCLUDED.total_loco_distance,
+			total_couples = EXCLUDED.total_couples,
+			total_decouples = EXCLUDED.total_decouples,
+			total_switch_crossings = EXCLUDED.total_switch_crossings,
+			updated_at = EXCLUDED.updated_at
+	`, scenarioID, metrics.TotalLocoDistance, metrics.TotalCouples, metrics.TotalDecouples, metrics.TotalSwitchCrossings, time.Now())
+	return err
 }
 
 func (s *PostgresStore) replaceNormalizedSchemeData(schemeID int, scheme normalized.Scheme) error {

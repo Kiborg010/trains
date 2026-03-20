@@ -76,6 +76,14 @@ type ScenarioDTO struct {
 	SourceHeuristicScenarioID *string `json:"source_heuristic_scenario_id,omitempty"`
 }
 
+type ScenarioMetricsDTO struct {
+	ScenarioID           string `json:"scenario_id"`
+	TotalLocoDistance    int    `json:"total_loco_distance"`
+	TotalCouples         int    `json:"total_couples"`
+	TotalDecouples       int    `json:"total_decouples"`
+	TotalSwitchCrossings int    `json:"total_switch_crossings"`
+}
+
 type UpsertNormalizedScenarioRequest struct {
 	SchemeID      int               `json:"scheme_id"`
 	Name          string            `json:"name"`
@@ -142,6 +150,12 @@ type ScenarioDetailsResponse struct {
 	Message       string            `json:"message,omitempty"`
 	Scenario      *ScenarioDTO      `json:"scenario,omitempty"`
 	ScenarioSteps []ScenarioStepDTO `json:"scenario_steps,omitempty"`
+}
+
+type ScenarioMetricsResponse struct {
+	OK      bool                `json:"ok"`
+	Message string              `json:"message,omitempty"`
+	Metrics *ScenarioMetricsDTO `json:"metrics,omitempty"`
 }
 
 func toSchemeDTO(item normalized.Scheme) SchemeDTO {
@@ -298,6 +312,16 @@ func toScenarioStepDTOs(items []normalized.ScenarioStep) []ScenarioStepDTO {
 		result = append(result, toScenarioStepDTO(item))
 	}
 	return result
+}
+
+func toScenarioMetricsDTO(item normalized.ScenarioMetrics) ScenarioMetricsDTO {
+	return ScenarioMetricsDTO{
+		ScenarioID:           item.ScenarioID,
+		TotalLocoDistance:    item.TotalLocoDistance,
+		TotalCouples:         item.TotalCouples,
+		TotalDecouples:       item.TotalDecouples,
+		TotalSwitchCrossings: item.TotalSwitchCrossings,
+	}
 }
 
 func dtoToTrack(item TrackDTO) normalized.Track {

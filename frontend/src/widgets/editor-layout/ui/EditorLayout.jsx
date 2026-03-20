@@ -8,6 +8,7 @@ import {
   deleteScheme,
   generateFullHeuristicScenario,
   getNormalizedScenarioDetails,
+  getScenarioMetrics,
   getSchemeDetails,
   listNormalizedScenarios,
   listSchemes,
@@ -1210,6 +1211,10 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [canvasTheme, setCanvasTheme] = useState(CANVAS_THEME_LIGHT);
   const [savedScenarios, setSavedScenarios] = useState([]);
   const [selectedScenarioId, setSelectedScenarioId] = useState("");
+  const [selectedMetricsScenarioId, setSelectedMetricsScenarioId] = useState("");
+  const [scenarioMetrics, setScenarioMetrics] = useState(null);
+  const [scenarioMetricsError, setScenarioMetricsError] = useState("");
+  const [isScenarioMetricsLoading, setIsScenarioMetricsLoading] = useState(false);
   const [heuristicTargetColor, setHeuristicTargetColor] = useState("");
   const [heuristicRequiredTargetCount, setHeuristicRequiredTargetCount] = useState("1");
   const [heuristicFormationTrackId, setHeuristicFormationTrackId] = useState("");
@@ -1228,6 +1233,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [isLayoutObjectsSectionCollapsed, setIsLayoutObjectsSectionCollapsed] = useState(false);
   const [isCouplingActionsSectionCollapsed, setIsCouplingActionsSectionCollapsed] = useState(false);
   const [isMovementActionsSectionCollapsed, setIsMovementActionsSectionCollapsed] = useState(false);
+  const [isMetricsSectionCollapsed, setIsMetricsSectionCollapsed] = useState(false);
 
   useEffect(() => {
     function handlePointerMove(event) {
@@ -1504,6 +1510,58 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!savedScenarios.length) {
+      setScenarioMetrics(null);
+      setScenarioMetricsError("");
+      return;
+    }
+    setSelectedMetricsScenarioId((prev) => {
+      if (prev && savedScenarios.some((scenario) => String(scenario.scenario_id) === String(prev))) {
+        return prev;
+      }
+      if (selectedScenarioId && savedScenarios.some((scenario) => String(scenario.scenario_id) === String(selectedScenarioId))) {
+        return String(selectedScenarioId);
+      }
+      return String(savedScenarios[0].scenario_id);
+    });
+  }, [savedScenarios, selectedScenarioId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadScenarioMetrics() {
+      if (!selectedMetricsScenarioId) {
+        setScenarioMetrics(null);
+        setScenarioMetricsError("");
+        return;
+      }
+
+      setIsScenarioMetricsLoading(true);
+      setScenarioMetricsError("");
+      try {
+        const response = await getScenarioMetrics(selectedMetricsScenarioId);
+        if (!cancelled) {
+          setScenarioMetrics(response.metrics || null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setScenarioMetrics(null);
+          setScenarioMetricsError(error.message || "Не удалось загрузить метрики сценария.");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsScenarioMetricsLoading(false);
+        }
+      }
+    }
+
+    loadScenarioMetrics();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMetricsScenarioId]);
 
   function getWorldPoint(event, snapPoint = true) {
     if (!canvasRef.current) {
@@ -4301,13 +4359,50 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
           {activePanel === "metrics" && (
             <div className="tools">
-              <p className="counter">Путей: {segments.length}</p>
-              <p className="counter">Составов: {vehicles.length}</p>
-              <p className="counter">Сцепок: {couplings.length}</p>
-              <p className="counter">Выбрано составов: {selectedVehicleIds.length}</p>
-              <p className="counter">Локомотив: {selectedLocomotiveId ? "выбран" : "не выбран"}</p>
-              <p className="counter">Цель: {targetPathId ? "выбрана" : "не выбрана"}</p>
-              <p className="counter">Пройдено ячеек: {movementCellsPassed}</p>
+              <section className="toolSection">
+                <div className="toolSectionHeader toolSectionHeaderCollapsible">
+                  <span>Подсчёт сценария</span>
+                  <button
+                    type="button"
+                    className="toolSectionToggle"
+                    onClick={() => setIsMetricsSectionCollapsed((value) => !value)}
+                    aria-label={isMetricsSectionCollapsed ? "Развернуть блок подсчёта" : "Свернуть блок подсчёта"}
+                    title={isMetricsSectionCollapsed ? "Развернуть" : "Свернуть"}
+                  >
+                    {isMetricsSectionCollapsed ? "▾" : "▴"}
+                  </button>
+                </div>
+                {!isMetricsSectionCollapsed && (
+                  <div className="toolSectionBody">
+                    <select
+                      className="toolInput"
+                      value={selectedMetricsScenarioId}
+                      onChange={(event) => setSelectedMetricsScenarioId(event.target.value)}
+                    >
+                      <option value="">Выбор сценария</option>
+                      {savedScenarios.map((scenario) => (
+                        <option key={`metrics-${scenario.scenario_id}`} value={String(scenario.scenario_id)}>
+                          {scenario.name || `Сценарий ${scenario.scenario_id}`}
+                        </option>
+                      ))}
+                    </select>
+
+                    {isScenarioMetricsLoading ? (
+                      <p className="counter">Загрузка метрик...</p>
+                    ) : scenarioMetricsError ? (
+                      <p className="counter">{scenarioMetricsError}</p>
+                    ) : scenarioMetrics ? (
+                      <>
+                        <p className="counter">Пройдено звеньев: {scenarioMetrics.total_loco_distance}</p>
+                        <p className="counter">Сцепок: {scenarioMetrics.total_couples}</p>
+                        <p className="counter">Расцепок: {scenarioMetrics.total_decouples}</p>
+                      </>
+                    ) : (
+                      <p className="counter">Выбери сценарий.</p>
+                    )}
+                  </div>
+                )}
+              </section>
             </div>
           )}
         </div>

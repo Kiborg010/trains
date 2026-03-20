@@ -148,6 +148,10 @@ export async function getNormalizedScenarioDetails(scenarioId) {
   return getJSON(`/normalized/scenarios/${scenarioId}/details`);
 }
 
+export async function getScenarioMetrics(scenarioId) {
+  return getJSON(`/normalized/scenarios/${scenarioId}/metrics`);
+}
+
 export async function updateNormalizedScenario(scenarioId, payload) {
   return putJSON(`/normalized/scenarios/${scenarioId}`, payload);
 }
