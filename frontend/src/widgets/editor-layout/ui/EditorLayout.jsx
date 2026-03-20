@@ -3662,6 +3662,64 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     setZoom(1);
   }
 
+  function applyZoomAtClientPoint(nextZoom, clientX, clientY) {
+    if (!canvasWrapRef.current) {
+      setZoom(nextZoom);
+      return;
+    }
+
+    const rect = canvasWrapRef.current.getBoundingClientRect();
+    if (!rect.width || !rect.height) {
+      setZoom(nextZoom);
+      return;
+    }
+
+    const worldX = camera.x + ((clientX - rect.left) / rect.width) * viewWidth;
+    const worldY = camera.y + ((clientY - rect.top) / rect.height) * viewHeight;
+    const nextViewWidth = viewport.width / nextZoom;
+    const nextViewHeight = viewport.height / nextZoom;
+    const relativeX = (clientX - rect.left) / rect.width;
+    const relativeY = (clientY - rect.top) / rect.height;
+
+    setZoom(nextZoom);
+    setCamera({
+      x: worldX - relativeX * nextViewWidth,
+      y: worldY - relativeY * nextViewHeight,
+    });
+  }
+
+  useEffect(() => {
+    const element = canvasWrapRef.current;
+    if (!element) {
+      return undefined;
+    }
+
+    function handleWheel(event) {
+      if (!event.ctrlKey) {
+        return;
+      }
+
+      event.preventDefault();
+      const direction = event.deltaY < 0 ? 1 : -1;
+      const nextZoom = clamp(
+        Number((zoom + direction * ZOOM_STEP).toFixed(2)),
+        MIN_ZOOM,
+        MAX_ZOOM
+      );
+
+      if (nextZoom === zoom) {
+        return;
+      }
+
+      applyZoomAtClientPoint(nextZoom, event.clientX, event.clientY);
+    }
+
+    element.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      element.removeEventListener("wheel", handleWheel);
+    };
+  }, [zoom, camera.x, camera.y, viewWidth, viewHeight, viewport.width, viewport.height]);
+
   const canvasGridSize = useMemo(() => computeCanvasGridSize(segments), [segments]);
   const majorCanvasGrid = canvasGridSize * 5;
   const minorVerticalGridLines = useMemo(
