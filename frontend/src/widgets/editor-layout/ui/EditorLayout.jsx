@@ -2138,21 +2138,15 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       if (!response?.scenario || !Array.isArray(response?.scenario_steps)) {
         throw new Error("Сервер не вернул готовый обычный сценарий.");
       }
-
-      const currentSnapshot = cloneLayoutState({ segments, vehicles, couplings });
-      applyLoadedScenarioDetails(
-        {
-          ok: true,
-          scenario: response.scenario,
-          scenario_steps: response.scenario_steps,
-        },
-        vehicles,
-        currentSnapshot
-      );
-      if (response?.created_scenario_id) {
-        setSelectedScenarioId(String(response.created_scenario_id));
-      }
       await refreshSavedScenarios();
+      const createdScenarioId = String(
+        response?.created_scenario_id || response?.scenario?.scenario_id || ""
+      ).trim();
+      if (!createdScenarioId) {
+        throw new Error("Сервер не вернул идентификатор созданного сценария.");
+      }
+      setSelectedScenarioId(createdScenarioId);
+      await loadScenarioById(createdScenarioId);
       setMovementHint("Эвристический сценарий сгенерирован и сразу открыт как обычный сценарий.");
     } catch (error) {
       setHeuristicDraftResult(null);
