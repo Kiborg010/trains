@@ -835,16 +835,37 @@ func (s *PostgresStore) ListScenarioStepsByScenario(userID int, scenarioID strin
 func (s *PostgresStore) GetScenarioMetrics(userID int, scenarioID string) (*normalized.ScenarioMetrics, error) {
 	var metrics normalized.ScenarioMetrics
 	if err := s.db.QueryRow(`
-		SELECT m.scenario_id, m.total_loco_distance, m.total_couples, m.total_decouples, m.total_switch_crossings
+		SELECT
+			m.scenario_id,
+			m.total_loco_distance,
+			m.total_loco_distance_meters,
+			m.empty_loco_distance,
+			m.empty_loco_distance_meters,
+			m.loaded_loco_distance,
+			m.loaded_loco_distance_meters,
+			m.total_couples,
+			m.total_decouples,
+			m.total_switch_crossings,
+			m.total_wagons_moved,
+			m.total_wagon_distance,
+			m.total_wagon_distance_meters
 		FROM scenario_metrics m
 		JOIN scenarios s ON s.scenario_id = m.scenario_id
 		WHERE m.scenario_id = $1 AND s.user_id = $2
 	`, scenarioID, userID).Scan(
 		&metrics.ScenarioID,
 		&metrics.TotalLocoDistance,
+		&metrics.TotalLocoDistanceMeters,
+		&metrics.EmptyLocoDistance,
+		&metrics.EmptyLocoDistanceMeters,
+		&metrics.LoadedLocoDistance,
+		&metrics.LoadedLocoDistanceMeters,
 		&metrics.TotalCouples,
 		&metrics.TotalDecouples,
 		&metrics.TotalSwitchCrossings,
+		&metrics.TotalWagonsMoved,
+		&metrics.TotalWagonDistance,
+		&metrics.TotalWagonDistanceMeters,
 	); err != nil {
 		return nil, err
 	}
@@ -854,15 +875,51 @@ func (s *PostgresStore) GetScenarioMetrics(userID int, scenarioID string) (*norm
 func (s *PostgresStore) SaveScenarioMetrics(scenarioID string, metrics normalized.ScenarioMetrics) error {
 	_, err := s.db.Exec(`
 		INSERT INTO scenario_metrics (
-			scenario_id, total_loco_distance, total_couples, total_decouples, total_switch_crossings, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6)
+			scenario_id,
+			total_loco_distance,
+			total_loco_distance_meters,
+			empty_loco_distance,
+			empty_loco_distance_meters,
+			loaded_loco_distance,
+			loaded_loco_distance_meters,
+			total_couples,
+			total_decouples,
+			total_switch_crossings,
+			total_wagons_moved,
+			total_wagon_distance,
+			total_wagon_distance_meters,
+			updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		ON CONFLICT (scenario_id) DO UPDATE SET
 			total_loco_distance = EXCLUDED.total_loco_distance,
+			total_loco_distance_meters = EXCLUDED.total_loco_distance_meters,
+			empty_loco_distance = EXCLUDED.empty_loco_distance,
+			empty_loco_distance_meters = EXCLUDED.empty_loco_distance_meters,
+			loaded_loco_distance = EXCLUDED.loaded_loco_distance,
+			loaded_loco_distance_meters = EXCLUDED.loaded_loco_distance_meters,
 			total_couples = EXCLUDED.total_couples,
 			total_decouples = EXCLUDED.total_decouples,
 			total_switch_crossings = EXCLUDED.total_switch_crossings,
+			total_wagons_moved = EXCLUDED.total_wagons_moved,
+			total_wagon_distance = EXCLUDED.total_wagon_distance,
+			total_wagon_distance_meters = EXCLUDED.total_wagon_distance_meters,
 			updated_at = EXCLUDED.updated_at
-	`, scenarioID, metrics.TotalLocoDistance, metrics.TotalCouples, metrics.TotalDecouples, metrics.TotalSwitchCrossings, time.Now())
+	`,
+		scenarioID,
+		metrics.TotalLocoDistance,
+		metrics.TotalLocoDistanceMeters,
+		metrics.EmptyLocoDistance,
+		metrics.EmptyLocoDistanceMeters,
+		metrics.LoadedLocoDistance,
+		metrics.LoadedLocoDistanceMeters,
+		metrics.TotalCouples,
+		metrics.TotalDecouples,
+		metrics.TotalSwitchCrossings,
+		metrics.TotalWagonsMoved,
+		metrics.TotalWagonDistance,
+		metrics.TotalWagonDistanceMeters,
+		time.Now(),
+	)
 	return err
 }
 

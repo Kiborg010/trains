@@ -100,8 +100,18 @@ func TestComputeScenarioMetrics(t *testing.T) {
 				Object2ID: stringPtr("wagon-1"),
 			},
 			{
-				StepID:    "step-3",
-				StepOrder: 3,
+				StepID:      "step-3",
+				StepOrder:   3,
+				StepType:    "move_loco",
+				Object1ID:   stringPtr("loco-1"),
+				FromTrackID: stringPtr("track-2"),
+				FromIndex:   intPtr(1),
+				ToTrackID:   stringPtr("track-1"),
+				ToIndex:     intPtr(1),
+			},
+			{
+				StepID:    "step-4",
+				StepOrder: 4,
 				StepType:  "decouple",
 				Object1ID: stringPtr("loco-1"),
 				Object2ID: stringPtr("wagon-1"),
@@ -120,21 +130,36 @@ func TestComputeScenarioMetrics(t *testing.T) {
 	if metrics.TotalLocoDistance <= 0 {
 		t.Fatalf("expected positive loco distance, got %d", metrics.TotalLocoDistance)
 	}
+	if metrics.EmptyLocoDistance <= 0 {
+		t.Fatalf("expected positive empty loco distance, got %d", metrics.EmptyLocoDistance)
+	}
+	if metrics.LoadedLocoDistance <= 0 {
+		t.Fatalf("expected positive loaded loco distance, got %d", metrics.LoadedLocoDistance)
+	}
+	if metrics.TotalLocoDistanceMeters <= 0 {
+		t.Fatalf("expected positive loco distance meters, got %f", metrics.TotalLocoDistanceMeters)
+	}
 	if metrics.TotalCouples != 1 {
 		t.Fatalf("expected 1 couple, got %d", metrics.TotalCouples)
 	}
 	if metrics.TotalDecouples != 1 {
 		t.Fatalf("expected 1 decouple, got %d", metrics.TotalDecouples)
 	}
-	if metrics.TotalSwitchCrossings != 1 {
-		t.Fatalf("expected 1 switch crossing, got %d", metrics.TotalSwitchCrossings)
+	if metrics.TotalSwitchCrossings != 2 {
+		t.Fatalf("expected 2 switch crossings, got %d", metrics.TotalSwitchCrossings)
+	}
+	if metrics.TotalWagonsMoved != 1 {
+		t.Fatalf("expected 1 moved wagon, got %d", metrics.TotalWagonsMoved)
+	}
+	if metrics.TotalWagonDistance <= 0 {
+		t.Fatalf("expected positive wagon distance, got %d", metrics.TotalWagonDistance)
 	}
 
 	savedMetrics, err := store.GetScenarioMetrics(user.ID, scenarioID)
 	if err != nil {
 		t.Fatalf("load saved metrics: %v", err)
 	}
-	if savedMetrics.TotalSwitchCrossings != 1 {
+	if savedMetrics.TotalSwitchCrossings != 2 || savedMetrics.TotalWagonsMoved != 1 {
 		t.Fatalf("expected saved metrics, got %#v", savedMetrics)
 	}
 }

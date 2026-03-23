@@ -69,11 +69,19 @@ type Scenario struct {
 }
 
 type ScenarioMetrics struct {
-	ScenarioID           string `json:"scenario_id"`
-	TotalLocoDistance    int    `json:"total_loco_distance"`
-	TotalCouples         int    `json:"total_couples"`
-	TotalDecouples       int    `json:"total_decouples"`
-	TotalSwitchCrossings int    `json:"total_switch_crossings"`
+	ScenarioID               string  `json:"scenario_id"`
+	TotalLocoDistance        int     `json:"total_loco_distance"`
+	TotalLocoDistanceMeters  float64 `json:"total_loco_distance_meters"`
+	EmptyLocoDistance        int     `json:"empty_loco_distance"`
+	EmptyLocoDistanceMeters  float64 `json:"empty_loco_distance_meters"`
+	LoadedLocoDistance       int     `json:"loaded_loco_distance"`
+	LoadedLocoDistanceMeters float64 `json:"loaded_loco_distance_meters"`
+	TotalCouples             int     `json:"total_couples"`
+	TotalDecouples           int     `json:"total_decouples"`
+	TotalSwitchCrossings     int     `json:"total_switch_crossings"`
+	TotalWagonsMoved         int     `json:"total_wagons_moved"`
+	TotalWagonDistance       int     `json:"total_wagon_distance"`
+	TotalWagonDistanceMeters float64 `json:"total_wagon_distance_meters"`
 }
 
 type ScenarioStep struct {

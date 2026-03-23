@@ -4525,7 +4525,10 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                       <p className="counter">{scenarioMetricsError}</p>
                     ) : scenarioMetrics ? (
                       <>
-                        <p className="counter">Пройдено звеньев: {scenarioMetrics.total_loco_distance}</p>
+                        <p className="counter">Пройдено локомотивом: {scenarioMetrics.total_loco_distance} зв. / {scenarioMetrics.total_loco_distance_meters} м</p>
+                        <p className="counter">Пустой пробег локомотива: {scenarioMetrics.empty_loco_distance} зв. / {scenarioMetrics.empty_loco_distance_meters} м</p>
+                        <p className="counter">Пробег с вагонами: {scenarioMetrics.loaded_loco_distance} зв. / {scenarioMetrics.loaded_loco_distance_meters} м</p>
+                        <p className="counter">Суммарно вагонов перевезено: {scenarioMetrics.total_wagons_moved}</p>
                         <p className="counter">Сцепок: {scenarioMetrics.total_couples}</p>
                         <p className="counter">Расцепок: {scenarioMetrics.total_decouples}</p>
                       </>
