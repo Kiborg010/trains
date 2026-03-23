@@ -8,6 +8,7 @@ import {
   deleteScheme,
   generateFullHeuristicScenario,
   getNormalizedScenarioDetails,
+  getHeuristicScenarioDetails,
   getScenarioMetrics,
   getSchemeDetails,
   listNormalizedScenarios,
@@ -1165,6 +1166,18 @@ function buildScenarioStepsFromNormalizedScenario(details, sourceVehicles = []) 
   return steps;
 }
 
+function extractScenarioTargetColor(details) {
+  const scenarioSteps = Array.isArray(details?.scenario_steps) ? details.scenario_steps : [];
+  for (const step of scenarioSteps) {
+    const payload = step?.payload_json;
+    const color = String(payload?.target_color || "").trim();
+    if (color) {
+      return color;
+    }
+  }
+  return "";
+}
+
 export default function EditorLayout({ activePanel, setActivePanel }) {
   const canvasRef = useRef(null);
   const canvasWrapRef = useRef(null);
@@ -1229,6 +1242,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [savedLayouts, setSavedLayouts] = useState([]);
   const [selectedLayoutId, setSelectedLayoutId] = useState("");
   const [scenarioName, setScenarioName] = useState("Сценарий 1");
+  const [scenarioTargetColor, setScenarioTargetColor] = useState("");
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const [canvasTheme, setCanvasTheme] = useState(CANVAS_THEME_LIGHT);
   const [savedScenarios, setSavedScenarios] = useState([]);
@@ -1848,6 +1862,20 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   async function loadScenarioById(scenarioId) {
     try {
       const scenarioDetails = await getNormalizedScenarioDetails(scenarioId);
+      let resolvedScenarioTargetColor = extractScenarioTargetColor(scenarioDetails);
+      const sourceHeuristicScenarioId = String(
+        scenarioDetails?.scenario?.source_heuristic_scenario_id || ""
+      ).trim();
+      if (sourceHeuristicScenarioId) {
+        try {
+          const heuristicDetails = await getHeuristicScenarioDetails(sourceHeuristicScenarioId);
+          resolvedScenarioTargetColor = String(
+            heuristicDetails?.heuristic_scenario?.target_color || resolvedScenarioTargetColor || ""
+          ).trim();
+        } catch {
+          // Keep fallback color inferred from scenario steps if heuristic details are unavailable.
+        }
+      }
       const schemeId = scenarioDetails.scenario?.scheme_id;
       let sourceVehicles = vehicles;
       let initialSnapshot = cloneLayoutState({ segments, vehicles, couplings });
@@ -1862,6 +1890,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         );
         setCouplings(mappedState.couplings);
       }
+      setScenarioTargetColor(resolvedScenarioTargetColor);
       applyLoadedScenarioDetails(scenarioDetails, sourceVehicles, initialSnapshot);
       setMovementHint("Сценарий загружен.");
     } catch (error) {
@@ -2057,6 +2086,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       await deleteNormalizedScenario(selectedScenarioId);
       setSelectedScenarioId("");
       setScenarioSteps([]);
+      setScenarioTargetColor("");
       setCurrentScenarioStep(0);
       setScenarioStateHistory([]);
       setScenarioInitialState(null);
@@ -4528,6 +4558,19 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
       <main className={`workspace workspaceTheme-${canvasTheme}`}>
         <header className={`toolbar toolbarTheme-${canvasTheme}`}>
+          <div className="toolbarInfo">
+            <span className="toolbarInfoLabel">Целевой цвет сценария:</span>
+            {scenarioTargetColor ? (
+              <span
+                className="toolbarColorChip"
+                style={{ backgroundColor: scenarioTargetColor }}
+                title={scenarioTargetColor}
+                aria-label={`Целевой цвет сценария ${scenarioTargetColor}`}
+              />
+            ) : (
+              <span className="toolbarInfoValue">-</span>
+            )}
+          </div>
           <div className="toolbarActions">
             <button
               type="button"

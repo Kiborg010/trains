@@ -445,6 +445,8 @@ select.toolInput::-ms-expand {
 }
 
 .toolbar {
+  display: flex;
+  align-items: center;
   justify-content: flex-end;
 }
 
@@ -473,6 +475,34 @@ select.toolInput::-ms-expand {
   flex: 0 0 auto;
   margin-left: auto;
   margin-right: 200px;
+}
+
+.toolbarInfo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding-left: 6px;
+}
+
+.toolbarInfoLabel {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.toolbarInfoValue {
+  font-size: 15px;
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+.toolbarColorChip {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  flex: 0 0 auto;
 }
 
 .canvasWrap {
