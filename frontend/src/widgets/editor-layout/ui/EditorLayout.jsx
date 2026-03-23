@@ -144,18 +144,6 @@ function computeCanvasGridSize(segments) {
   return bestValue;
 }
 
-function buildGridLines(start, end, step) {
-  if (!Number.isFinite(step) || step <= 0 || !Number.isFinite(start) || !Number.isFinite(end)) {
-    return [];
-  }
-  const first = Math.floor(start / step) * step;
-  const lines = [];
-  for (let value = first; value <= end + step; value += step) {
-    lines.push(roundGridValue(value));
-  }
-  return lines;
-}
-
 function getSegmentLabelPosition(segment, distance = 30) {
   const midpointX = (segment.from.x + segment.to.x) / 2;
   const midpointY = (segment.from.y + segment.to.y) / 2;
@@ -1181,6 +1169,10 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const canvasRef = useRef(null);
   const canvasWrapRef = useRef(null);
   const panStateRef = useRef(null);
+  const panAnimationFrameRef = useRef(null);
+  const pendingPanDeltaRef = useRef(null);
+  const mousePointAnimationFrameRef = useRef(null);
+  const pendingMousePointRef = useRef(null);
   const movementTimerRef = useRef(null);
   const movementRunIdRef = useRef(0);
   const skipAutoResolvePassesRef = useRef(0);
@@ -1446,14 +1438,37 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       }
       const deltaX = event.clientX - panStateRef.current.startX;
       const deltaY = event.clientY - panStateRef.current.startY;
-      setCamera({
-        x: panStateRef.current.startCamera.x - deltaX / zoom,
-        y: panStateRef.current.startCamera.y - deltaY / zoom,
+      pendingPanDeltaRef.current = { deltaX, deltaY };
+
+      if (panAnimationFrameRef.current) {
+        return;
+      }
+
+      panAnimationFrameRef.current = window.requestAnimationFrame(() => {
+        panAnimationFrameRef.current = null;
+        if (!pendingPanDeltaRef.current || !canvasRef.current) {
+          return;
+        }
+        canvasRef.current.style.transform = `translate(${pendingPanDeltaRef.current.deltaX}px, ${pendingPanDeltaRef.current.deltaY}px)`;
       });
     }
 
     function handlePanEnd() {
+      if (panStateRef.current && pendingPanDeltaRef.current) {
+        setCamera({
+          x: panStateRef.current.startCamera.x - pendingPanDeltaRef.current.deltaX / zoom,
+          y: panStateRef.current.startCamera.y - pendingPanDeltaRef.current.deltaY / zoom,
+        });
+      }
+      if (canvasRef.current) {
+        canvasRef.current.style.transform = "";
+      }
       panStateRef.current = null;
+      pendingPanDeltaRef.current = null;
+      if (panAnimationFrameRef.current) {
+        window.cancelAnimationFrame(panAnimationFrameRef.current);
+        panAnimationFrameRef.current = null;
+      }
       setIsPanning(false);
     }
 
@@ -1469,6 +1484,15 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     return () => {
       if (movementTimerRef.current) {
         clearInterval(movementTimerRef.current);
+      }
+      if (canvasRef.current) {
+        canvasRef.current.style.transform = "";
+      }
+      if (panAnimationFrameRef.current) {
+        window.cancelAnimationFrame(panAnimationFrameRef.current);
+      }
+      if (mousePointAnimationFrameRef.current) {
+        window.cancelAnimationFrame(mousePointAnimationFrameRef.current);
       }
     };
   }, []);
@@ -3230,9 +3254,21 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   }
 
   function handleMouseMove(event) {
+    if (isPanning) {
+      return;
+    }
     const point = getWorldPoint(event, true);
     const rawPoint = getWorldPoint(event, false);
-    setMousePoint(point);
+    pendingMousePointRef.current = point;
+    if (!mousePointAnimationFrameRef.current) {
+      mousePointAnimationFrameRef.current = window.requestAnimationFrame(() => {
+        mousePointAnimationFrameRef.current = null;
+        if (!pendingMousePointRef.current) {
+          return;
+        }
+        setMousePoint(pendingMousePointRef.current);
+      });
+    }
 
     if (selectionBox && isEditMode) {
       setSelectionBox((prev) => (prev ? { ...prev, end: rawPoint } : prev));
@@ -3752,22 +3788,6 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
   const canvasGridSize = useMemo(() => computeCanvasGridSize(segments), [segments]);
   const majorCanvasGrid = canvasGridSize * 5;
-  const minorVerticalGridLines = useMemo(
-    () => buildGridLines(camera.x, camera.x + viewWidth, canvasGridSize),
-    [camera.x, viewWidth, canvasGridSize]
-  );
-  const minorHorizontalGridLines = useMemo(
-    () => buildGridLines(camera.y, camera.y + viewHeight, canvasGridSize),
-    [camera.y, viewHeight, canvasGridSize]
-  );
-  const majorVerticalGridLines = useMemo(
-    () => buildGridLines(camera.x, camera.x + viewWidth, majorCanvasGrid),
-    [camera.x, viewWidth, majorCanvasGrid]
-  );
-  const majorHorizontalGridLines = useMemo(
-    () => buildGridLines(camera.y, camera.y + viewHeight, majorCanvasGrid),
-    [camera.y, viewHeight, majorCanvasGrid]
-  );
   const selectionRect = selectionBox ? normalizeRect(selectionBox.start, selectionBox.end) : null;
   const activeModeLabel =
     mode === "drawTrack"
@@ -4556,61 +4576,59 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
           >
+            <defs>
+              <pattern
+                id="canvas-grid-minor"
+                x="0"
+                y="0"
+                width={canvasGridSize}
+                height={canvasGridSize}
+                patternUnits="userSpaceOnUse"
+              >
+                <path
+                  d={`M ${canvasGridSize} 0 L 0 0 0 ${canvasGridSize}`}
+                  fill="none"
+                  stroke={canvasColors.gridMinor}
+                  strokeWidth="1"
+                  vectorEffect="non-scaling-stroke"
+                  shapeRendering="crispEdges"
+                />
+              </pattern>
+              <pattern
+                id="canvas-grid-major"
+                x="0"
+                y="0"
+                width={majorCanvasGrid}
+                height={majorCanvasGrid}
+                patternUnits="userSpaceOnUse"
+              >
+                <path
+                  d={`M ${majorCanvasGrid} 0 L 0 0 0 ${majorCanvasGrid}`}
+                  fill="none"
+                  stroke={canvasColors.gridMajor}
+                  strokeWidth="1.2"
+                  vectorEffect="non-scaling-stroke"
+                  shapeRendering="crispEdges"
+                />
+              </pattern>
+            </defs>
             <rect x={camera.x} y={camera.y} width={viewWidth} height={viewHeight} fill={canvasColors.background} />
-            <g aria-hidden="true">
-              {minorVerticalGridLines.map((x) => (
-                <line
-                  key={`grid-minor-v-${x}`}
-                  x1={x}
-                  y1={camera.y}
-                  x2={x}
-                  y2={camera.y + viewHeight}
-                  stroke={canvasColors.gridMinor}
-                  strokeWidth="1"
-                  vectorEffect="non-scaling-stroke"
-                  shapeRendering="crispEdges"
-                />
-              ))}
-              {minorHorizontalGridLines.map((y) => (
-                <line
-                  key={`grid-minor-h-${y}`}
-                  x1={camera.x}
-                  y1={y}
-                  x2={camera.x + viewWidth}
-                  y2={y}
-                  stroke={canvasColors.gridMinor}
-                  strokeWidth="1"
-                  vectorEffect="non-scaling-stroke"
-                  shapeRendering="crispEdges"
-                />
-              ))}
-              {majorVerticalGridLines.map((x) => (
-                <line
-                  key={`grid-major-v-${x}`}
-                  x1={x}
-                  y1={camera.y}
-                  x2={x}
-                  y2={camera.y + viewHeight}
-                  stroke={canvasColors.gridMajor}
-                  strokeWidth="1.2"
-                  vectorEffect="non-scaling-stroke"
-                  shapeRendering="crispEdges"
-                />
-              ))}
-              {majorHorizontalGridLines.map((y) => (
-                <line
-                  key={`grid-major-h-${y}`}
-                  x1={camera.x}
-                  y1={y}
-                  x2={camera.x + viewWidth}
-                  y2={y}
-                  stroke={canvasColors.gridMajor}
-                  strokeWidth="1.2"
-                  vectorEffect="non-scaling-stroke"
-                  shapeRendering="crispEdges"
-                />
-              ))}
-            </g>
+            <rect
+              x={camera.x}
+              y={camera.y}
+              width={viewWidth}
+              height={viewHeight}
+              fill="url(#canvas-grid-minor)"
+              aria-hidden="true"
+            />
+            <rect
+              x={camera.x}
+              y={camera.y}
+              width={viewWidth}
+              height={viewHeight}
+              fill="url(#canvas-grid-major)"
+              aria-hidden="true"
+            />
 
             {segments.map((segment) => {
               const pathName = getPathDisplayName(segment.id, segmentDisplayNameById);
@@ -4651,40 +4669,44 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                       Путь {pathName} ({PATH_TYPE_LABELS[normalizePathType(segment.type)]})
                     </title>
                   </line>
-                  <line
-                    x1={midpointX}
-                    y1={midpointY}
-                    x2={labelPosition.x}
-                    y2={labelPosition.y}
-                    stroke={canvasColors.pathLabelLeader}
-                    strokeWidth="1"
-                    vectorEffect="non-scaling-stroke"
-                    pointerEvents="none"
-                  />
-                  <rect
-                    x={labelPosition.x - labelWidth / 2}
-                    y={labelPosition.y - labelHeight / 2}
-                    width={labelWidth}
-                    height={labelHeight}
-                    rx="7"
-                    fill={canvasColors.pathLabelBackdrop}
-                    stroke={canvasColors.pathLabelBorder}
-                    strokeWidth="1"
-                    pointerEvents="none"
-                  />
-                  <text
-                    x={labelPosition.x}
-                    y={labelPosition.y}
-                    dy="0.35em"
-                    fill={canvasColors.pathLabel}
-                    fontSize="14"
-                    fontWeight="700"
-                    textAnchor="middle"
-                    pointerEvents="none"
-                    style={{ userSelect: "none" }}
-                  >
-                    {pathName}
-                  </text>
+                  {!isPanning && (
+                    <>
+                      <line
+                        x1={midpointX}
+                        y1={midpointY}
+                        x2={labelPosition.x}
+                        y2={labelPosition.y}
+                        stroke={canvasColors.pathLabelLeader}
+                        strokeWidth="1"
+                        vectorEffect="non-scaling-stroke"
+                        pointerEvents="none"
+                      />
+                      <rect
+                        x={labelPosition.x - labelWidth / 2}
+                        y={labelPosition.y - labelHeight / 2}
+                        width={labelWidth}
+                        height={labelHeight}
+                        rx="7"
+                        fill={canvasColors.pathLabelBackdrop}
+                        stroke={canvasColors.pathLabelBorder}
+                        strokeWidth="1"
+                        pointerEvents="none"
+                      />
+                      <text
+                        x={labelPosition.x}
+                        y={labelPosition.y}
+                        dy="0.35em"
+                        fill={canvasColors.pathLabel}
+                        fontSize="14"
+                        fontWeight="700"
+                        textAnchor="middle"
+                        pointerEvents="none"
+                        style={{ userSelect: "none" }}
+                      >
+                        {pathName}
+                      </text>
+                    </>
+                  )}
                 </g>
               );
             })}
@@ -4709,27 +4731,28 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
               );
             })}
 
-            {railSlots.map((slot) => (
-              <circle
-                key={`slot-${slot.id}`}
-                cx={slot.x}
-                cy={slot.y}
-                r="4.5"
-                fill={
-                  targetPathId === slot.pathId && targetPathIndex === slot.index
-                    ? "#22c55e"
-                    : occupiedSlots.has(slot.id)
-                      ? canvasColors.occupiedSlot
-                      : canvasColors.emptySlot
-                }
-                className="slotPoint"
-                onClick={(event) => handleSlotClick(event, slot)}
-              >
-                <title>
-                  Путь {getPathDisplayName(slot.pathId, segmentDisplayNameById)}, звено: {slot.index}
-                </title>
-             </circle>
-            ))}
+            {!isPanning &&
+              railSlots.map((slot) => (
+                <circle
+                  key={`slot-${slot.id}`}
+                  cx={slot.x}
+                  cy={slot.y}
+                  r="4.5"
+                  fill={
+                    targetPathId === slot.pathId && targetPathIndex === slot.index
+                      ? "#22c55e"
+                      : occupiedSlots.has(slot.id)
+                        ? canvasColors.occupiedSlot
+                        : canvasColors.emptySlot
+                  }
+                  className="slotPoint"
+                  onClick={(event) => handleSlotClick(event, slot)}
+                >
+                  <title>
+                    Путь {getPathDisplayName(slot.pathId, segmentDisplayNameById)}, звено: {slot.index}
+                  </title>
+               </circle>
+              ))}
 
             {vehicles.map((vehicle) => {
               const vehicleLabel = vehicleCodeById.get(vehicle.id) || vehicle.id;
@@ -4769,7 +4792,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
               );
             })}
 
-            {nodes.map((node) => {
+            {!isPanning && nodes.map((node) => {
               const nodeKey = `${keyOf(node.x, node.y)}:${(node.endpoints || []).map((item) => `${item.segmentId}:${item.endpoint}`).join("|")}`;
 
               if (isEditMode) {
