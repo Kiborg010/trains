@@ -115,3 +115,58 @@ func TestJWT(t *testing.T) {
 		t.Fatal("expected JWT verification to fail with wrong secret")
 	}
 }
+
+func TestRegisterHandlerDuplicateDoesNotChangePassword(t *testing.T) {
+	setupAuthTestStore()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/auth/register", registerHandler)
+
+	firstPayload := RegisterRequest{
+		Email:    "dup@example.com",
+		Password: "password123",
+	}
+
+	firstBody, _ := json.Marshal(firstPayload)
+	firstReq := httptest.NewRequest("POST", "/api/auth/register", bytes.NewReader(firstBody))
+	firstW := httptest.NewRecorder()
+	mux.ServeHTTP(firstW, firstReq)
+
+	if firstW.Code != http.StatusCreated {
+		t.Fatalf("expected first registration status 201, got %d", firstW.Code)
+	}
+
+	originalUser, err := appStore.GetUserByEmail(firstPayload.Email)
+	if err != nil {
+		t.Fatalf("failed to load original user: %v", err)
+	}
+	originalHash := originalUser.PasswordHash
+
+	secondPayload := RegisterRequest{
+		Email:    "dup@example.com",
+		Password: "newpassword456",
+	}
+
+	secondBody, _ := json.Marshal(secondPayload)
+	secondReq := httptest.NewRequest("POST", "/api/auth/register", bytes.NewReader(secondBody))
+	secondW := httptest.NewRecorder()
+	mux.ServeHTTP(secondW, secondReq)
+
+	if secondW.Code != http.StatusConflict {
+		t.Fatalf("expected duplicate registration status 409, got %d", secondW.Code)
+	}
+
+	sameUser, err := appStore.GetUserByEmail(firstPayload.Email)
+	if err != nil {
+		t.Fatalf("failed to reload user after duplicate registration: %v", err)
+	}
+
+	if sameUser.PasswordHash != originalHash {
+		t.Fatal("duplicate registration changed the stored password hash")
+	}
+	if !VerifyPassword(sameUser.PasswordHash, firstPayload.Password) {
+		t.Fatal("original password should remain valid after duplicate registration")
+	}
+	if VerifyPassword(sameUser.PasswordHash, secondPayload.Password) {
+		t.Fatal("new password from duplicate registration must not become valid")
+	}
+}

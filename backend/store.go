@@ -1,10 +1,11 @@
-package main
+﻿package main
 
 import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -168,7 +169,7 @@ func (s *InMemoryStore) GetExecution(id string, userID int) (*Execution, error) 
 
 	execution, ok := s.executionsByID[id]
 	if !ok || execution.UserID != userID {
-		return nil, fmt.Errorf("выполнение не найдено")
+		return nil, fmt.Errorf("РІС‹РїРѕР»РЅРµРЅРёРµ РЅРµ РЅР°Р№РґРµРЅРѕ")
 	}
 	return &execution, nil
 }
@@ -179,7 +180,7 @@ func (s *InMemoryStore) UpdateExecution(id string, userID int, execution Executi
 
 	existing, ok := s.executionsByID[id]
 	if !ok || existing.UserID != userID {
-		return fmt.Errorf("выполнение не найдено")
+		return fmt.Errorf("РІС‹РїРѕР»РЅРµРЅРёРµ РЅРµ РЅР°Р№РґРµРЅРѕ")
 	}
 	execution.ID = id
 	execution.UserID = userID
@@ -215,7 +216,7 @@ func (s *PostgresStore) CreateUser(email string, passwordHash string) (*User, er
 		email, passwordHash, time.Now(),
 	).Scan(&id, &createdAt)
 	if err != nil {
-		if err.Error() == "pq: duplicate key value violates unique constraint \"users_email_key\"" {
+		if strings.Contains(err.Error(), "users_email_key") {
 			return nil, ErrUserExists
 		}
 		return nil, err
@@ -298,7 +299,7 @@ func (s *PostgresStore) SaveExecution(userID int, scenarioID string) (string, er
 func (s *PostgresStore) GetExecution(id string, userID int) (*Execution, error) {
 	executionID, err := strconv.Atoi(id)
 	if err != nil {
-		return nil, fmt.Errorf("некорректный идентификатор выполнения")
+		return nil, fmt.Errorf("РЅРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РёРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РІС‹РїРѕР»РЅРµРЅРёСЏ")
 	}
 
 	var execution Execution
@@ -309,7 +310,7 @@ func (s *PostgresStore) GetExecution(id string, userID int) (*Execution, error) 
 		executionID, userID,
 	).Scan(&execution.ID, &execution.UserID, &execution.ScenarioID, &execution.Status, &execution.CurrentStep, &stateJSON, &logJSON)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("выполнение не найдено")
+		return nil, fmt.Errorf("РІС‹РїРѕР»РЅРµРЅРёРµ РЅРµ РЅР°Р№РґРµРЅРѕ")
 	}
 	if err != nil {
 		return nil, err
@@ -327,7 +328,7 @@ func (s *PostgresStore) GetExecution(id string, userID int) (*Execution, error) 
 func (s *PostgresStore) UpdateExecution(id string, userID int, execution Execution) error {
 	executionID, err := strconv.Atoi(id)
 	if err != nil {
-		return fmt.Errorf("некорректный идентификатор выполнения")
+		return fmt.Errorf("РЅРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РёРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РІС‹РїРѕР»РЅРµРЅРёСЏ")
 	}
 
 	stateJSON, err := json.Marshal(execution.State)
@@ -351,7 +352,8 @@ func (s *PostgresStore) UpdateExecution(id string, userID int, execution Executi
 		return err
 	}
 	if rows == 0 {
-		return fmt.Errorf("выполнение не найдено")
+		return fmt.Errorf("РІС‹РїРѕР»РЅРµРЅРёРµ РЅРµ РЅР°Р№РґРµРЅРѕ")
 	}
 	return nil
 }
+
