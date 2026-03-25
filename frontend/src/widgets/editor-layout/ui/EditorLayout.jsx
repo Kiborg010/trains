@@ -2458,7 +2458,9 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         return {
           vehicles: instantVehicles,
           couplings: sourceCouplings,
-          timeline: [],
+          // Keep the full movement timeline in history even when the jump itself
+          // is applied instantly. This allows Prev/Next to always replay animation.
+          timeline: cloneTimeline(timeline),
           lastLocomotiveId: target.id,
           lastTargetPathId: expectedToPathId,
           lastTargetIndex: step.payload.toIndex,
