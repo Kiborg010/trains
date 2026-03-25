@@ -24,6 +24,7 @@ const DEFAULT_VIEWPORT_HEIGHT = 700;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2.5;
 const ZOOM_STEP = 0.1;
+const ZOOM_INTERACTION_SETTLE_MS = 140;
 const SCENARIO_STEP_MOVE = "MOVE_LOCO";
 const SCENARIO_STEP_MOVE_GROUP = "MOVE_GROUP";
 const SCENARIO_STEP_COUPLE = "COUPLE";
@@ -1186,6 +1187,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const pendingPanDeltaRef = useRef(null);
   const mousePointAnimationFrameRef = useRef(null);
   const pendingMousePointRef = useRef(null);
+  const zoomInteractionTimerRef = useRef(null);
   const movementTimerRef = useRef(null);
   const movementRunIdRef = useRef(0);
   const skipAutoResolvePassesRef = useRef(0);
@@ -1209,6 +1211,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [dragState, setDragState] = useState(null);
   const [selectionBox, setSelectionBox] = useState(null);
   const [isPanning, setIsPanning] = useState(false);
+  const [isZooming, setIsZooming] = useState(false);
 
   const [vehicles, setVehicles] = useState([]);
   const [selectedVehicleIds, setSelectedVehicleIds] = useState([]);
@@ -1301,6 +1304,17 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     document.body.style.userSelect = "none";
   }
 
+  function markZoomInteraction() {
+    setIsZooming(true);
+    if (zoomInteractionTimerRef.current) {
+      clearTimeout(zoomInteractionTimerRef.current);
+    }
+    zoomInteractionTimerRef.current = window.setTimeout(() => {
+      zoomInteractionTimerRef.current = null;
+      setIsZooming(false);
+    }, ZOOM_INTERACTION_SETTLE_MS);
+  }
+
   const viewWidth = viewport.width / zoom;
   const viewHeight = viewport.height / zoom;
   const isManeuversPanel = activePanel === "maneuvers";
@@ -1311,6 +1325,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     isManeuversPanel && (mode === "placeWagon" || mode === "placeLocomotive");
   const isMoveMode = isMovementPanel && mode === "move";
   const isPaintMode = isManeuversPanel && mode === "paintWagon";
+  const isCanvasInteractionOptimized = isPanning || isZooming;
 
   const selectedSegmentSet = useMemo(() => new Set(selectedSegmentIds), [selectedSegmentIds]);
   const selectedVehicleSet = useMemo(() => new Set(selectedVehicleIds), [selectedVehicleIds]);
@@ -1507,6 +1522,9 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       }
       if (mousePointAnimationFrameRef.current) {
         window.cancelAnimationFrame(mousePointAnimationFrameRef.current);
+      }
+      if (zoomInteractionTimerRef.current) {
+        clearTimeout(zoomInteractionTimerRef.current);
       }
     };
   }, []);
@@ -3417,7 +3435,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   }
 
   function handleCanvasWrapMouseDown(event) {
-    if (event.button !== 1) {
+    if (event.button !== 1 && event.button !== 2) {
       return;
     }
     event.preventDefault();
@@ -3743,18 +3761,22 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   }
 
   function zoomIn() {
+    markZoomInteraction();
     setZoom((prev) => clamp(Number((prev + ZOOM_STEP).toFixed(2)), MIN_ZOOM, MAX_ZOOM));
   }
 
   function zoomOut() {
+    markZoomInteraction();
     setZoom((prev) => clamp(Number((prev - ZOOM_STEP).toFixed(2)), MIN_ZOOM, MAX_ZOOM));
   }
 
   function resetZoom() {
+    markZoomInteraction();
     setZoom(1);
   }
 
   function applyZoomAtClientPoint(nextZoom, clientX, clientY) {
+    markZoomInteraction();
     if (!canvasWrapRef.current) {
       setZoom(nextZoom);
       return;
@@ -4605,6 +4627,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
               event.preventDefault();
             }
           }}
+          onContextMenu={(event) => event.preventDefault()}
         >
           <svg
             ref={canvasRef}
@@ -4711,7 +4734,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                       Путь {pathName} ({PATH_TYPE_LABELS[normalizePathType(segment.type)]})
                     </title>
                   </line>
-                  {!isPanning && (
+                  {!isCanvasInteractionOptimized && (
                     <>
                       <line
                         x1={midpointX}
@@ -4773,7 +4796,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
               );
             })}
 
-            {!isPanning &&
+            {!isCanvasInteractionOptimized &&
               railSlots.map((slot) => (
                 <circle
                   key={`slot-${slot.id}`}
