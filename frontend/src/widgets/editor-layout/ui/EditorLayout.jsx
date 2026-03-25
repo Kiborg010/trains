@@ -2648,17 +2648,24 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
     }
   }
 
-  async function handlePrevScenarioStep() {
+  async function playPreviousScenarioStepAnimated(options = {}) {
+    const {
+      stepPosition = currentScenarioStep,
+      history = scenarioStateHistory,
+      activeVehicles = vehicles,
+      activeCouplings = couplings,
+    } = options;
+
     if (isMoving) {
-      return;
+      return false;
     }
-    if (currentScenarioStep <= 0 || !scenarioStateHistory.length) {
+    if (stepPosition <= 0 || !history.length) {
       setMovementHint("Нет предыдущего шага для отката.");
-      return;
+      return false;
     }
 
-    const entryIndex = currentScenarioStep - 1;
-    const historyEntry = scenarioStateHistory[entryIndex];
+    const entryIndex = stepPosition - 1;
+    const historyEntry = history[entryIndex];
     const previousSnapshot = historyEntry?.beforeState || scenarioInitialState || {};
     const shouldAnimateReverseMove =
       historyEntry?.stepType === SCENARIO_STEP_MOVE &&
@@ -2669,25 +2676,30 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       const reverseTimeline = cloneTimeline(historyEntry.timeline).reverse();
       const reverseResult = await playTimeline(
         reverseTimeline,
-        `Откат шага ${currentScenarioStep}/${scenarioSteps.length}: движение`,
-        vehicles.map((vehicle) => ({ ...vehicle })),
-        couplings.map((coupling) => ({ ...coupling }))
+        `Откат шага ${stepPosition}/${scenarioSteps.length}: движение`,
+        activeVehicles.map((vehicle) => ({ ...vehicle })),
+        activeCouplings.map((coupling) => ({ ...coupling }))
       );
       if (!reverseResult.ok) {
         setMovementHint("Не удалось выполнить обратную анимацию шага.");
-        return;
+        return false;
       }
     }
 
     applyLayoutSnapshot(previousSnapshot);
-    setCurrentScenarioStep((prev) => Math.max(0, prev - 1));
+    setCurrentScenarioStep(Math.max(0, entryIndex));
     setScenarioExecutingStep(null);
-    setScenarioViewMode(currentScenarioStep - 1 <= 0 ? "start" : "step");
+    setScenarioViewMode(entryIndex <= 0 ? "start" : "step");
     setMovementHint(
       shouldAnimateReverseMove
         ? "Шаг откачен с обратной анимацией."
         : "Выполнен откат на предыдущий шаг."
     );
+    return true;
+  }
+
+  async function handlePrevScenarioStep() {
+    await playPreviousScenarioStepAnimated();
   }
 
   async function handleShowScenarioStart() {
@@ -3144,24 +3156,25 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
 
   async function handleShowScenarioFinal() {
     if (isMoving) {
-      return;
+      return null;
     }
 
     const steps = scenarioSteps.map((step) => normalizeScenarioStep(step)).filter(Boolean);
     if (!steps.length) {
       setMovementHint("Сценарий не содержит шагов.");
-      return;
+      return null;
     }
 
-    if (!scenarioInitialState) {
+    let baseStartState = scenarioInitialState;
+    if (!baseStartState) {
       try {
-        const startState = await loadScenarioStartLayoutState();
-        setScenarioInitialState(startState);
-        applyLayoutSnapshot(startState);
+        baseStartState = await loadScenarioStartLayoutState();
+        setScenarioInitialState(baseStartState);
+        applyLayoutSnapshot(baseStartState);
         setCurrentScenarioStep(0);
       } catch (error) {
         setMovementHint(error.message || "Не удалось показать финал сценария.");
-        return;
+        return null;
       }
     }
 
@@ -3173,15 +3186,18 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
         setScenarioExecutingStep(null);
         setScenarioViewMode("final");
         setMovementHint("Показано финальное состояние сценария.");
-        return;
+        return {
+          history: scenarioStateHistory.slice(0, steps.length),
+          finalSnapshot: finalEntry.afterState,
+        };
       }
     }
 
     try {
       scenarioStopRequestedRef.current = false;
-      let workingSegments = (scenarioInitialState?.segments || segments).map((segment) => ({ ...segment }));
-      let workingVehicles = (scenarioInitialState?.vehicles || vehicles).map((vehicle) => ({ ...vehicle }));
-      let workingCouplings = (scenarioInitialState?.couplings || couplings).map((coupling) => ({ ...coupling }));
+      let workingSegments = (baseStartState?.segments || segments).map((segment) => ({ ...segment }));
+      let workingVehicles = (baseStartState?.vehicles || vehicles).map((vehicle) => ({ ...vehicle }));
+      let workingCouplings = (baseStartState?.couplings || couplings).map((coupling) => ({ ...coupling }));
       const historyDraft = [];
       let lastLocomotiveId = null;
       let lastTargetPathId = null;
@@ -3220,7 +3236,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
             couplings: workingCouplings,
           }),
           stepType: step.type,
-          timeline: [],
+          timeline: cloneTimeline(result.timeline || []),
         };
       }
 
@@ -3241,11 +3257,74 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
       setScenarioExecutingStep(null);
       setScenarioViewMode("final");
       setMovementHint("Показано финальное состояние сценария.");
+      return {
+        history: historyDraft,
+        finalSnapshot: {
+          segments: workingSegments,
+          vehicles: workingVehicles,
+          couplings: workingCouplings,
+        },
+      };
     } catch (error) {
       setScenarioExecutingStep(null);
       setScenarioViewMode("paused");
       setMovementHint(error.message || "Не удалось показать финальное состояние.");
+      return null;
     }
+  }
+
+  async function handleShowScenarioReverse() {
+    if (isMoving) {
+      return;
+    }
+
+    const steps = scenarioSteps.map((step) => normalizeScenarioStep(step)).filter(Boolean);
+    if (!steps.length) {
+      setMovementHint("Сценарий не содержит шагов.");
+      return;
+    }
+
+    const finalResult = await handleShowScenarioFinal();
+    if (!finalResult?.history?.length) {
+      return;
+    }
+
+    const history = finalResult.history;
+    let workingVehicles = cloneLayoutState(finalResult.finalSnapshot?.vehicles || []);
+    let workingCouplings = cloneLayoutState(finalResult.finalSnapshot?.couplings || []);
+    scenarioStopRequestedRef.current = false;
+    setScenarioViewMode("play");
+
+    for (let index = history.length; index > 0; index -= 1) {
+      if (scenarioStopRequestedRef.current) {
+        setScenarioExecutingStep(null);
+        setScenarioViewMode("paused");
+        setMovementHint("Обратное воспроизведение сценария остановлено.");
+        return;
+      }
+
+      setScenarioExecutingStep(index - 1);
+      const ok = await playPreviousScenarioStepAnimated({
+        stepPosition: index,
+        history,
+        activeVehicles: workingVehicles,
+        activeCouplings: workingCouplings,
+      });
+      if (!ok) {
+        setScenarioExecutingStep(null);
+        setScenarioViewMode("paused");
+        setMovementHint("Не удалось выполнить обратное воспроизведение сценария.");
+        return;
+      }
+
+      const previousSnapshot = history[index - 1]?.beforeState || scenarioInitialState || {};
+      workingVehicles = cloneLayoutState(previousSnapshot?.vehicles || []);
+      workingCouplings = cloneLayoutState(previousSnapshot?.couplings || []);
+    }
+
+    setScenarioExecutingStep(null);
+    setScenarioViewMode("start");
+    setMovementHint("Сценарий показан в обратном порядке.");
   }
 
   function updateSegment(segmentId, updater) {
@@ -4378,7 +4457,14 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                 {!isScenarioPlaybackSectionCollapsed && (
                   <div className="toolSectionBody">
                     <button type="button" className="toolButton" onClick={handleShowFullScenario}>
-                      Показать сценарий полностью
+                      Показать Сценарий
+                      <br />
+                      (Старт -> Финиш)
+                    </button>
+                    <button type="button" className="toolButton" onClick={handleShowScenarioReverse}>
+                      Показать Сценарий
+                      <br />
+                      (Финиш -> Старт)
                     </button>
                     <button
                       type="button"
@@ -4389,10 +4475,10 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                       Перейти к выбранному шагу
                     </button>
                     <button type="button" className="toolButton" onClick={handleShowScenarioStart}>
-                      Показать старт
+                      Показать Старт
                     </button>
                     <button type="button" className="toolButton" onClick={handleShowScenarioFinal}>
-                      Показать финал
+                      Показать Финиш
                     </button>
                   </div>
                 )}
@@ -4508,7 +4594,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                         onDoubleClick={handleShowScenarioFinal}
                         style={{ cursor: "pointer" }}
                       >
-                        <span className="scenarioStepText">Финал</span>
+                        <span className="scenarioStepText">Финиш</span>
                       </div>
                     </div>
                   )}
