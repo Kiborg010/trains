@@ -1254,6 +1254,8 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const [scenarioMetrics, setScenarioMetrics] = useState(null);
   const [scenarioMetricsError, setScenarioMetricsError] = useState("");
   const [isScenarioMetricsLoading, setIsScenarioMetricsLoading] = useState(false);
+  const [showTrackLabels, setShowTrackLabels] = useState(true);
+  const [showRailSlots, setShowRailSlots] = useState(true);
   const [heuristicTargetColor, setHeuristicTargetColor] = useState("");
   const [heuristicRequiredTargetCount, setHeuristicRequiredTargetCount] = useState("1");
   const [heuristicFormationTrackId, setHeuristicFormationTrackId] = useState("");
@@ -1326,6 +1328,8 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
   const isMoveMode = isMovementPanel && mode === "move";
   const isPaintMode = isManeuversPanel && mode === "paintWagon";
   const isCanvasInteractionOptimized = isPanning || isZooming;
+  const shouldRenderTrackLabels = showTrackLabels && !isCanvasInteractionOptimized;
+  const shouldRenderRailSlots = showRailSlots && !isCanvasInteractionOptimized;
 
   const selectedSegmentSet = useMemo(() => new Set(selectedSegmentIds), [selectedSegmentIds]);
   const selectedVehicleSet = useMemo(() => new Set(selectedVehicleIds), [selectedVehicleIds]);
@@ -4593,6 +4597,26 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
             )}
           </div>
           <div className="toolbarActions">
+            <div className="toolbarToggles" aria-label="Управление отображением элементов холста">
+              <button
+                type="button"
+                className={`zoomButton toolbarToggleButton toolbarToggleButtonMultiline ${showTrackLabels ? "active" : ""}`}
+                onClick={() => setShowTrackLabels((prev) => !prev)}
+                aria-pressed={showTrackLabels}
+              >
+                Номера
+                <br />
+                путей
+              </button>
+              <button
+                type="button"
+                className={`zoomButton toolbarToggleButton ${showRailSlots ? "active" : ""}`}
+                onClick={() => setShowRailSlots((prev) => !prev)}
+                aria-pressed={showRailSlots}
+              >
+                Звенья
+              </button>
+            </div>
             <button
               type="button"
               className={`zoomButton zoomButtonTheme ${canvasTheme === CANVAS_THEME_DARK ? "active" : ""}`}
@@ -4602,7 +4626,19 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                 )
               }
             >
-              {canvasTheme === CANVAS_THEME_DARK ? "Светлый холст" : "Тёмный холст"}
+              {canvasTheme === CANVAS_THEME_DARK ? (
+                <>
+                  Светлый
+                  <br />
+                  холст
+                </>
+              ) : (
+                <>
+                  Тёмный
+                  <br />
+                  холст
+                </>
+              )}
             </button>
             <div className="zoomControls">
               <button type="button" className="zoomButton" onClick={zoomOut}>
@@ -4734,7 +4770,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
                       Путь {pathName} ({PATH_TYPE_LABELS[normalizePathType(segment.type)]})
                     </title>
                   </line>
-                  {!isCanvasInteractionOptimized && (
+                  {shouldRenderTrackLabels && (
                     <>
                       <line
                         x1={midpointX}
@@ -4796,7 +4832,7 @@ export default function EditorLayout({ activePanel, setActivePanel }) {
               );
             })}
 
-            {!isCanvasInteractionOptimized &&
+            {shouldRenderRailSlots &&
               railSlots.map((slot) => (
                 <circle
                   key={`slot-${slot.id}`}

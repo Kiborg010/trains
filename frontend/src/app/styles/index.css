@@ -474,7 +474,14 @@ select.toolInput::-ms-expand {
   gap: 8px;
   flex: 0 0 auto;
   margin-left: auto;
-  margin-right: 200px;
+  margin-right: 50px;
+}
+
+.toolbarToggles {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
 }
 
 .toolbarInfo {
@@ -606,9 +613,32 @@ select.toolInput::-ms-expand {
 }
 
 .zoomButtonTheme {
-  flex: 0 0 auto;
-  min-width: 132px;
-  padding: 0 14px;
+  flex: 0 0 72px;
+  width: 72px;
+  min-width: 72px;
+  max-width: 72px;
+  height: 38px;
+  padding: 0 8px;
+  white-space: normal;
+  line-height: 1.05;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.toolbarToggleButton {
+  min-width: 0;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.toolbarToggleButtonMultiline {
+  min-width: 72px;
+  height: 38px;
+  line-height: 1.05;
+  font-size: 12px;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 8px;
 }
 
 .zoomButtonValue {
